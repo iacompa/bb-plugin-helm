@@ -80,6 +80,14 @@ const DEFER_SHORT = 3_000;
 /** How long unread FYI lines wait for a free ride on a tool result before they are sent on their own. */
 const FLUSH_MS = 120_000;
 
+/** What every agent is told when autonomy is high (briefs, and the notice when it is switched on). */
+export function autonomyText(orchestrator: boolean): string {
+  const human = "credentials or API keys; anything that spends real money (paid services, purchases, a budget raise); anything that could expose private keys, secrets or personal data; access only the human can grant (permissions, accounts)";
+  return orchestrator
+    ? `The human wants you to run this build. Decide everything yourself except: ${human}. Agents' questions come to you (through their managers) instead of the human: answer them with helm_message or helm_direct. Waves and plan changes go ahead without approval. When a call is uncertain, pick the safest reasonable option, write it under Decisions in PORTFOLIO.md, and keep going; the human reviews everything at sign-off. Use helm_need only for the exceptions above, and set \`about\` to say which.`
+    : `The human wants the Orchestrator to run this build. Ask your supervisor with helm_need as usual: unless it is about ${human}, it goes to your supervisor, not the human, and the answer comes back as a message. Keep working on whatever does not depend on the answer.`;
+}
+
 export class Engine {
   readonly repo: Repo;
   readonly port: BbPort;
@@ -557,9 +565,9 @@ export class Engine {
       this.repo.resolveNeed(runId, n.id, { action: "superseded" });
       this.emit(runId, "need.resolved", { id: n.id, action: "superseded" });
     }
-    if (run.autoAdvance === "auto") {
+    if (run.autoAdvance === "auto" || this.autonomous(run)) {
       this.repo.tx(() => {
-        for (const a of wave) this.admitAppTx(runId, a.id, "auto-advance");
+        for (const a of wave) this.admitAppTx(runId, a.id, this.autonomous(run) ? "next wave (autonomy is on)" : "auto-advance");
       });
       void this.pump(runId);
       return;
@@ -676,6 +684,11 @@ export class Engine {
     return lines.join("\n");
   }
 
+  /** Autonomy is high: the Orchestrator decides what does not need the human (see HUMAN_ONLY). */
+  autonomous(run: RunInfo): boolean {
+    return run.limits.autonomy === "high";
+  }
+
   // ───────────────────────────── briefs ─────────────────────────────
 
   buildBrief(run: RunInfo, n: NodeInfo, extra: { integrationCommit?: string | null; scannerFindings?: string | null; handover?: string | null } = {}): string {
@@ -693,8 +706,9 @@ export class Engine {
     const studio = this.studioPath(run);
     if (n.role === "orch") {
       lines.push(`## Your memory\nRead \`${studio}/PORTFOLIO.md\` first, every time you start or after a compaction. Helm rewrites the block between the helm:world markers; keep strategy and decisions below it. \`helm_world\` is always current — prefer it to asking anyone.`);
-      if (run.autoAdvance === "ask") lines.push("## Waves\nWhen apps wait in Intake and capacity frees up, Helm asks the human to approve the next wave. Use `helm_propose_wave` if you want to suggest a different set.");
+      if (run.autoAdvance === "ask" && !this.autonomous(run)) lines.push("## Waves\nWhen apps wait in Intake and capacity frees up, Helm asks the human to approve the next wave. Use `helm_propose_wave` if you want to suggest a different set.");
     }
+    if (this.autonomous(run)) lines.push(`## Autonomy\n${autonomyText(n.role === "orch")}`);
     if (n.role === "mgr") lines.push(`## Your notes\nKeep \`${studio}/MANAGER-NOTES-${n.id}.md\` current: apps and status, cross-app dependencies, risks, asks of the Orchestrator.`);
     const wrapper = app?.adopted ? `"${this.wrapperPath(run)}"` : ".helm/run-check.sh";
     if (this.isLeadNode(n) && app?.adopted)

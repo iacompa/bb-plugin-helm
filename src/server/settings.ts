@@ -11,7 +11,7 @@ const PERM = { type: "select", options: ["auto", "accept-edits", "full"] as stri
 
 export const SETTINGS_DESCRIPTORS = {
   appsRoot: { type: "string", label: "Apps root folder", description: "Default parent folder for new app repositories: <root>/<run>/<app>. An app can also name its own folder or an existing repository anywhere (brief: \"- Name — tagline · macOS · /path/to/repo\"), and bb helm plan --root sets this per run.", default: DEFAULT_SETTINGS.appsRoot },
-  concurrency: { type: "number", label: "Concurrent agents", description: `How many agents may run at once across all runs (max ${LIMIT_CEILINGS.concurrency}).`, default: LIMIT_DEFAULTS.concurrency },
+  concurrency: { type: "number", label: "Concurrent agents", description: `Default for new runs: how many of a run's agents may run at once (max ${LIMIT_CEILINGS.concurrency}). Change a running run with bb helm limits or the capacity chip.`, default: LIMIT_DEFAULTS.concurrency },
   maxTotalAgents: { type: "number", label: "Agent cap per run", description: `Upper bound on a plan's size (max ${LIMIT_CEILINGS.maxTotalAgents}).`, default: LIMIT_DEFAULTS.maxTotalAgents },
   managerSpan: { type: "number", label: "Apps per manager", default: LIMIT_DEFAULTS.managerSpan },
   orchestratorSpan: { type: "number", label: "Orchestrator span", default: LIMIT_DEFAULTS.orchestratorSpan },
@@ -19,6 +19,13 @@ export const SETTINGS_DESCRIPTORS = {
   fixRounds: { type: "number", label: "Fix rounds before asking you", default: LIMIT_DEFAULTS.fixRounds },
   stallMinutes: { type: "number", label: "Minutes of silence before a nudge", default: LIMIT_DEFAULTS.stallMinutes },
   budgetCap: { type: "number", label: "Default budget cap (relative units)", default: LIMIT_DEFAULTS.budgetCap },
+  autonomy: {
+    type: "select",
+    label: "Autonomy",
+    options: ["high", "ask"] as string[],
+    experimental_optionLabels: { high: "The Orchestrator decides; ask me only about credentials, spending, private data or access", ask: "Ask me about every question, wave and plan change" },
+    default: "high",
+  },
   autoAdvance: { type: "select", label: "Later waves", options: ["ask", "auto"] as string[], experimental_optionLabels: { ask: "Ask me before each wave", auto: "Run waves automatically" }, default: "ask" },
   permissionOrchestrator: { ...PERM, label: "Permission mode: Orchestrator" },
   permissionManager: { ...PERM, label: "Permission mode: Managers" },
@@ -50,6 +57,7 @@ export function toHelmSettings(v: Values, warn: (m: string) => void = () => {}):
     fixRounds: clampInt(v.fixRounds, 0, LIMIT_CEILINGS.fixRounds, LIMIT_DEFAULTS.fixRounds),
     stallMinutes: clampInt(v.stallMinutes, 5, 240, LIMIT_DEFAULTS.stallMinutes),
     budgetCap: Math.max(0.01, Number(v.budgetCap) || LIMIT_DEFAULTS.budgetCap),
+    autonomy: v.autonomy === "ask" ? "ask" : "high",
   };
   let weights = SEED_WEIGHTS;
   if (typeof v.weights === "string" && v.weights.trim()) {

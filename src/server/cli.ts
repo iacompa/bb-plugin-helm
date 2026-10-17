@@ -310,14 +310,16 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
           run: RUN,
           concurrency: { type: "integer", min: 1, max: 48, description: "Agents allowed to run at once in this run" },
           budget: { type: "integer", min: 1, max: 1000000, description: "Budget cap in relative units (raising it above the spend lifts a budget pause)" },
+          autonomy: { type: "enum", values: ["high", "ask"], description: "high: the Orchestrator decides everything except credentials, spending, private data and access; ask: every question, wave and plan change asks you" },
           json: JSON_OPT,
         },
         run: (i) =>
           guard(async () => {
             const run = runOf(i.options.run);
-            if (i.options.concurrency === undefined && i.options.budget === undefined) return out(i.options.json, { run }, `${run.name}: at most ${run.concurrency} agents at once · budget cap ${Math.round(run.budgetCap)} u. Change with --concurrency N or --budget N.`);
-            const r = await svc.setLimits(run.id, { concurrency: i.options.concurrency, budgetCap: i.options.budget });
-            return out(i.options.json, { run: r }, `${r.name}: at most ${r.concurrency} agents at once · budget cap ${Math.round(r.budgetCap)} u.`);
+            const line = (x: typeof run) => `${x.name}: at most ${x.concurrency} agents at once · budget cap ${Math.round(x.budgetCap)} u · autonomy ${x.limits.autonomy ?? "ask"}.`;
+            if (i.options.concurrency === undefined && i.options.budget === undefined && i.options.autonomy === undefined) return out(i.options.json, { run }, `${line(run)} Change with --concurrency N, --budget N or --autonomy high|ask.`);
+            const r = await svc.setLimits(run.id, { concurrency: i.options.concurrency, budgetCap: i.options.budget, autonomy: i.options.autonomy as "high" | "ask" | undefined });
+            return out(i.options.json, { run: r }, line(r));
           }),
       }),
       end: cliCommand({

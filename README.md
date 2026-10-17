@@ -55,7 +55,7 @@ bb helm signoff <app>
 bb helm ledger                    # every change with its receipts
 bb helm complete --yes            # after every app is signed off
 bb helm end --run <id> --yes      # end a run now, or discard a draft plan
-bb helm limits --concurrency 24   # agents running at once in this run; also --budget N
+bb helm limits --concurrency 24   # agents running at once in this run; also --budget N, --autonomy high|ask
 ```
 
 A structured brief is read deterministically: `# Group` headings, then `- Name — tagline · iOS Android macOS Windows` lines.
@@ -69,6 +69,8 @@ A structured brief is read deterministically: `# Group` headings, then `- Name �
 - `bb helm plan` prints what will happen to every folder, and refuses unsafe ones: system folders, a folder inside another repository, a non-git folder with files. Free text is read by one short hidden planner thread on the model you choose (`--planner-model`, default: the `code` slot at medium). `bb helm <command> --help` covers every option. Every command accepts `--json`.
 
 **Several sessions at once.** Every run you open gets a tab under the top bar. Each tab shows whether the run is live and how many items need you, and runs keep going while you look at another tab. **+ New session** opens a fresh start page without touching your runs. From there you can write a brief, plan with an agent, or reopen any earlier run. Closing a tab only hides it; to end a run use the run menu or `bb helm end`.
+
+**The Orchestrator runs it.** Runs default to **autonomy high**. Agents' questions go up the chain, and the Orchestrator decides. Waves and plan changes go ahead on the record. You are asked only about four things: credentials or API keys, spending real money, anything that could expose private data, and access only you can grant. Sign-off, real failures and the budget cap still come to you. Switch a run to **ask** (every question, wave and plan change) in the capacity chip, the wizard's Approve step, or with `bb helm limits --autonomy ask`.
 
 **Steering.** Every agent's inspector ends in a one-line **Steer…** box. Type an instruction and press Enter. It interrupts the agent's current turn, or tick *after its turn* to wait. You can also apply it to the agent's reports or its whole team. The line under the box shows who else hears about it: its parent gets it in full, and the levels above see one FYI line.
 

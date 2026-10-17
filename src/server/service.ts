@@ -1,11 +1,11 @@
 // The service layer: one set of functions behind the CLI, the RPC and the UI,
 // so a directive sent from any surface is the same code path (§9 rules).
 
-import type { DirectiveInfo, ModelRef, NodeInfo, Portfolio, RunInfo, SlotId, SlotMap } from "../shared/types.ts";
+import type { Autonomy, DirectiveInfo, ModelRef, NodeInfo, Portfolio, RunInfo, SlotId, SlotMap } from "../shared/types.ts";
 import { SLOT_IDS, SEED_PRESETS, modelName, validateRef } from "./domain/models.ts";
 import { ORCH_ID } from "./domain/topology.ts";
 import { createDirective, previewDirective, resolveNeed, type DirectiveInput, type NeedResolution } from "./engine/direct.ts";
-import { HelmError, type Engine } from "./engine/engine.ts";
+import { HelmError, autonomyText, type Engine } from "./engine/engine.ts";
 import { reconcile, watchdog } from "./engine/events.ts";
 import { completeRun, sendback, signoff } from "./engine/gates.ts";
 import { snapshot, world, worldBlock } from "./engine/world.ts";
@@ -143,7 +143,7 @@ export class HelmService {
    * and the budget cap. Raising the cap above the spend lifts a budget pause. Recorded as an event
    * and told to the Orchestrator as one FYI line.
    */
-  async setLimits(runId: string, input: { concurrency?: number; budgetCap?: number }) {
+  async setLimits(runId: string, input: { concurrency?: number; budgetCap?: number; autonomy?: Autonomy }) {
     const run = this.engine.run(runId);
     if (run.status === "done" || run.status === "cancelled") throw new HelmError(`The run is ${run.status}; its limits can no longer change.`, "bad_state");
     const changes: string[] = [];
@@ -164,6 +164,11 @@ export class HelmService {
       limits.budgetCap = cap;
       if (run.spawnsPaused && cap > this.engine.spend(runId)) patch.spawnsPaused = false;
     }
+    const autonomyOn = input.autonomy !== undefined && input.autonomy !== (run.limits.autonomy ?? "ask") ? input.autonomy : null;
+    if (autonomyOn) {
+      changes.push(autonomyOn === "high" ? "autonomy on: the Orchestrator decides everything except credentials, spending, private data and access" : "autonomy off: questions, waves and plan changes ask the human again");
+      limits.autonomy = autonomyOn;
+    }
     if (!changes.length) return this.engine.run(runId);
     patch.limits = limits;
     const text = `The human changed the run's limits: ${changes.join("; ")}.${patch.spawnsPaused === false ? " Spawns resume." : ""}`;
@@ -171,6 +176,10 @@ export class HelmService {
       this.repo.updateRun(runId, patch);
       this.repo.event(runId, ORCH_ID, "limits", text);
       if (run.status !== "planning") this.repo.pushInbox(runId, ORCH_ID, text);
+      // every live agent learns the new rule with its next Helm tool result (no extra turn)
+      if (autonomyOn === "high" && run.status !== "planning")
+        for (const n of this.repo.listNodes(runId).filter((x) => x.threadId && !["done", "idle", "failed"].includes(x.status)))
+          this.repo.pushInbox(runId, n.id, `Autonomy is now on. ${autonomyText(n.id === ORCH_ID)}`);
     });
     this.engine.emit(runId, "run.updated", { id: runId, limits: true });
     if (run.status === "running") await this.engine.pump(runId);

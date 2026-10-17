@@ -216,6 +216,13 @@ go in `CONTRACT.md`, `DECISIONS.md`, `ACCEPTANCE.md`, not chat. Reports ≤ 600 
 refs. After a compaction re-read `BRIEF.md`, `CONTRACT.md` and `DECISIONS.md`, then call
 `helm_context` (stage, CONTRACT version, integration HEAD, fix round, unacked directives).
 
+## Deciding for your squad (autonomy)
+
+With autonomy high (the default), your squad's ordinary questions come to you as messages
+marked "instead of the human". Decide within the app's spec and contract, and answer with
+`helm_message`. Ask upward with `helm_need` (`about: other` reaches your manager or the
+Orchestrator). Only credentials, spending, privacy and access go to the human.
+
 ## Never
 
 - Never request a stage or report done without evidence Helm can verify.

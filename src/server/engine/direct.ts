@@ -375,6 +375,8 @@ export interface NeedResolution {
   value?: number;
   findingIds?: string[];
   rotatedConfirmed?: boolean;
+  /** Who resolved it: the human (default), or Helm on the Orchestrator's behalf when autonomy is high. */
+  actor?: "human" | "system";
 }
 
 export async function resolveNeed(e: Engine, runId: string, needId: string, res: NeedResolution, hooks: { signoff(appId: string, d: DirectiveInfo): Promise<void>; sendback(appId: string, d: DirectiveInfo): Promise<void> }): Promise<{ need: ReturnType<Engine["repo"]["getNeed"]>; directive: DirectiveInfo | null }> {
@@ -401,10 +403,10 @@ export async function resolveNeed(e: Engine, runId: string, needId: string, res:
         const delta = (need.data as { delta?: PlanDelta })?.delta;
         if (res.action === "approve" && delta) {
           const summary = await applyDelta(e, runId, delta);
-          directive = await createDirective(e, runId, { type: "plan", target: ORCH_ID, text: text || summary, needId });
+          directive = await createDirective(e, runId, { type: "plan", target: ORCH_ID, text: text || summary, needId, actor: res.actor });
         } else if (res.action === "approve") {
           const appIds = ((need.data as { appIds?: string[] })?.appIds ?? []).filter(Boolean);
-          directive = await createDirective(e, runId, { type: "plan", target: ORCH_ID, text: text || `admit ${appIds.join(", ")}`, needId });
+          directive = await createDirective(e, runId, { type: "plan", target: ORCH_ID, text: text || `admit ${appIds.join(", ")}`, needId, actor: res.actor });
           e.repo.tx(() => {
             for (const a of appIds) e.admitAppTx(runId, a, `wave approved (${directive!.id})`);
           });

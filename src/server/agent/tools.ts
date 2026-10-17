@@ -6,11 +6,11 @@
 import { z } from "zod";
 import type { Engine } from "../engine/engine.ts";
 import { HelmError } from "../engine/engine.ts";
-import type { NodeInfo } from "../../shared/types.ts";
+import { HUMAN_ONLY, type NodeInfo } from "../../shared/types.ts";
 import { toolsForNode, PLANNER_TOOLS } from "../domain/roles.ts";
 import { PortfolioSchema, normalizePortfolio } from "../domain/brief.ts";
 import { VerdictSchema } from "../domain/verdict.ts";
-import { ack, agentDirect } from "../engine/direct.ts";
+import { ack, agentDirect, resolveNeed } from "../engine/direct.ts";
 import { assignFix, declareExisting, publishContract, recordCheck, releaseSquadMembers, report, slopScan, spawnSquad, stageRequest, verdict } from "../engine/gates.ts";
 import { context, digest, world } from "../engine/world.ts";
 import { validateDelta } from "../engine/delta.ts";
@@ -40,8 +40,18 @@ export const TOOL_DEFS: ToolDef[] = [
   { name: "helm_ack", description: "Acknowledge a binding directive (D-0001…) with one line saying what you changed.", parameters: z.object({ directiveId: z.string().regex(/^D-\d{4,}$/), note: z.string().max(300).optional() }).strict(), presentation: { label: { pending: "Acknowledging", completed: "Acknowledged" }, icon: { glyph: "Check" }, suppress: true } },
   {
     name: "helm_need",
-    description: "Ask the human something only they can decide (question|approval|decision). Creates a Needs-you item; then stop and wait — the answer will be sent to you.",
-    parameters: z.object({ kind: z.enum(["question", "approval", "decision"]), title: z.string().min(1).max(200), body: z.string().max(1200), options: z.array(z.string().max(80)).max(6).optional(), evidence: z.string().max(600).optional() }).strict(),
+    description:
+      "Ask for a decision (question|approval|decision). Set `about`: credentials (API keys, logins), spending (real money), privacy (secrets or personal data could leak), access (permissions or accounts only the human grants), or other. When the run's autonomy is high, only those four reach the human; anything else goes to your supervisor (the Orchestrator decides at the top). Then keep working on what does not depend on it; the answer is sent to you.",
+    parameters: z
+      .object({
+        kind: z.enum(["question", "approval", "decision"]),
+        about: z.enum([...HUMAN_ONLY, "other"]).default("other"),
+        title: z.string().min(1).max(200),
+        body: z.string().max(1200),
+        options: z.array(z.string().max(80)).max(6).optional(),
+        evidence: z.string().max(600).optional(),
+      })
+      .strict(),
     presentation: { label: { pending: "Asking the human", completed: "Asked the human" }, icon: { glyph: "MessageQuestion" } },
   },
   {
@@ -181,6 +191,8 @@ async function dispatch(e: Engine, node: NodeInfo, name: string, p: Record<strin
     case "helm_ack":
       return ack(e, node, String(p.directiveId), (p.note as string) ?? null);
     case "helm_need": {
+      const routed = routeNeed(e, node, p);
+      if (routed) return routed;
       const need = e.repo.tx(() => e.raiseNeed(node.runId, { kind: p.kind as "question", nodeId: node.id, appId: node.appId, title: String(p.title), body: String(p.body ?? ""), evidence: String(p.evidence ?? ""), options: (p.options as string[]) ?? [], dedupeKey: `need:${node.id}:${String(p.title).slice(0, 80)}`, setNodeNeeds: true }));
       return need ? `Created ${need.id}. Stop and wait; the answer will be sent to you.` : "You already asked this; stop and wait for the answer.";
     }
@@ -237,6 +249,40 @@ function message(e: Engine, from: NodeInfo, to: string, text: string, kind: stri
   return kind === "info" ? `Delivered to ${e.label(target)} as FYI (it reads it on its next turn).` : `Sent to ${e.label(target)}.`;
 }
 
+const ABOUT_LABEL: Record<string, string> = { credentials: "Credentials", spending: "Spending", privacy: "Private data", access: "Access" };
+
+/**
+ * Autonomy is high: a question that is not about credentials, spending, privacy or access goes to
+ * the asker's supervisor instead of the human; the Orchestrator decides it itself. Returns the tool
+ * result when routed, or null when it should reach the human.
+ */
+function routeNeed(e: Engine, node: NodeInfo, p: Record<string, unknown>): string | null {
+  const run = e.run(node.runId);
+  const about = String(p.about ?? "other");
+  if (about !== "other") p.title = `${ABOUT_LABEL[about] ?? about}: ${String(p.title)}`.slice(0, 200);
+  if (!e.autonomous(run) || about !== "other") return null;
+  const parent = node.parentId ? e.repo.getNode(node.runId, node.parentId) : null;
+  if (!parent) {
+    e.repo.event(node.runId, node.id, "decide", `kept a decision (autonomy): ${String(p.title).slice(0, 160)}`);
+    return "Autonomy is on: the human wants you to decide this. Pick the safest reasonable option, write it under Decisions in PORTFOLIO.md, tell the agents it affects (helm_direct), and keep going. The human reviews everything at sign-off. helm_need reaches the human only with about: credentials, spending, privacy or access.";
+  }
+  const options = ((p.options as string[] | undefined) ?? []).length ? ` Options: ${(p.options as string[]).join(" / ")}.` : "";
+  const text = `${p.kind === "approval" ? "Approval" : p.kind === "decision" ? "Decision" : "Question"} from ${e.label(node)} (${node.id}), sent to you instead of the human because autonomy is on: ${String(p.title)}. ${String(p.body ?? "")}${options}${p.evidence ? ` Evidence: ${String(p.evidence)}` : ""} Decide and answer with helm_message (to ${node.id}). Escalate with helm_need only if it is about credentials, spending, privacy or access.`;
+  e.repo.tx(() => {
+    e.repo.comms(node.runId, { from: node.id, to: parent.id, kind: "ask", summary: `(instead of the human) ${String(p.title)}`.slice(0, 300) });
+    e.sendFromHelm(node.runId, parent.id, text.slice(0, 3000), { senderNodeId: node.id, kind: "message", commsKind: "ask", key: `ask:${node.runId}:${node.id}:${String(p.title).slice(0, 60)}` });
+  });
+  return `Autonomy is on: sent to ${e.label(parent)}, who decides (not the human). Keep working on what does not depend on it; the answer arrives as a message.`;
+}
+
+/** Autonomy is high: approve a wave or plan change on the Orchestrator's behalf, on the record. */
+async function autoApprove(e: Engine, runId: string, needId: string, what: string): Promise<void> {
+  const noGate = async () => {
+    throw new HelmError("not a sign-off", "bad_state");
+  };
+  await resolveNeed(e, runId, needId, { action: "approve", text: `${what} (approved by the Orchestrator; autonomy is on)`, actor: "system" }, { signoff: noGate, sendback: noGate });
+}
+
 function proposePlan(e: Engine, node: NodeInfo, p: Record<string, unknown>): string {
   const delta = p.delta as { add?: Array<z.infer<typeof AppZ>>; drop?: string[]; shapes?: Record<string, "solo" | "lean" | "full">; rationale?: string } | undefined;
   if (!delta) return "Rejected: the Orchestrator proposes a delta (add / drop / shapes). A whole portfolio comes from the planner.";
@@ -244,6 +290,10 @@ function proposePlan(e: Engine, node: NodeInfo, p: Record<string, unknown>): str
   const v = validateDelta(e, node.runId, { add, drop: delta.drop, shapes: delta.shapes });
   if (!v.ok) return `Rejected: ${v.error}`;
   const need = e.repo.tx(() => e.raiseNeed(node.runId, { kind: "plan", nodeId: node.id, appId: null, title: `Plan change: ${v.summary}`, body: `${delta.rationale ?? ""}\nAdds up to ${v.agents} agents (spawned lazily).`.trim(), evidence: "", options: ["Approve plan change", "Deny"], dedupeKey: `delta:${v.summary}`, data: { delta: { add, drop: delta.drop ?? [], shapes: delta.shapes ?? {} } } }));
+  if (need && e.autonomous(e.run(node.runId))) {
+    void autoApprove(e, node.runId, need.id, `Plan change: ${v.summary}`).catch((err: unknown) => e.log.error(`auto-approve ${need.id}: ${err instanceof Error ? err.message : String(err)}`));
+    return `Valid. Autonomy is on, so ${need.id} is approved and applied now (on the record).`;
+  }
   return need ? `Valid. Raised ${need.id} for the human; you will be told the outcome.` : "Already proposed; waiting for the human.";
 }
 
@@ -252,12 +302,12 @@ function proposeWave(e: Engine, node: NodeInfo, appIds: string[], rationale: str
   const bad = appIds.filter((id) => apps.find((a) => a.id === id)?.stage !== "intake");
   if (bad.length) return `Rejected: not in Intake: ${bad.join(", ")}.`;
   const run = e.run(node.runId);
-  if (run.autoAdvance === "auto" && !run.spawnsPaused) {
+  if ((run.autoAdvance === "auto" || e.autonomous(run)) && !run.spawnsPaused) {
     e.repo.tx(() => {
       for (const id of appIds) e.admitAppTx(node.runId, id, `wave proposed by the Orchestrator: ${rationale.slice(0, 120)}`);
     });
     void e.pump(node.runId);
-    return `Admitted ${appIds.join(", ")} (auto-advance is on).`;
+    return `Admitted ${appIds.join(", ")} (${e.autonomous(run) ? "autonomy" : "auto-advance"} is on).`;
   }
   const need = e.repo.tx(() => e.raiseNeed(node.runId, { kind: "plan", nodeId: node.id, appId: null, title: `Start the next wave: ${appIds.map((id) => apps.find((a) => a.id === id)?.name ?? id).join(", ")}`, body: rationale, evidence: "", options: ["Approve wave", "Not yet"], dedupeKey: `wave:${appIds.join(",")}`, data: { appIds } }));
   return need ? `Raised ${need.id}; the human decides.` : "Already proposed.";

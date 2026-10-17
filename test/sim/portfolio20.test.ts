@@ -8,7 +8,8 @@ const H = 3600_000;
 test("A1/A2/A6: the 20-app sample brief runs to completion — 169 agents, waves, gates, sign-off — with every invariant held", async (t) => {
   const h = await createHarness();
   const portfolio = parseBrief(SAMPLE_BRIEF).portfolio;
-  const { runId, plan } = h.engine.createRun({ name: "Sample 20", brief: SAMPLE_BRIEF, portfolio, slots: CHEAP });
+  // "ask" autonomy: this test covers the human approving every later wave
+  const { runId, plan } = h.engine.createRun({ name: "Sample 20", brief: SAMPLE_BRIEF, portfolio, slots: CHEAP, limits: { autonomy: "ask" } });
   assert.deepEqual([plan.counts.managers, plan.counts.leads, plan.counts.specialists, plan.counts.gates, plan.counts.total + 0], [5, 20, 103, 40, 169]);
   const conc = h.repo.getRun(runId)!.limits.concurrency;
 

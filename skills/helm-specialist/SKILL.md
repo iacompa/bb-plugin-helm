@@ -19,7 +19,7 @@ says so.**
 | `helm_message {to, text, kind}` | Your lead (parent) and siblings **in the same app** (other builders, gates), by node id (`<app>.code`, `<app>.ui`, `<app>.p.ios` …). Cross-app traffic goes through your lead. `info` = FYI; `ask` / `handoff` wake them. |
 | `helm_slop_scan {paths?}` | The deterministic scanner on your branch. Run it before reporting done. |
 | `helm_ack {directiveId, note}` | Acknowledge a binding human change. |
-| `helm_need {kind, title, body, options?, evidence?}` | Ask the human something only they can decide. |
+| `helm_need {kind, about, title, body, options?, evidence?}` | Ask for a decision. `about`: credentials, spending, privacy, access or other. With autonomy high (the default), only the first four reach the human; `other` goes to your supervisor. |
 
 You cannot record checks, move stages, spawn agents or judge — those belong to the lead and
 the gates.

@@ -509,17 +509,20 @@ function LimitsEditor() {
   const finished = run.status === "done" || run.status === "cancelled";
   const [conc, setConc] = useState(run.concurrency);
   const [cap, setCap] = useState(Math.round(run.budgetCap));
+  const runAutonomy = run.limits?.autonomy ?? "ask";
+  const [auto, setAuto] = useState<"high" | "ask">(runAutonomy);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     setConc(run.concurrency);
     setCap(Math.round(run.budgetCap));
-  }, [run.id, run.concurrency, run.budgetCap]);
-  const dirty = conc !== run.concurrency || cap !== Math.round(run.budgetCap);
+    setAuto(runAutonomy);
+  }, [run.id, run.concurrency, run.budgetCap, runAutonomy]);
+  const dirty = conc !== run.concurrency || cap !== Math.round(run.budgetCap) || auto !== runAutonomy;
   const apply = async () => {
     setBusy(true);
     try {
-      await h.rpc.call("run_setLimits", { runId: run.id, ...(conc !== run.concurrency ? { concurrency: conc } : {}), ...(cap !== Math.round(run.budgetCap) ? { budgetCap: cap } : {}) });
-      toast.success("Limits updated", { description: `At most ${conc} agents at once · budget cap ${cap} u. ${run.status === "planning" ? "" : "The Orchestrator was told; waiting agents start as slots allow."}` });
+      await h.rpc.call("run_setLimits", { runId: run.id, ...(conc !== run.concurrency ? { concurrency: conc } : {}), ...(cap !== Math.round(run.budgetCap) ? { budgetCap: cap } : {}), ...(auto !== runAutonomy ? { autonomy: auto } : {}) });
+      toast.success("Run settings updated", { description: `At most ${conc} agents at once · budget cap ${cap} u · ${auto === "high" ? "the Orchestrator decides" : "asks you"}. ${run.status === "planning" ? "" : "Every live agent was told."}` });
       h.refetch();
     } catch (e) {
       toast.error(errMsg(e));
@@ -535,6 +538,16 @@ function LimitsEditor() {
         </label>
         <input id="helm-cap" className="slider" type="range" min={1} max={48} step={1} value={conc} disabled={finished || busy} onChange={(e) => setConc(Number(e.target.value))} />
         <span className="hint-t">Each run has its own limit. BB's own thread limit (Settings) still applies on top.</span>
+      </div>
+      <div className="field">
+        <label className="lbl" htmlFor="helm-autonomy">
+          Who decides
+        </label>
+        <select id="helm-autonomy" className="select" value={auto} disabled={finished || busy} onChange={(e) => setAuto(e.target.value as "high" | "ask")}>
+          <option value="high">The Orchestrator (asks me only about credentials, spending, private data or access)</option>
+          <option value="ask">Me: every question, wave and plan change</option>
+        </select>
+        <span className="hint-t">Sign-off and real failures always come to you, and the budget cap still stops spending.</span>
       </div>
       <div className="field">
         <label className="lbl" htmlFor="helm-budget">

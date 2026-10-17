@@ -115,7 +115,19 @@ export interface HelmLimits {
   fixRounds: number;
   stallMinutes: number;
   budgetCap: number;
+  /**
+   * "high": agents' questions go to their supervisor and the Orchestrator decides; waves and plan
+   * changes go ahead. Only credentials, real spending, private data and access the human must grant
+   * reach Needs you (plus sign-off and failures). "ask": every question, wave and plan change asks the
+   * human. Runs made before this setting existed read as "ask".
+   */
+  autonomy?: Autonomy;
 }
+
+export type Autonomy = "high" | "ask";
+/** What may still reach the human when autonomy is high. */
+export const HUMAN_ONLY = ["credentials", "spending", "privacy", "access"] as const;
+export type HumanOnly = (typeof HUMAN_ONLY)[number];
 
 export const LIMIT_DEFAULTS: HelmLimits = {
   managerSpan: 4,
@@ -127,6 +139,7 @@ export const LIMIT_DEFAULTS: HelmLimits = {
   fixRounds: 2,
   stallMinutes: 20,
   budgetCap: 2500,
+  autonomy: "high",
 };
 
 export const LIMIT_CEILINGS = {

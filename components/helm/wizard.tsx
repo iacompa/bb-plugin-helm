@@ -97,6 +97,7 @@ function WizardInner() {
   const [slots, setSlots] = useStored<SlotMap>(`${WIZ}slots`, () => JSON.parse(JSON.stringify(SEED_PRESETS["Studio default"])) as SlotMap);
   const [autoAdvance, setAutoAdvance] = useStored<"ask" | "auto">(`${WIZ}autoAdvance`, "ask", (v) => v === "ask" || v === "auto");
   const [dryRun, setDryRun] = useStored(`${WIZ}dryRun`, false);
+  const [autonomy, setAutonomy] = useStored<"high" | "ask">(`${WIZ}autonomy`, "high", (v) => v === "high" || v === "ask");
   const [preview, setPreview] = useState<PlanPreview | null>(null);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -247,6 +248,7 @@ function WizardInner() {
         slots: slots as Record<string, ModelRef>,
         limits,
         autoAdvance,
+        autonomy,
         ...(appsRoot.trim() ? { appsRoot: appsRoot.trim() } : {}),
       })) as { runId: string; problems?: string[] };
       h.refreshRuns();
@@ -355,6 +357,8 @@ function WizardInner() {
               setLimits={setLimits}
               autoAdvance={autoAdvance}
               setAutoAdvance={setAutoAdvance}
+              autonomy={autonomy}
+              setAutonomy={setAutonomy}
               dryRun={dryRun}
               setDryRun={setDryRun}
               problems={problems}
@@ -695,6 +699,8 @@ function StepApprove(p: {
   setLimits: (l: Limits) => void;
   autoAdvance: "ask" | "auto";
   setAutoAdvance: (a: "ask" | "auto") => void;
+  autonomy: "high" | "ask";
+  setAutonomy: (a: "high" | "ask") => void;
   dryRun: boolean;
   setDryRun: (b: boolean) => void;
   problems: string[];
@@ -761,8 +767,25 @@ function StepApprove(p: {
       </div>
       <div className="row" style={{ gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div className="field" style={{ minWidth: 260, flex: 1 }}>
-          <span className="lbl">Wave approval</span>
-          <div className="cards" role="radiogroup" aria-label="Wave approval">
+          <span className="lbl">Who decides</span>
+          <div className="cards" role="radiogroup" aria-label="Who decides">
+            {(
+              [
+                ["high", "The Orchestrator runs it", "Agents' questions, waves and plan changes are decided by the Orchestrator. You are asked only about credentials, spending real money, private data or access, plus sign-off and failures."],
+                ["ask", "Ask me", "Every question, wave and plan change comes to Needs you."],
+              ] as const
+            ).map(([v, t, d]) => (
+              <button key={v} type="button" role="radio" aria-checked={p.autonomy === v} className="rcard" onClick={() => p.setAutonomy(v)}>
+                <span className="rd" />
+                <span>
+                  <b>{t}</b>
+                  <span className="d">{d}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+          {p.autonomy === "ask" ? <span className="lbl" style={{ marginTop: 10 }}>Wave approval</span> : null}
+          <div className="cards" role="radiogroup" aria-label="Wave approval" hidden={p.autonomy === "high"}>
             {(
               [
                 ["ask", "Ask me before each wave", "The Orchestrator proposes, you approve in Needs you."],

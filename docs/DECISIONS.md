@@ -152,3 +152,11 @@ The open decisions from the brief (§17.2) took their defaults. Where reality on
     - `helm-planner` leaves `--concurrency` out unless the user asks, so a run uses the Helm setting.
 
     `test/sim/limits.test.ts` covers this. Its cross-run test fails when the scheduler counts every run.
+
+34. **Autonomy: the Orchestrator runs the build (user request).** "It's like every second I have to approve things." Every agent's `helm_need` went to the human, and so did every wave and plan change. Runs now have `limits.autonomy`. New runs default to `high`; runs made before it existed read as `ask`. It is set in the setting, the wizard's Approve step, the capacity popover, and `bb helm limits --autonomy`. With `high`:
+    - `helm_need` takes `about`: `credentials`, `spending`, `privacy`, `access` or `other`. The first four reach the human, labelled.
+    - `other` goes to the asker's supervisor as a message marked "instead of the human". The Orchestrator is told to decide it, write it under Decisions in PORTFOLIO.md, and keep going.
+    - Waves admit without a card. `helm_propose_plan` is approved and applied on the Orchestrator's behalf, as a `system` directive, so the ledger never attributes it to the human.
+
+    Sign-off, failures, model problems, BB permission prompts and the budget cap still reach the human: the budget cap is the guard on spending. Switching autonomy on mid-run pushes the rule to every live agent as an FYI line, so it costs no extra turn. Role skills and briefs carry the rule. `test/sim/autonomy.test.ts` covers this, and the 20-app test now pins `ask`, because it covers wave approvals.
+

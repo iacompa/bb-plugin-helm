@@ -41,14 +41,14 @@ export const RPC_SCHEMAS = {
   run_list: { input: z.object({}).optional(), output: Any },
   run_get: { input: Run, output: Any },
   run_create: {
-    input: z.object({ brief: z.string().max(TEXT_MAX), portfolio: PortfolioZ.optional(), name: z.string().max(80).optional(), preset: z.string().max(80).optional(), slots: SlotsZ.optional(), limits: LimitsZ, autoAdvance: z.enum(["ask", "auto"]).optional(), appsRoot: z.string().trim().max(500).optional() }),
+    input: z.object({ brief: z.string().max(TEXT_MAX), portfolio: PortfolioZ.optional(), name: z.string().max(80).optional(), preset: z.string().max(80).optional(), slots: SlotsZ.optional(), limits: LimitsZ, autoAdvance: z.enum(["ask", "auto"]).optional(), autonomy: z.enum(["high", "ask"]).optional(), appsRoot: z.string().trim().max(500).optional() }),
     output: Any,
   },
   run_setSlots: { input: z.object({ runId: Id, slots: SlotsZ }), output: Any },
   /** Read-only: whether a planned run can start (models, folders) and what Helm will do with each folder. */
   run_readiness: { input: Run, output: Any },
   /** Change a run's concurrency and budget cap, before or during the run. */
-  run_setLimits: { input: z.object({ runId: Id, concurrency: z.number().int().min(1).max(48).optional(), budgetCap: z.number().positive().max(1e9).optional() }), output: Any },
+  run_setLimits: { input: z.object({ runId: Id, concurrency: z.number().int().min(1).max(48).optional(), budgetCap: z.number().positive().max(1e9).optional(), autonomy: z.enum(["high", "ask"]).optional() }), output: Any },
   run_start: { input: z.object({ runId: Id, dryRun: z.boolean().optional() }), output: Any },
   run_finish: { input: z.object({ runId: Id, status: z.enum(["done", "cancelled"]) }), output: Any },
   world_get: { input: Run, output: Any },
