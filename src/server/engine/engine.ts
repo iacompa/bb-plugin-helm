@@ -89,6 +89,9 @@ export function autonomyText(orchestrator: boolean): string {
     : `The human wants the Orchestrator to run this build. Ask your supervisor with helm_need as usual: unless it is about ${human}, it goes to your supervisor, not the human, and the answer comes back as a message. Keep working on whatever does not depend on the answer.`;
 }
 
+/** BB's refusal when a provider cannot run the requested permission mode. */
+const PERMISSION_REFUSED = /only supports .*permission mode/i;
+
 export class Engine {
   readonly repo: Repo;
   readonly port: BbPort;
@@ -722,9 +725,14 @@ export class Engine {
     const run = this.run(runId);
     this.repo.tx(() => {
       this.repo.updateRun(runId, { limits: { ...run.limits, providerPermission: { ...(run.limits.providerPermission ?? {}), [providerId]: mode } } });
-      for (const n of this.repo.listNodes(runId))
-        if (n.status === "needs" && n.model?.providerId === providerId && !n.threadId && !this.repo.openNeedsFor(runId, n.id).length)
-          this.repo.updateNode(runId, n.id, { status: "queued", prevStatus: null, firstInLine: true, warning: null });
+      for (const n of this.repo.listNodes(runId)) {
+        if (n.threadId || n.model?.providerId !== providerId) continue;
+        // agents whose spawn BB refused for the permission mode (before Helm asked) are released too
+        const refused = this.repo.openNeedsFor(runId, n.id).filter((x) => x.kind === "failed" && PERMISSION_REFUSED.test(`${x.body} ${n.warning ?? ""}`));
+        for (const x of refused) this.repo.resolveNeed(runId, x.id, { action: "retry", text: why });
+        const held = n.status === "needs" && !this.repo.openNeedsFor(runId, n.id).length;
+        if (held || (n.status === "failed" && refused.length)) this.repo.updateNode(runId, n.id, { status: "queued", prevStatus: null, firstInLine: true, warning: null });
+      }
       this.repo.event(runId, ORCH_ID, "limits", `${why}: agents on ${providerId} run in ${mode} mode`);
     });
     this.emit(runId, "run.updated", { id: runId, limits: true });

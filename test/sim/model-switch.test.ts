@@ -134,8 +134,13 @@ test("a provider that cannot run Helm's permission mode holds its agents and ask
   assert.equal(asks.length, 1, "one question per provider, not one per agent");
   assert.deepEqual(asks[0].options, [PERMISSION_LABEL["accept-edits"], PERMISSION_LABEL.full]);
 
+  // an agent BB refused before Helm asked (the plugin was older) is released by the same answer
+  const early = codes[0];
+  h.repo.updateNode(runId, early.id, { status: "failed", warning: "HTTP 400: Provider acp-grok only supports accept-edits, full permission mode." });
+  h.engine.raiseNeed(runId, { kind: "failed", nodeId: early.id, appId: early.appId, title: "could not be spawned", body: "HTTP 400: Provider acp-grok only supports accept-edits, full permission mode.", evidence: "", options: ["Retry"] });
   await resolveNeed(h.engine, runId, asks[0].id, { action: "answer", text: PERMISSION_LABEL.full }, { signoff: async () => {}, sendback: async () => {} });
   assert.equal(h.repo.getRun(runId)!.limits.providerPermission?.["acp-grok"], "full");
+  assert.equal(h.repo.openNeedsFor(runId, early.id).length, 0, "its failed card is closed");
   for (const c of codes) {
     const t = await untilThread(h, runId, c.id);
     assert.equal(thread(h, t).providerId, "acp-grok");
