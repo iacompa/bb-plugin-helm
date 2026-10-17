@@ -10,6 +10,7 @@ import { Planner } from "./engine/planner.ts";
 import { HelmError } from "./engine/engine.ts";
 import { parseSlotArg, type HelmService } from "./service.ts";
 import { fmtUnits } from "./domain/models.ts";
+import { errorsText } from "./journal.ts";
 
 const MAX_TEXT = 20_000;
 /** How long `bb helm plan` waits for a planner before handing back its id. */
@@ -320,6 +321,26 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             const host = await svc.engine.port.primaryHostId();
             const cat = await svc.engine.catalog(host, true);
             return out(i.options.json, { catalog: cat }, await svc.modelsText());
+          }),
+      }),
+      errors: cliCommand({
+        summary: "Helm's error journal: server, RPC, agent-tool and panel failures, newest first",
+        options: {
+          json: JSON_OPT,
+          limit: { type: "integer", min: 1, max: 500, description: "How many (default 30)" },
+          hours: { type: "integer", min: 1, max: 720, description: "Only the last N hours (default 24)" },
+          all: { type: "boolean", description: "Include refused requests (by default only errors and warnings)" },
+          clear: { type: "boolean", description: "Delete the journal after showing it" },
+        },
+        run: (i) =>
+          guard(async () => {
+            const hours = i.options.hours ?? 24;
+            const since = svc.engine.now() - hours * 3600_000;
+            const all = svc.repo.listErrors({ since, limit: 500 });
+            const entries = (i.options.all ? all : all.filter((x) => x.level !== "user")).slice(0, i.options.limit ?? 30);
+            const counts = svc.repo.countErrors(since);
+            const text = errorsText(entries, counts, `last ${hours} h`) + (i.options.clear ? `\nCleared ${svc.repo.clearErrors()} entries.` : "");
+            return out(i.options.json, { counts, errors: entries }, text);
           }),
       }),
       doctor: cliCommand({

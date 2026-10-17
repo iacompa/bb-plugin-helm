@@ -1,7 +1,7 @@
 // The Helm frame: top bar (brand · run switcher · tabs · caps · spend · Models
 // · inspector toggle · New run), the main view, the Inspector, overlays,
 // first-run states and global shortcuts.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useRealtimeConnectionState } from "@get-bb/plugin-sdk/app";
 import { HelmProvider, popEscape, useHelm } from "./ctx.tsx";
@@ -16,16 +16,46 @@ import { NeedsView } from "./needs.tsx";
 import { Inspector } from "./inspector/index.tsx";
 import { StudioModal } from "./studio.tsx";
 import { EXAMPLES, WizardModal, seedWizardBrief, seedWizardMode } from "./wizard.tsx";
+import { reportClientError } from "./data.ts";
 
 export function HelmApp() {
   const rootRef = useRef<HTMLDivElement>(null);
   return (
     <div className="helm" ref={rootRef} data-testid="helm-root">
       <HelmProvider rootRef={rootRef}>
-        <Frame />
+        <CrashBoundary>
+          <Frame />
+        </CrashBoundary>
       </HelmProvider>
     </div>
   );
+}
+
+/** A crash anywhere in the panel is reported to the error journal and offers a retry instead of a blank panel. */
+class CrashBoundary extends Component<{ children: ReactNode }, { err: string | null; key: number }> {
+  state = { err: null as string | null, key: 0 };
+  static getDerivedStateFromError(e: unknown) {
+    return { err: e instanceof Error ? e.message : String(e) };
+  }
+  componentDidCatch(e: unknown, info: ErrorInfo) {
+    const stack = e instanceof Error && e.stack ? e.stack.split("\n").slice(0, 6).join("\n") : "";
+    reportClientError("error", "panel crash", e instanceof Error ? e.message : String(e), `${stack}\n${(info.componentStack ?? "").split("\n").slice(0, 8).join("\n")}`);
+  }
+  render() {
+    if (!this.state.err) return <Fragment key={this.state.key}>{this.props.children}</Fragment>;
+    return (
+      <div className="hero" style={{ gridRow: "2 / span 2" }}>
+        <div className="hero-in">
+          <Banner tone="crit">
+            Helm's panel hit an error: {this.state.err}. It has been recorded (run <code>bb helm errors</code>). Your runs are not affected.
+          </Banner>
+          <button type="button" className="btn primary" onClick={() => this.setState((s) => ({ err: null, key: s.key + 1 }))}>
+            <Ic name="RotateCcw" size="sm" /> Try again
+          </button>
+        </div>
+      </div>
+    );
+  }
 }
 
 const VIEWS: View[] = ["graph", "board", "ledger", "needs"];

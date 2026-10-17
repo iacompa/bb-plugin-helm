@@ -9,14 +9,16 @@ import { TYPE_LABEL, clockOf, errMsg, isQuestion, roleIcon, trailLabel } from ".
 import { useHelm } from "../ctx.tsx";
 import { Banner, Ic, cx } from "../ui.tsx";
 import { isOrch, notifyChain, sendThreadText, useSendDirective } from "./shared.tsx";
+import { reportClientError } from "../data.ts";
 
 class ChatBoundary extends Component<{ fallback: (err: string) => ReactNode; children: ReactNode }, { err: string | null }> {
   state = { err: null as string | null };
   static getDerivedStateFromError(e: unknown) {
     return { err: e instanceof Error ? e.message : String(e) };
   }
-  componentDidCatch(_e: unknown, _info: ErrorInfo) {
-    /* the fallback renders Helm's own record */
+  componentDidCatch(e: unknown, _info: ErrorInfo) {
+    // the fallback renders Helm's own record; the failure goes to the error journal
+    reportClientError("warn", "thread chat", e instanceof Error ? e.message : String(e));
   }
   render() {
     return this.state.err ? this.props.fallback(this.state.err) : this.props.children;

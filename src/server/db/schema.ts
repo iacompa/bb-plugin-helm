@@ -134,4 +134,10 @@ ALTER TABLE apps ADD COLUMN base_commit TEXT;
   `
 ALTER TABLE directives ADD COLUMN by_node TEXT;
 `,
+  // 5 — error journal: every failure Helm sees (server, RPC, agent tools, the panel), the
+  // last 1000 kept, so problems can be debugged with `bb helm errors` without a screen.
+  `
+CREATE TABLE IF NOT EXISTS errors(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, level TEXT, source TEXT, at TEXT, run_id TEXT, message TEXT, detail TEXT);
+CREATE INDEX IF NOT EXISTS errors_ts ON errors(ts);
+`,
 ];

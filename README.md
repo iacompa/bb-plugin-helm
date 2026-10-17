@@ -108,6 +108,16 @@ Cost rule for development:
 - Helm manages only the threads it spawns. Everything else is read-only (the Observatory).
 - Repositories, branches and worktrees are never deleted. In an existing repository, Helm adds only its own branch.
 
+## When something goes wrong
+
+Run `bb helm errors`. Helm records every failure it sees in its own database:
+- server errors and warnings;
+- requests BB or Helm refused;
+- agent tool calls it refused;
+- crashes or rejected requests in the panel.
+
+It records what failed and where, never the contents of your brief or messages. `bb helm doctor` includes the count for the last 24 hours. The panel checks requests before sending them, so a problem such as an over-long brief says which field and by how much.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

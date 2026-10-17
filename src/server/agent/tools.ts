@@ -118,6 +118,15 @@ const TIER_NAME: Record<string, string> = {
   helm_verdict: "gates (Reviewer, Slop Hunter)",
 };
 
+/** A refused or failed tool call, for `bb helm errors` (the agent sees the same text). */
+function journalTool(e: Engine, node: NodeInfo, name: string, level: "user" | "error", text: string): void {
+  try {
+    e.repo.recordError({ level, source: "tool", at: `${name} by ${node.id}`, runId: node.runId, message: text.slice(0, 600) });
+  } catch {
+    /* never break the tool call */
+  }
+}
+
 /** Tools whose result already carries the unread FYI lines (helm_context marks them read). */
 const INBOX_FREE = new Set(["helm_context", "helm_digest", "helm_verdict"]);
 
@@ -149,11 +158,15 @@ export async function callTool(e: Engine, name: string, threadId: string, raw: u
   try {
     const text = await dispatch(e, node, name, parsed.data as Record<string, unknown>);
     const isError = text.startsWith("Rejected") || text.startsWith("No ");
+    if (isError) journalTool(e, node, name, "user", text);
     // FYI lines ride along with the tool result the agent is already reading: no extra turn
     const fyi = INBOX_FREE.has(name) ? "" : e.takeInbox(node.runId, node.id);
     return { text: fyi ? `${text}\n\n${fyi}` : text, isError };
   } catch (err) {
-    if (err instanceof HelmError) return { text: err.message, isError: true };
+    if (err instanceof HelmError) {
+      journalTool(e, node, name, "user", err.message);
+      return { text: err.message, isError: true };
+    }
     e.log.error(`tool ${name} for ${node.id} failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
     return { text: `Helm could not complete ${name}: ${err instanceof Error ? err.message : String(err)}`, isError: true };
   }

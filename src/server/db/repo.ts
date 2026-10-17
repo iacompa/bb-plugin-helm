@@ -71,6 +71,10 @@ export function migrate(db: SqlDb): number {
   return v;
 }
 
+/** error: something broke · warn: degraded or retried · user: a request Helm refused with a reason. */
+export type ErrorLevel = "error" | "warn" | "user";
+export interface ErrorEntry { id: number; ts: number; level: ErrorLevel; source: string; at: string; runId: string | null; message: string; detail: string | null }
+
 export class Repo {
   private depth = 0;
   constructor(readonly db: SqlDb, readonly now: () => number = Date.now) {}
@@ -583,6 +587,28 @@ export class Repo {
       "SELECT d.* FROM directives d JOIN directive_recipients r ON r.run_id = d.run_id AND r.directive_id = d.id WHERE d.run_id = ? AND r.node_id = ? AND r.level = 'direct' AND r.state = 'queued' AND r.outbox_id IS NULL ORDER BY d.ts",
       runId, nodeId,
     ).map((r) => this.toDirective(r));
+  }
+
+  // ───────────── error journal ─────────────
+  recordError(e: { level: ErrorLevel; source: string; at: string; runId?: string | null; message: string; detail?: string | null }): void {
+    this.run("INSERT INTO errors(ts, level, source, at, run_id, message, detail) VALUES (?, ?, ?, ?, ?, ?, ?)", this.now(), e.level, e.source.slice(0, 40), e.at.slice(0, 200), e.runId ?? null, e.message.slice(0, 2000), e.detail ? e.detail.slice(0, 4000) : null);
+    this.run("DELETE FROM errors WHERE id <= (SELECT MAX(id) FROM errors) - 1000");
+  }
+  listErrors(opts: { limit?: number; since?: number; level?: ErrorLevel } = {}): ErrorEntry[] {
+    return this.all(
+      `SELECT * FROM errors WHERE ts >= ? ${opts.level ? "AND level = ?" : ""} ORDER BY id DESC LIMIT ?`,
+      ...[opts.since ?? 0, ...(opts.level ? [opts.level] : []), opts.limit ?? 50],
+    ).map((r) => ({ id: Number(r.id), ts: Number(r.ts), level: String(r.level) as ErrorLevel, source: String(r.source), at: String(r.at), runId: s(r.run_id), message: String(r.message), detail: s(r.detail) }));
+  }
+  countErrors(since: number): Record<ErrorLevel, number> {
+    const out: Record<ErrorLevel, number> = { error: 0, warn: 0, user: 0 };
+    for (const r of this.all("SELECT level, COUNT(*) AS c FROM errors WHERE ts >= ? GROUP BY level", since)) out[String(r.level) as ErrorLevel] = Number(r.c);
+    return out;
+  }
+  clearErrors(): number {
+    const n = Number((this.get1("SELECT COUNT(*) AS c FROM errors") as { c: number } | null)?.c ?? 0);
+    this.run("DELETE FROM errors");
+    return n;
   }
 
   // ───────────── inbox (FYI lines that must not wake an idle agent) ─────────────

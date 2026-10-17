@@ -12,6 +12,7 @@ import { validateRef } from "../domain/models.ts";
 import { PLANNER_INSTRUCTIONS, plannerPrompt } from "../domain/briefs.ts";
 import { expandHome } from "./context.ts";
 import { GITIGNORE } from "../domain/checks.ts";
+import { TEXT_MAX } from "../../shared/rpc-schemas.ts";
 
 export const PLANNER_DIR = "_planner";
 
@@ -21,7 +22,7 @@ export function planChatPrompt(idea: string | null): string {
     "I opened Helm → New run → Plan with an agent. Load and follow the helm-planner skill: interview me briefly, check `bb helm doctor` and `bb helm models`, ask me which model to use for each role from the models available on this machine (recommend one per role and let me change it), ask where each app lives (an existing repository or a new folder), write the brief file, and run `bb helm plan`.",
     "When `bb helm plan` succeeds, tell me the run id; the New run screen will offer to open it. Never run `bb helm start` unless I say so.",
   ];
-  if (idea) L.push("", "What I want to build:", "<idea>", idea.slice(0, 8000), "</idea>");
+  if (idea) L.push("", "What I want to build:", "<idea>", idea.slice(0, TEXT_MAX), "</idea>");
   else L.push("", "Start by asking me what I want to build.");
   return L.join("\n");
 }

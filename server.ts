@@ -21,17 +21,29 @@ import { Coalescer } from "./src/server/realtime.ts";
 import { bindSettings } from "./src/server/settings.ts";
 import { PLANNER_CHANNEL, RUNS_CHANNEL } from "./src/shared/protocol.ts";
 import type { NodeInfo } from "./src/shared/types.ts";
+import { journaledHandlers, type RpcHandler } from "./src/server/journal.ts";
 
 /** Events that change what PORTFOLIO.md's machine block shows. */
 const PORTFOLIO_EVENTS = new Set(["stage.changed", "need.created", "need.resolved", "directive.created", "plan.changed", "spawns.paused"]);
 
 export default async function plugin(bb: BbPluginApi) {
-  const log = { info: (m: string) => bb.log.info(m), warn: (m: string) => bb.log.warn(m), error: (m: string) => bb.log.error(m) };
-  const settings = await bindSettings(bb);
-
   const db = bb.storage.database() as unknown as SqlDb;
   migrate(db);
   const repo = new Repo(db);
+  // every warning and error also goes to the error journal (`bb helm errors`)
+  const journal = (level: "error" | "warn", m: string) => {
+    try {
+      repo.recordError({ level, source: "server", at: m.split(":")[0].slice(0, 80), message: m });
+    } catch {
+      /* the journal must never break the caller */
+    }
+  };
+  const log = {
+    info: (m: string) => bb.log.info(m),
+    warn: (m: string) => (bb.log.warn(m), journal("warn", m)),
+    error: (m: string) => (bb.log.error(m), journal("error", m)),
+  };
+  const settings = await bindSettings(bb);
   const port = new RealBB(bb, { log: log.warn });
   port.install();
 
@@ -97,7 +109,9 @@ export default async function plugin(bb: BbPluginApi) {
   });
 
   bb.cli.register(buildCli(svc, { doctor: () => runDoctor(bb, port, repo, engine.settings, { tools: TOOL_DEFS.length, hook: true }) }));
-  registerRpc(bb, svc);
+  // RPC failures are journaled; registerRpc only uses bb.rpc
+  const journaledRpc = { register: (c: unknown, h: Record<string, RpcHandler>) => (bb.rpc.register as (c: unknown, h: unknown) => unknown).call(bb.rpc, c, journaledHandlers(h, repo)) };
+  registerRpc({ rpc: journaledRpc } as unknown as BbPluginApi, svc);
 
   // Start once BB has bound the SDK: recover the outbox, subscribe, reconcile live runs.
   bb.background.service("engine", {

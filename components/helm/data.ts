@@ -6,6 +6,7 @@ import type { PluginRpcClient } from "@get-bb/plugin-sdk/app";
 import type { Catalog, RealtimeBatch, RpcContract, RunListItem, Snapshot } from "./types.ts";
 import { applyBatch, fromSnapshot, type BatchEffects, type RunState } from "./store.ts";
 import { errMsg } from "./format.ts";
+import { readableRpcError, requestProblem } from "./rpccheck.ts";
 
 export type HelmRpc = PluginRpcClient<RpcContract>;
 
@@ -15,15 +16,54 @@ export function cleanInput<T>(input: T): T {
   return JSON.parse(JSON.stringify(input)) as T;
 }
 
-/** The plugin RPC client, with inputs JSON-cleaned so optional fields may be left undefined. */
+type RawCall = (m: string, ...a: unknown[]) => Promise<unknown>;
+let reporter: ((r: { level: "error" | "warn" | "user"; at: string; message: string; detail?: string | null; runId?: string | null }) => void) | null = null;
+const recent = new Map<string, number>();
+
+/** Send a panel failure to Helm's error journal (`bb helm errors`). Never throws; repeats within 30 s are dropped. */
+export function reportClientError(level: "error" | "warn" | "user", at: string, message: string, detail?: string | null, runId?: string | null): void {
+  const key = `${at}|${message}`;
+  const now = Date.now();
+  if ((recent.get(key) ?? 0) > now - 30_000) return;
+  recent.set(key, now);
+  if (recent.size > 200) recent.clear();
+  try {
+    reporter?.({ level, at: at.slice(0, 200), message: message.slice(0, 2000), detail: detail ? detail.slice(0, 4000) : null, runId: runId ?? null });
+  } catch {
+    /* reporting must never break the panel */
+  }
+}
+
+/**
+ * The plugin RPC client. Inputs are JSON-cleaned (optional fields may be undefined) and
+ * checked against the shared schema first; every failure is reported to the error journal
+ * and surfaces as a readable message.
+ */
 export function useHelmRpc(): HelmRpc {
   const raw = useRpc<RpcContract>();
-  return useMemo<HelmRpc>(
-    () => ({
-      call: ((method: string, ...args: unknown[]) => (raw.call as (m: string, ...a: unknown[]) => Promise<unknown>)(method, ...args.map((a) => cleanInput(a)))) as HelmRpc["call"],
-    }),
-    [raw],
-  );
+  return useMemo<HelmRpc>(() => {
+    const call = raw.call as RawCall;
+    reporter = (r) => void call("client_error", r).catch(() => undefined);
+    return {
+      call: (async (method: string, ...args: unknown[]) => {
+        const input = cleanInput(args[0]);
+        const runId = input && typeof input === "object" && typeof (input as { runId?: unknown }).runId === "string" ? (input as { runId: string }).runId : null;
+        const problem = requestProblem(method, input);
+        if (problem) {
+          reportClientError("user", `rpc ${method}`, problem, null, runId);
+          throw new Error(problem);
+        }
+        try {
+          return await call(method, ...(args.length ? [input, ...args.slice(1)] : []));
+        } catch (e) {
+          const msg = errMsg(e);
+          // a request the server refused with a reason is already journaled server-side
+          if (/rpc input validation failed|not a JSON value|HTTP 5\d\d|failed to fetch|network/i.test(msg)) reportClientError("error", `rpc ${method}`, msg, null, runId);
+          throw new Error(readableRpcError(method, msg));
+        }
+      }) as HelmRpc["call"],
+    };
+  }, [raw]);
 }
 
 export function useRuns(rpc: HelmRpc) {
