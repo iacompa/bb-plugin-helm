@@ -57,7 +57,8 @@ export function world(e: Engine, runId: string, opts: { appsPage?: number } = {}
     touched: { count: touched.length, nodes: touched.slice(0, 40) },
     policies,
     managers: direct ? [...managers, direct] : managers,
-    appsPage: apps.length > 30 ? { page, pages: Math.ceil(apps.length / 30) } : undefined,
+    // omitted, never undefined: RPC results must be plain JSON (BB rejects undefined values)
+    ...(apps.length > 30 ? { appsPage: { page, pages: Math.ceil(apps.length / 30) } } : {}),
   };
 }
 
