@@ -145,3 +145,10 @@ The open decisions from the brief (§17.2) took their defaults. Where reality on
     - **Children follow in the same pass.** The pump goes round again after admitting supervisors, so their children are admitted straight away.
 
     Reconcile at startup pumps every live run, so stuck runs recover when the plugin updates. `test/sim/start-order.test.ts` reproduces the stuck state, and all three of its tests fail without the fix.
+
+33. **Concurrency is per run and changes live (incident).** A run planned with `--concurrency 4` ran its 6 Managers and nothing below them, while the user's Helm setting said 24. A run's limit was frozen at plan time: the capacity slider was disabled. On top of that, the scheduler counted every running agent of **every** live run against this run's limit, so a second run on the same machine starved it. Changes:
+    - `pumpRun` counts this run's running agents and queued spawns only. BB's own thread limit still applies on top.
+    - `run_setLimits` / `bb helm limits --concurrency N --budget N` / the capacity popover's **Apply now** change a run's concurrency and budget cap before or during a run. The change is recorded as an event, the Orchestrator gets one FYI line, and the scheduler runs straight away. Raising the budget above the spend lifts a budget pause.
+    - `helm-planner` leaves `--concurrency` out unless the user asks, so a run uses the Helm setting.
+
+    `test/sim/limits.test.ts` covers this. Its cross-run test fails when the scheduler counts every run.

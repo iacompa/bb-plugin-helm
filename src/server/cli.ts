@@ -304,6 +304,22 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             return out(i.options.json, { run: r }, `${r.name} is ${r.status}.`);
           }),
       }),
+      limits: cliCommand({
+        summary: "Change a run's limits now: how many agents run at once, and the budget cap",
+        options: {
+          run: RUN,
+          concurrency: { type: "integer", min: 1, max: 48, description: "Agents allowed to run at once in this run" },
+          budget: { type: "integer", min: 1, max: 1000000, description: "Budget cap in relative units (raising it above the spend lifts a budget pause)" },
+          json: JSON_OPT,
+        },
+        run: (i) =>
+          guard(async () => {
+            const run = runOf(i.options.run);
+            if (i.options.concurrency === undefined && i.options.budget === undefined) return out(i.options.json, { run }, `${run.name}: at most ${run.concurrency} agents at once · budget cap ${Math.round(run.budgetCap)} u. Change with --concurrency N or --budget N.`);
+            const r = await svc.setLimits(run.id, { concurrency: i.options.concurrency, budgetCap: i.options.budget });
+            return out(i.options.json, { run: r }, `${r.name}: at most ${r.concurrency} agents at once · budget cap ${Math.round(r.budgetCap)} u.`);
+          }),
+      }),
       end: cliCommand({
         summary: "End a run now: cancel it (or discard a plan), stopping and archiving every agent it spawned",
         options: { run: RUN, yes: { type: "boolean", description: "Confirm" }, json: JSON_OPT },

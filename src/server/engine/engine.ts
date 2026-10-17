@@ -617,9 +617,11 @@ export class Engine {
       .nodesByStatus(run.id, ["queued"])
       .filter((n) => !n.threadId && !spawning(run.id, n.id) && parentReady(run.id, n.parentId));
     if (!queued.length) return;
-    // spawns already queued count against concurrency, except ones blocked on a parent that is not on its way (they hold no thread)
-    const pendingRows = this.repo.db.prepare("SELECT run_id AS r, node_id AS n FROM outbox WHERE kind = 'spawn' AND state IN ('pending','inflight')").all() as Array<{ r: string; n: string }>;
-    const pendingSpawns = { c: pendingRows.filter((o) => parentReady(o.r, this.repo.getNode(o.r, o.n)?.parentId ?? null)).length };
+    // concurrency is per run: this run's running agents plus its queued spawns, except spawns blocked
+    // on a parent that is not on its way (they hold no thread). Other runs have their own limits;
+    // BB's own thread limit still applies on top.
+    const pendingRows = this.repo.db.prepare("SELECT node_id AS n FROM outbox WHERE run_id = ? AND kind = 'spawn' AND state IN ('pending','inflight')").all(run.id) as Array<{ n: string }>;
+    const pendingSpawns = { c: pendingRows.filter((o) => parentReady(run.id, this.repo.getNode(run.id, o.n)?.parentId ?? null)).length };
     const apps = new Map(this.repo.listApps(run.id).map((a) => [a.id, a]));
     const eligible: Eligible[] = queued.map((n) => {
       const app = n.appId ? apps.get(n.appId) : undefined;
@@ -639,7 +641,7 @@ export class Engine {
       eligible,
       {
         concurrency: run.limits.concurrency,
-        running: this.repo.countRunning() + Number(pendingSpawns.c),
+        running: this.repo.countRunning(run.id) + Number(pendingSpawns.c),
         maxTotalAgents: run.limits.maxTotalAgents,
         nonPlanned: this.repo.countAllNonPlanned(),
         providerCaps: run.limits.providerCaps,

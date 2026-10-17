@@ -54,6 +54,11 @@ or in `bb helm <command> --help`, say you are not sure, and don't guess.
 - **Ending a run**: `bb helm end --run <id> --yes` stops and archives every agent that run spawned,
   or discards a draft plan. `bb helm runs` lists runs and their status. Repositories, `helm/…` branches
   and the ledger stay.
+- **Concurrency** is per run: how many of that run's agents may run at once. Leave out
+  `--concurrency` so the run uses the user's Helm setting (default 24), unless the user asks for a
+  number. A low number makes a large run crawl: with 4 and six Managers, almost nothing below the
+  Managers can run. It can be changed at any time with `bb helm limits --run <id> --concurrency N`
+  or the capacity chip in the panel.
 - **Updates**: Helm (the plugin) updates only when the user presses Update in BB's Plugins page.
   Nothing changes underneath a running plan.
 

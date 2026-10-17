@@ -135,6 +135,7 @@ bb helm signoff <app>                       # Ready → Done; squad archived bot
 bb helm sendback <app> --message-file why.md   # Ready → Build; gates reset, the lead is told why
 bb helm complete [--run <id>]               # stop and archive every remaining agent; repos stay
 bb helm end --run <id> --yes                # end a run now (cancel), or discard a draft plan
+bb helm limits [--run <id>] [--concurrency N] [--budget N]   # show or change a run's limits now
 ```
 
 - `signoff` is the human's acceptance of the app as judged — including anything listed as

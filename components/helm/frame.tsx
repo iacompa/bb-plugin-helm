@@ -502,6 +502,60 @@ function RunPopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => v
   );
 }
 
+/** Change this run's concurrency and budget cap now (run_setLimits); the Orchestrator is told. */
+function LimitsEditor() {
+  const h = useHelm();
+  const run = h.data!.run;
+  const finished = run.status === "done" || run.status === "cancelled";
+  const [conc, setConc] = useState(run.concurrency);
+  const [cap, setCap] = useState(Math.round(run.budgetCap));
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    setConc(run.concurrency);
+    setCap(Math.round(run.budgetCap));
+  }, [run.id, run.concurrency, run.budgetCap]);
+  const dirty = conc !== run.concurrency || cap !== Math.round(run.budgetCap);
+  const apply = async () => {
+    setBusy(true);
+    try {
+      await h.rpc.call("run_setLimits", { runId: run.id, ...(conc !== run.concurrency ? { concurrency: conc } : {}), ...(cap !== Math.round(run.budgetCap) ? { budgetCap: cap } : {}) });
+      toast.success("Limits updated", { description: `At most ${conc} agents at once · budget cap ${cap} u. ${run.status === "planning" ? "" : "The Orchestrator was told; waiting agents start as slots allow."}` });
+      h.refetch();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="col" style={{ gap: 10 }}>
+      <div className="field">
+        <label className="lbl" htmlFor="helm-cap">
+          Max agents running at once (this run) · <span className="mono">{conc}</span>
+        </label>
+        <input id="helm-cap" className="slider" type="range" min={1} max={48} step={1} value={conc} disabled={finished || busy} onChange={(e) => setConc(Number(e.target.value))} />
+        <span className="hint-t">Each run has its own limit. BB's own thread limit (Settings) still applies on top.</span>
+      </div>
+      <div className="field">
+        <label className="lbl" htmlFor="helm-budget">
+          Budget cap (relative units)
+        </label>
+        <input id="helm-budget" className="input" type="number" min={1} step={100} style={{ width: 140 }} value={cap} disabled={finished || busy} onChange={(e) => setCap(Math.max(1, Math.round(Number(e.target.value) || 0)))} />
+      </div>
+      {dirty && !finished ? (
+        <div className="row" style={{ gap: 8 }}>
+          <button type="button" className="btn sm primary" disabled={busy} onClick={() => void apply()} data-testid="apply-limits">
+            {busy ? "Applying…" : "Apply now"}
+          </button>
+          <button type="button" className="btn sm ghost" disabled={busy} onClick={() => { setConc(run.concurrency); setCap(Math.round(run.budgetCap)); }}>
+            Reset
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function CapPopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => void }) {
   const h = useHelm();
   const { data } = h;
@@ -589,13 +643,7 @@ function CapPopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => v
             Relative units, not real prices. Reaching the cap pauses new spawns and asks you in Needs you.
           </div>
         </div>
-        <div className="field">
-          <label className="lbl" htmlFor="helm-cap">
-            Max concurrent agents · <span className="mono">{run.concurrency}</span>
-          </label>
-          <input id="helm-cap" className="slider" type="range" min={4} max={48} step={2} value={run.concurrency} disabled readOnly />
-          <span className="hint-t">Set when the run is approved. This Helm backend does not change concurrency mid-run yet.</span>
-        </div>
+        <LimitsEditor />
         <label className="check" title="This Helm backend pauses spawns itself when the budget cap is reached; a manual switch is not available yet">
           <input type="checkbox" checked={run.spawnsPaused} disabled readOnly />
           <span>

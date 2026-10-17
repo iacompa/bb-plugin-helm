@@ -138,6 +138,45 @@ export class HelmService {
     return { runId, plan, forecast: pre.forecast, assumed: pre.assumed, problems, locations: loc.notes, runFolder: run.appsRoot };
   }
 
+  /**
+   * Change a run's limits while it runs (or before it starts): how many agents may run at once,
+   * and the budget cap. Raising the cap above the spend lifts a budget pause. Recorded as an event
+   * and told to the Orchestrator as one FYI line.
+   */
+  async setLimits(runId: string, input: { concurrency?: number; budgetCap?: number }) {
+    const run = this.engine.run(runId);
+    if (run.status === "done" || run.status === "cancelled") throw new HelmError(`The run is ${run.status}; its limits can no longer change.`, "bad_state");
+    const changes: string[] = [];
+    const limits = { ...run.limits };
+    const patch: { concurrency?: number; budgetCap?: number; spawnsPaused?: boolean; limits?: typeof limits } = {};
+    if (input.concurrency !== undefined && input.concurrency !== run.concurrency) {
+      const c = Math.round(input.concurrency);
+      if (!(c >= 1 && c <= 48)) throw new HelmError("Concurrency must be between 1 and 48.", "invalid_input");
+      changes.push(`at most ${c} agents running at once (was ${run.concurrency})`);
+      patch.concurrency = c;
+      limits.concurrency = c;
+    }
+    if (input.budgetCap !== undefined && input.budgetCap !== run.budgetCap) {
+      const cap = Number(input.budgetCap);
+      if (!(cap > 0)) throw new HelmError("The budget cap must be above 0.", "invalid_input");
+      changes.push(`budget cap ${Math.round(cap)} u (was ${Math.round(run.budgetCap)} u)`);
+      patch.budgetCap = cap;
+      limits.budgetCap = cap;
+      if (run.spawnsPaused && cap > this.engine.spend(runId)) patch.spawnsPaused = false;
+    }
+    if (!changes.length) return this.engine.run(runId);
+    patch.limits = limits;
+    const text = `The human changed the run's limits: ${changes.join("; ")}.${patch.spawnsPaused === false ? " Spawns resume." : ""}`;
+    this.repo.tx(() => {
+      this.repo.updateRun(runId, patch);
+      this.repo.event(runId, ORCH_ID, "limits", text);
+      if (run.status !== "planning") this.repo.pushInbox(runId, ORCH_ID, text);
+    });
+    this.engine.emit(runId, "run.updated", { id: runId, limits: true });
+    if (run.status === "running") await this.engine.pump(runId);
+    return this.engine.run(runId);
+  }
+
   /** Read-only: can this planned run start, and what will Helm do with its folders? */
   async readiness(runId: string) {
     const run = this.engine.run(runId);

@@ -55,6 +55,7 @@ bb helm signoff <app>
 bb helm ledger                    # every change with its receipts
 bb helm complete --yes            # after every app is signed off
 bb helm end --run <id> --yes      # end a run now, or discard a draft plan
+bb helm limits --concurrency 24   # agents running at once in this run; also --budget N
 ```
 
 A structured brief is read deterministically: `# Group` headings, then `- Name — tagline · iOS Android macOS Windows` lines.
