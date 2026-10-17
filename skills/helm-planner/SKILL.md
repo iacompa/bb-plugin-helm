@@ -17,7 +17,45 @@ when the user says go. Everyone's accounts and subscriptions differ, so **never 
 model exists**. Read the live list.
 
 If you were started from Helm's **New run → Plan with an agent** screen, the screen shows your
-plan as soon as `bb helm plan` makes it, with an **Open plan** button. Tell the user to press it.
+plan as soon as `bb helm plan` makes it, with an **Open plan to start it** button. The plan opens
+with a **Start run** bar at the top. Tell the user to press those two buttons. That is the whole start.
+
+**Be quick.** A good planning session is a few minutes and two or three messages from you: one
+message of questions, one table of models, then the plan. Don't explore the user's code beyond the
+read-only checks below. Don't explain Helm's internals unless they ask.
+
+## Facts about Helm: rely on these, never re-derive them
+
+These are authoritative. **Never read Helm's source code** (or its database) to work out how it
+behaves. It wastes the user's time and you will get details wrong. If something isn't covered here
+or in `bb helm <command> --help`, say you are not sure, and don't guess.
+
+- **Nothing happens at plan time.** `bb helm plan` only records a draft (status `planning`). No
+  folder, branch, file or thread is created.
+- **Starting** (`bb helm start`, or **Start run** in the panel) creates Helm's notes folder, the
+  **Studio**, at `<run folder>/_studio`, a small git repository holding PORTFOLIO.md and briefs. Then
+  it queues the Orchestrator (and Managers) and admits **wave 1**. Later waves need the user's approval
+  in **Needs you**, unless `--auto`.
+- **The run folder** is `--root <folder>` when given, otherwise `<Helm's apps root>/<run-slug>`.
+  The apps root defaults to `~/Projects/helm`. New apps without their own folder get a repository
+  there. **Always tell the user where the run folder will be, and offer `--root`.**
+- **Adopting an existing repository** creates exactly one thing: the branch
+  `helm/<run-slug>-<id6>/<app-id>`, pointing at the repository's **current HEAD commit**, when
+  that app's wave is admitted (not at plan time, not at start for later waves). It adds **no commits
+  and no files** to the user's repository, and never touches their checkout, working tree, index,
+  stash or other branches. Helm never merges. The user merges a signed-off branch themselves.
+- **Agents work in BB-managed worktrees** (under `~/.bb/…`) branched from that `helm/…` branch, so
+  they see **committed work only**. Uncommitted or untracked changes in the user's checkout are
+  invisible to them. If the user has uncommitted work the agents should build on, they must
+  **commit it before that app's wave is admitted**. `bb helm plan` prints how many uncommitted changes
+  each folder has.
+- **Read-only folders** (`reads`) are enforced by the agents' instructions, not by file permissions.
+- Planning checks folders with read-only git commands that don't write the index (no optional locks).
+- **Ending a run**: `bb helm end --run <id> --yes` stops and archives every agent that run spawned,
+  or discards a draft plan. `bb helm runs` lists runs and their status. Repositories, `helm/…` branches
+  and the ledger stay.
+- **Updates**: Helm (the plugin) updates only when the user presses Update in BB's Plugins page.
+  Nothing changes underneath a running plan.
 
 ## How Helm is organised (explain the parts that matter to this build)
 
@@ -76,14 +114,23 @@ questions), each with a default they can accept:
 Helm can work **anywhere on this machine**. Ask, for each app:
 
 - **An existing repository?** Ask for its folder, for example `/Volumes/Work/apps/tide` or
-  `~/code/tide`. Helm **adopts** it: it creates a new branch `helm/<run>/<app>` with its own files
-  and works only in worktrees. **Your checkout, uncommitted changes and branches are never
-  touched**, and Helm never merges. The user merges the signed-off branch themselves.
+  `~/code/tide`. Helm **adopts** it: when the app's wave is admitted it creates the branch
+  `helm/<run>/<app>` at the current commit (no commits or files added) and works only in worktrees.
+  **Their checkout, uncommitted changes and branches are never touched**, and Helm never merges.
+  If the folder has uncommitted work the agents need, tell them to commit it first: agents see
+  committed work only.
 - **A new folder somewhere specific?** Give the folder path. Helm creates the repository there.
 - **Neither** → a new repository under the run folder: Helm's apps root setting, or
   `--root <folder>` for this run (for example, a folder on an external disk).
 - **Read-only folders**: code the app should *use but not change*, such as a shared core
   library or a design-system repository. Its agents may read these and never write them.
+
+Ask **once**, in the same message: "Helm's own notes and any new app folders go under
+`<apps root>/<run-slug>` (default `~/Projects/helm/…`). Keep that, or use another folder (`--root`)?"
+
+Also run `bb helm runs`. If another run is still **running** or **paused** on the same folders,
+tell the user and offer to end it (`bb helm end --run <id> --yes`) **only after they say yes**.
+Two runs on one repository is allowed (each gets its own branch) but is rarely what they want.
 
 Rules to explain when they come up:
 - **One app = one repository.** Point an app at the repository's top folder. If several products
@@ -95,9 +142,9 @@ Rules to explain when they come up:
 - A folder that has files but is **not a git repository** can't be used as is. Tell the user to
   `git init` and commit it themselves (checking what gets committed), or pick an empty or new folder.
 
-You may check a folder before planning, with read-only commands: `git -C <path> rev-parse --show-toplevel`,
-`git -C <path> status --short | head`. `bb helm plan` checks every folder again and reports
-what it will do.
+You may check a folder before planning, with read-only commands that don't touch the index:
+`git -C <path> rev-parse --show-toplevel`, `git --no-optional-locks -C <path> status --short | head`.
+Don't read the code itself. `bb helm plan` checks every folder again and reports what it will do.
 
 ## Step 3: Check the machine and read the live models
 
@@ -226,14 +273,15 @@ bb helm plan --brief-file "$f" --name '<Run name>' --shape <solo|lean|full> \
 Report to the user:
 - the **org**: agents per app, Managers or not, total agents;
 - the **folders**: which apps adopt an existing repository (and on which `helm/…` branch), which get a
-  new folder, and the read-only folders;
+  new folder, the read-only folders, **the run folder** (where `_studio` goes), and every folder whose
+  **uncommitted changes agents won't see**;
 - the **forecast** in relative units;
 - any **problems**, each with its fix: a missing model, a family warning, a folder that is
   inside another repository, a non-git folder, a disk that isn't mounted;
 - the **run id**.
 
 If there are problems, fix the brief or the `--slot`s and run `plan` again. That creates a new
-draft; the old one can be discarded from the run menu.
+draft: discard the old one with `bb helm end --run <old id> --yes` (a draft spawned nothing).
 
 Then give the next step, but **do not run it unless the user says go**:
 
@@ -242,7 +290,7 @@ bb helm start <runId> --dry-run   # writes the Studio and briefs, spawns nothing
 bb helm start <runId> --yes       # spawns the agents (this is what costs money)
 ```
 
-In the Helm panel the user can also open the plan and press **Start run** in the run menu. After it
+In the Helm panel the user can also open the plan and press **Start run** in the bar at the top. After it
 starts, they steer it from the Helm panel or with `bb helm status`, `needs`, `approve`, `model` and
 `signoff` (the `helm` skill covers these).
 
@@ -277,3 +325,5 @@ stay as they are. 5 agents, forecast … To build it, press Open plan → Start 
 - Never put the brief inline in a command. Always use a file written with a quoted heredoc.
 - Never edit, commit, `git init` or clean in the user's folders yourself. Helm adopts them safely, and the
   user prepares anything else.
+- Never read Helm's source code or database to explain how it works. Use the facts above.
+- Never end another run unless the user said to.

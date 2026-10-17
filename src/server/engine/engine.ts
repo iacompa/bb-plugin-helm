@@ -289,7 +289,7 @@ export class Engine {
       else if (info.gitRoot && !info.head) problems.push(`${app.name}: the repository at ${raw} has no commits yet. Commit something first, or name an empty folder.`);
       else if (info.gitRoot)
         notes.push(
-          `${app.name}: existing repository ${raw}${info.branch ? ` (on ${info.branch}` : " ("}${info.dirty ? `, ${info.dirty} uncommitted change${info.dirty === 1 ? "" : "s"} left untouched` : ""}). Helm works on a new branch ${this.helmBranchFor(run, app)} and never changes your checkout or your branches.`,
+          `${app.name}: existing repository ${raw}${info.branch ? ` (on ${info.branch})` : ""}. When its wave is admitted Helm makes the branch ${this.helmBranchFor(run, app)} at your last commit; agents work in their own worktrees and never change your checkout or your branches.${info.dirty ? ` ${info.dirty} uncommitted change${info.dirty === 1 ? " is" : "s are"} NOT visible to agents: commit first if they should build on ${info.dirty === 1 ? "it" : "them"}.` : ""}`,
         );
       else if (info.exists && !info.empty)
         problems.push(`${app.name}: ${raw} has files but is not a git repository. Run git init and commit there yourself (check what gets committed first), or name an empty or new folder.`);
@@ -307,7 +307,13 @@ export class Engine {
         if (!info?.exists) problems.push(`${app.name}: read-only folder ${r} does not exist on this host (is the disk mounted?).`);
       }
     const readers = apps.filter((a) => a.reads.length);
-    if (readers.length) notes.push(`Read-only folders: ${readers.map((a) => `${a.name} reads ${a.reads.join(", ")}`).join("; ")}. Agents may read them and never change them.`);
+    if (readers.length) notes.push(`Read-only folders: ${readers.map((a) => `${a.name} reads ${a.reads.join(", ")}`).join("; ")}. Agents are told to read them and never change them (an instruction, not a lock).`);
+    // another live run already working in the same folders: say so, so the human can end the old one
+    for (const other of this.repo.listRuns().filter((r) => r.id !== runId && (r.status === "running" || r.status === "paused"))) {
+      const theirs = this.repo.listApps(other.id).filter((a) => a.targetPath).map((a) => expandTilde(a.targetPath!, home));
+      const shared = placed.filter((p) => theirs.some((t) => samePath(t, p.path, home))).map((p) => p.app.name);
+      if (shared.length) notes.push(`The run "${other.name}" (${other.id}, ${other.status}) also works on ${shared.join(", ")}. If this plan replaces it, end it first: bb helm end --run ${other.id} --yes`);
+    }
     return { problems, notes };
   }
 

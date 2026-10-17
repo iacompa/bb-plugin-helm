@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { Catalog, DirectiveInfo, DirectiveType, InspTab, ReceiptState, RunListItem, SnapApp, SnapNode, View } from "./types.ts";
 import { useCatalog, useHelmRpc, useRunData, useRuns, type HelmRpc } from "./data.ts";
 import type { BatchEffects, RunState } from "./store.ts";
+import { lsGet, lsSet, useStored } from "./persist.ts";
 import { resolveSession } from "./store.ts";
 
 export interface PulseEvent {
@@ -104,22 +105,6 @@ function readTabs(): string[] | null {
     return [];
   }
 }
-function lsGet(k: string): string | null {
-  try {
-    return globalThis.localStorage?.getItem(k) ?? null;
-  } catch {
-    return null;
-  }
-}
-function lsSet(k: string, v: string | null) {
-  try {
-    if (v === null) globalThis.localStorage?.removeItem(k);
-    else globalThis.localStorage?.setItem(k, v);
-  } catch {
-    /* storage unavailable */
-  }
-}
-
 export function HelmProvider({ children, rootRef }: { children: ReactNode; rootRef: RefObject<HTMLDivElement | null> }) {
   const rpc = useHelmRpc();
   const { runs, error: runsError, refresh: refreshRuns } = useRuns(rpc);
@@ -172,20 +157,21 @@ export function HelmProvider({ children, rootRef }: { children: ReactNode; rootR
     }
   }, [runs, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const [view, setView] = useState<View>("graph");
-  const [sel, setSel] = useState<string | null>(null);
-  const [tab, setTab] = useState<InspTab>("overview");
+  const [view, setView] = useStored<View>("helm:view", "graph", (v) => ["graph", "board", "ledger", "needs"].includes(v as string));
+  const [sel, setSel] = useStored<string | null>("helm:sel", null, (v) => v === null || typeof v === "string");
+  const [tab, setTab] = useStored<InspTab>("helm:tab", "overview");
   const [draftType, setDraftType] = useState<{ type: DirectiveType; key: number } | null>(null);
   const [inspOpen, setInspOpen] = useState<boolean>(() => {
     const w = rootRef.current?.clientWidth ?? globalThis.innerWidth ?? 1400;
     return w > 1100;
   });
-  const [inspWide, setInspWide] = useState(false);
-  const [drill, setDrill] = useState<string | null>(null);
+  const [inspWide, setInspWide] = useStored("helm:inspWide", false);
+  const [drill, setDrill] = useStored<string | null>("helm:drill", null, (v) => v === null || typeof v === "string");
   const [focusReq, setFocusReq] = useState<{ id: string; key: number } | null>(null);
   const [observatory, setObservatory] = useState(false);
   const [studio, setStudio] = useState<StudioOpts | null>(null);
-  const [wizardOpen, setWizardOpen] = useState(false);
+  // the wizard stays open (with its draft) when you leave the panel and come back
+  const [wizardOpen, setWizardOpen] = useStored("helm:wizardOpen", false);
 
   const setRunId = useCallback((id: string | null) => {
     setRunIdState(id);

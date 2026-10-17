@@ -88,10 +88,10 @@ export function PlanChat(p: { model: ModelRef | null; setModel: (m: ModelRef) =>
                     className="btn sm primary"
                     onClick={() => {
                       p.onOpenRun(r.id);
-                      toast.success("Plan opened", { description: "Review it on the graph. Start it from the run menu when you are ready." });
+                      toast.success("Plan opened", { description: "Review it, then press Start run in the bar at the top. This conversation is kept: New run reopens it." });
                     }}
                   >
-                    Open plan
+                    Open plan to start it
                   </button>
                 </div>
               ))}

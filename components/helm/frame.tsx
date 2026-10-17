@@ -17,6 +17,7 @@ import { Inspector } from "./inspector/index.tsx";
 import { StudioModal } from "./studio.tsx";
 import { EXAMPLES, WizardModal, seedWizardBrief, seedWizardMode } from "./wizard.tsx";
 import { reportClientError } from "./data.ts";
+import { StartBar, useStartRun } from "./startbar.tsx";
 
 export function HelmApp() {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -108,6 +109,8 @@ function Frame() {
       <RunTabs />
       <div className="main">
         <section className="stagewrap" aria-label="Main view">
+          {!startPage && data ? <StartBar /> : null}
+          <div className="stagebody">
           {startPage ? (
             <Hero />
           ) : !data ? (
@@ -147,6 +150,7 @@ function Frame() {
               ) : null}
             </>
           )}
+          </div>
         </section>
         {showInspector ? <Inspector /> : null}
       </div>
@@ -341,15 +345,13 @@ function RunPopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => v
   if (data) for (const id of data.appOrder) counts[data.apps[id].stage] = (counts[data.apps[id].stage] ?? 0) + 1;
   const policies = (data?.policies ?? []).filter((p) => !p.retiredAt);
 
+  const startRun = useStartRun();
   const start = async () => {
     if (!run) return;
     setBusy(true);
     try {
-      await h.rpc.call("run_start", { runId: run.id, dryRun: run.dryRun });
-      toast.success("Run started");
-      h.refetch();
-      h.refreshRuns();
-      onClose();
+      // a refusal (models, folders) is shown by useStartRun and in the start bar
+      if (!(await startRun(run.id, run.dryRun))) onClose();
     } catch (e) {
       toast.error(errMsg(e));
     } finally {

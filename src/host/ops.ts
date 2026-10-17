@@ -13,6 +13,9 @@ import { scan, type ScanFile } from "../server/domain/slop/scan.ts";
 const GIT_ENV = {
   ...process.env,
   GIT_TERMINAL_PROMPT: "0",
+  // reads (git status while planning, evidence) must not refresh the index of the
+  // human's checkout or worktrees: no optional locks, no index writes
+  GIT_OPTIONAL_LOCKS: "0",
   GIT_AUTHOR_NAME: "Helm",
   GIT_AUTHOR_EMAIL: "helm@localhost",
   GIT_COMMITTER_NAME: "Helm",

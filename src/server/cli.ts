@@ -149,9 +149,9 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
               ...(portfolio ? [`Read by the planner: ${portfolio.apps.map((a) => a.name).join(", ")}`] : []),
               ...(questions.length ? ["The planner asks:", ...questions.map((q) => `  ? ${q}`)] : []),
               ...(r.assumed.length ? [`Assumed: ${r.assumed.join("; ")}`] : []),
-              `New app folders go under: ${r.runFolder ?? "the apps root"}`,
+              `New app folders and Helm's notes (_studio) go under: ${r.runFolder ?? "the apps root"}${i.options.root ? "" : " (change with --root)"}`,
               ...(r.locations.length ? ["Folders:", ...r.locations.map((n) => `  · ${n}`)] : []),
-              ...(r.problems.length ? ["Before it can start:", ...r.problems.map((p) => `  - ${p}`), "Fix models with --preset / --slot and folders in the brief or --root, then re-run bb helm plan."] : [`Start it with: bb helm start ${r.runId}`]),
+              ...(r.problems.length ? ["Before it can start:", ...r.problems.map((p) => `  - ${p}`), "Fix models with --preset / --slot and folders in the brief or --root, then re-run bb helm plan."] : [`Start it with: bb helm start ${r.runId} (or press Start run in the Helm panel). Discard it with: bb helm end --run ${r.runId} --yes`]),
             ];
             return out(i.options.json, r, lines.join("\n"));
           }),
@@ -302,6 +302,21 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             if (!i.options.yes) throw new PluginCliError(`This stops and archives every remaining agent of ${run.name}, including the Orchestrator. Repos and branches stay.`, { code: "confirmation_required", hint: "Re-run with --yes." });
             const r = await svc.finish(run.id, i.options.cancel ? "cancelled" : "done");
             return out(i.options.json, { run: r }, `${r.name} is ${r.status}.`);
+          }),
+      }),
+      end: cliCommand({
+        summary: "End a run now: cancel it (or discard a plan), stopping and archiving every agent it spawned",
+        options: { run: RUN, yes: { type: "boolean", description: "Confirm" }, json: JSON_OPT },
+        run: (i) =>
+          guard(async () => {
+            const run = runOf(i.options.run);
+            if (!i.options.yes)
+              throw new PluginCliError(
+                run.status === "planning" ? `This discards the plan ${run.name}; nothing was spawned.` : `This ends ${run.name}: every agent it spawned is stopped and archived, including the Orchestrator. Repos, branches and the ledger stay.`,
+                { code: "confirmation_required", hint: "Re-run with --yes." },
+              );
+            const r = await svc.finish(run.id, "cancelled");
+            return out(i.options.json, { run: r }, `${r.name} is ended (${r.status}).`);
           }),
       }),
       ledger: cliCommand({

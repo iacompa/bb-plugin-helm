@@ -10,6 +10,7 @@ import { Banner, Ic, Modal, ModelChip, askConfirm, cx } from "./ui.tsx";
 import { StudioPanel } from "./studio.tsx";
 import { ModelPicker } from "./picker.tsx";
 import { PlanChat, type PlanChatState } from "./planchat.tsx";
+import { clearStored, lsSet, readStored, useStored } from "./persist.ts";
 
 /** A planner session (§7.7) as planner_get returns it. */
 type PlannerState = { id: string; status: "spawning" | "running" | "done" | "failed"; error: string | null; portfolio: Portfolio | null };
@@ -48,15 +49,31 @@ function squadHas(a: PlannedApp, role: string): boolean {
   return (a.squad as unknown as Array<string | { role: string }>).some((m) => (typeof m === "string" ? m === role || m.endsWith(`.${role}`) : m.role === role));
 }
 
-let seedBrief: string | null = null;
-/** Pre-fill the next wizard opening with a brief (used by the first-run examples). */
+// The wizard's draft (brief, portfolio, models, the planning conversation…) lives in
+// localStorage under this prefix, so leaving the panel or opening Helm in another
+// window resumes where you were. It is cleared when a run starts or you discard it.
+const WIZ = "helm:wiz:";
+const isObj = (v: unknown) => !!v && typeof v === "object" && !Array.isArray(v);
+const orNull = (f: (v: unknown) => boolean) => (v: unknown) => v === null || f(v);
+
+/** Start the next wizard opening from this brief, replacing any saved draft (the first-run examples). */
 export function seedWizardBrief(text: string | null) {
-  seedBrief = text;
+  if (text === null) return; // keep the saved draft
+  clearStored(WIZ);
+  lsSet(`${WIZ}brief`, JSON.stringify(text));
 }
-let seedMode: "brief" | "agent" = "brief";
-/** Open the next wizard in "Plan with an agent" mode (the start page's second button). */
+/** Open the next wizard in "Plan with an agent" mode; an earlier planning conversation is kept. */
 export function seedWizardMode(m: "brief" | "agent") {
-  seedMode = m;
+  lsSet(`${WIZ}mode`, JSON.stringify(m));
+}
+/** A run made in the saved planning conversation started: that draft is finished. */
+export function planChatRunStarted(runCreatedAt: number) {
+  const chat = readStored<{ startedAt?: number } | null>(`${WIZ}chat`, null);
+  if (chat && typeof chat.startedAt === "number" && runCreatedAt >= chat.startedAt) clearStored(WIZ);
+}
+/** Forget the saved draft (after a run starts, or when the human discards it). */
+export function clearWizardDraft() {
+  clearStored(WIZ);
 }
 
 export function WizardModal() {
@@ -67,19 +84,19 @@ export function WizardModal() {
 
 function WizardInner() {
   const h = useHelm();
-  const [step, setStep] = useState(1);
-  const [brief, setBrief] = useState(() => {
-    const s = seedBrief ?? "";
-    seedBrief = null;
-    return s;
-  });
-  const [name, setName] = useState("");
-  const [portfolio, setPortfolio] = useState<Portfolio | null>(null);
-  const seededFrom = useRef<string | null>(null);
-  const [limits, setLimits] = useState<Limits>({ managerSpan: 4, orchestratorSpan: 6, concurrency: 24, budgetCap: 2500 });
-  const [slots, setSlots] = useState<SlotMap>(() => JSON.parse(JSON.stringify(SEED_PRESETS["Studio default"])) as SlotMap);
-  const [autoAdvance, setAutoAdvance] = useState<"ask" | "auto">("ask");
-  const [dryRun, setDryRun] = useState(false);
+  const [step, setStep] = useStored(`${WIZ}step`, 1, (v) => v === 1 || v === 2 || v === 3 || v === 4);
+  const [brief, setBrief] = useStored(`${WIZ}brief`, "");
+  const [name, setName] = useStored(`${WIZ}name`, "");
+  const [portfolio, setPortfolio] = useStored<Portfolio | null>(`${WIZ}portfolio`, null, orNull((v) => isObj(v) && Array.isArray((v as Portfolio).apps)));
+  const seededFrom = useRef<string | null>(readStored<string | null>(`${WIZ}seededFrom`, null, orNull((v) => typeof v === "string")));
+  const setSeeded = (b: string) => {
+    seededFrom.current = b;
+    lsSet(`${WIZ}seededFrom`, JSON.stringify(b));
+  };
+  const [limits, setLimits] = useStored<Limits>(`${WIZ}limits`, { managerSpan: 4, orchestratorSpan: 6, concurrency: 24, budgetCap: 2500 }, (v) => isObj(v) && typeof (v as Limits).concurrency === "number");
+  const [slots, setSlots] = useStored<SlotMap>(`${WIZ}slots`, () => JSON.parse(JSON.stringify(SEED_PRESETS["Studio default"])) as SlotMap);
+  const [autoAdvance, setAutoAdvance] = useStored<"ask" | "auto">(`${WIZ}autoAdvance`, "ask", (v) => v === "ask" || v === "auto");
+  const [dryRun, setDryRun] = useStored(`${WIZ}dryRun`, false);
   const [preview, setPreview] = useState<PlanPreview | null>(null);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -88,28 +105,28 @@ function WizardInner() {
   const [problems, setProblems] = useState<string[]>([]);
   const body = useRef<HTMLDivElement>(null);
   // step 1 has two ways in: write a brief, or plan it in a conversation with the helm-planner agent
-  const [mode, setMode] = useState<"brief" | "agent">(() => {
-    const m = seedMode;
-    seedMode = "brief";
-    return m;
-  });
-  const [chat, setChat] = useState<PlanChatState>(null);
-  const [appsRoot, setAppsRoot] = useState("");
+  const [mode, setMode] = useStored<"brief" | "agent">(`${WIZ}mode`, "brief", (v) => v === "brief" || v === "agent");
+  const [chat, setChat] = useStored<PlanChatState>(`${WIZ}chat`, null, orNull((v) => isObj(v) && typeof (v as { threadId?: unknown }).threadId === "string" && typeof (v as { startedAt?: unknown }).startedAt === "number"));
+  const [appsRoot, setAppsRoot] = useStored(`${WIZ}appsRoot`, "");
 
   // §7.7: a free-text brief is read by one short planner thread on a model the human chooses
-  const [plannerModel, setPlannerModel] = useState<ModelRef | null>(null);
+  const [plannerModel, setPlannerModel] = useStored<ModelRef | null>(`${WIZ}plannerModel`, null, orNull((v) => isObj(v) && typeof (v as ModelRef).modelId === "string"));
   const plannerRef: ModelRef | null = plannerModel ?? (slots.code ? { ...slots.code, reasoning: "medium" } : null);
-  const [pl, setPl] = useState<PlannerState | null>(null);
-  const [plFor, setPlFor] = useState<string | null>(null);
-  const plBrief = useRef<string>("");
-  const adoptPlanner = (s: PlannerState) => {
+  const [pl, setPl] = useStored<PlannerState | null>(`${WIZ}planner`, null, orNull((v) => isObj(v) && typeof (v as PlannerState).id === "string"));
+  const [plFor, setPlFor] = useStored<string | null>(`${WIZ}plannerFor`, null, orNull((v) => typeof v === "string"));
+  const [plBrief, setPlBrief] = useStored(`${WIZ}plannerBrief`, "");
+  const adoptPlanner = (s: PlannerState, forBrief = plBrief) => {
     setPl(s);
     if (s.status === "done" && s.portfolio) {
       setPortfolio(s.portfolio);
-      seededFrom.current = plBrief.current;
-      setPlFor(plBrief.current);
+      setSeeded(forBrief);
+      setPlFor(forBrief);
     }
   };
+  // a planner that was still reading when the panel closed: ask where it got to
+  useEffect(() => {
+    if (pl?.id && (pl.status === "spawning" || pl.status === "running")) h.rpc.call("planner_get", { id: pl.id }).then((s: PlannerState) => adoptPlanner(s), () => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useRealtime("helm:planner", (msg: unknown) => {
     const id = (msg as { id?: string } | null)?.id;
     if (!pl || id !== pl.id) return;
@@ -117,10 +134,10 @@ function WizardInner() {
   });
   const startPlanner = () => {
     if (!plannerRef) return;
-    plBrief.current = brief;
+    setPlBrief(brief);
     setPl({ id: "", status: "spawning", error: null, portfolio: null });
     h.rpc.call("planner_start", { brief, model: plannerRef }).then(
-      (s: PlannerState) => adoptPlanner(s),
+      (s: PlannerState) => adoptPlanner(s, brief),
       (e: unknown) => setPl({ id: "", status: "failed", error: errMsg(e), portfolio: null }),
     );
   };
@@ -164,11 +181,17 @@ function WizardInner() {
   const fam = familyWarnings(h.catalog, slots);
   const noModels = !!h.catalog && (!h.catalog.models.length || !h.catalog.providers.some((p) => p.available));
 
-  const close = async () => {
-    if (mode === "brief" && brief.trim() && !(await askConfirm({ title: "Discard this new run?", body: "Your brief and choices are not saved.", ok: "Discard", danger: true }))) return;
-    if (chat) toast("The planning conversation stays in your sidebar", { description: "“Helm · plan a build”. Any plan it made is in the run menu." });
+  // closing keeps the draft (New run reopens it); Discard is the explicit way to throw it away
+  const close = () => {
+    if (brief.trim() || chat) toast("Your draft is kept", { description: "New run opens it where you left off." });
     h.setWizardOpen(false);
   };
+  const discard = async () => {
+    if ((brief.trim() || chat || step > 1) && !(await askConfirm({ title: "Discard this draft?", body: chat ? "The brief and choices are cleared. The planning conversation stays in your sidebar (“Helm · plan a build”), and any plan it made stays in the run menu." : "The brief and every choice in this wizard are cleared.", ok: "Discard", danger: true }))) return;
+    clearWizardDraft();
+    h.setWizardOpen(false);
+  };
+  // opening a plan keeps the conversation (New run comes back to it); starting that plan clears it
   const openRun = (runId: string) => {
     h.refreshRuns();
     h.setRunId(runId);
@@ -177,9 +200,9 @@ function WizardInner() {
   };
 
   const go = (n: number) => {
-    if (n === 2 && step === 1 && preview && seededFrom.current !== brief) {
+    if (n >= 2 && step === 1 && preview && seededFrom.current !== brief) {
       setPortfolio(preview.portfolio);
-      seededFrom.current = brief;
+      setSeeded(brief);
     }
     setStep(n);
     body.current?.scrollTo?.({ top: 0 });
@@ -238,6 +261,7 @@ function WizardInner() {
       await h.rpc.call("run_start", { runId: created.runId, dryRun });
       h.refreshRuns();
       h.setRunId(created.runId);
+      clearWizardDraft();
       h.setWizardOpen(false);
       toast.success(dryRun ? "Plan created (dry run)" : "Run started", {
         description: dryRun ? "Projects and briefs were written; nothing was spawned." : `${plural(plan.apps.length, "app")} · the Orchestrator is starting${plan.managers.length ? ` with ${plural(plan.managers.length, "manager")}` : ""}.`,
@@ -249,7 +273,7 @@ function WizardInner() {
   };
 
   return (
-    <Modal label="New run" cls="lg" onClose={() => void close()}>
+    <Modal label="New run" cls="lg" onClose={close}>
       <div className="wiz">
         <div className="mhead">
           <span className="tile lg tier">
@@ -261,7 +285,7 @@ function WizardInner() {
               Nothing is spawned until you approve the plan on the last step.
             </div>
           </div>
-          <button type="button" className="iconbtn" onClick={() => void close()} aria-label="Close">
+          <button type="button" className="iconbtn" onClick={close} aria-label="Close (the draft is kept)">
             <Ic name="X" />
           </button>
         </div>
@@ -346,9 +370,17 @@ function WizardInner() {
           ) : null}
           <span className="grow" />
           <span className="hint-t">{step === 1 && mode === "agent" ? (chat ? "Open the plan when the planner has made it." : "") : previewing ? "Reading…" : why}</span>
-          <button type="button" className="btn" onClick={() => void close()} disabled={busy}>
-            Cancel
+          <button type="button" className="btn ghost" onClick={() => void discard()} disabled={busy} title="Clear this draft and close">
+            Discard
           </button>
+          <button type="button" className="btn" onClick={close} disabled={busy} title="Close; New run reopens this draft">
+            Close
+          </button>
+          {(step === 1 || step === 2) && !(step === 1 && mode === "agent") && !blocked && !unset.length && preview ? (
+            <button type="button" className="btn" onClick={() => go(4)} title="Every role already has a model: go straight to the summary">
+              Skip to review
+            </button>
+          ) : null}
           {step === 1 && mode === "agent" ? null : step < 4 ? (
             <button type="button" className="btn primary" disabled={blocked} onClick={() => go(step + 1)}>
               {["Read my brief", "Choose models", "Review and approve"][step - 1]} <Ic name="ChevronRight" size="sm" />

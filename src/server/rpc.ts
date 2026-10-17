@@ -29,6 +29,7 @@ export function registerRpc(bb: BbPluginApi, svc: HelmService): void {
     run_get: ({ runId }) => svc.snapshot(runId),
     run_create: (input) => svc.plan(input as never),
     run_setSlots: ({ runId, slots }) => svc.setSlots(runId, slots as SlotMap),
+    run_readiness: ({ runId }) => svc.readiness(runId),
     run_start: ({ runId, dryRun }) => svc.start(runId, { dryRun }),
     run_finish: ({ runId, status }) => svc.finish(runId, status),
     world_get: ({ runId }) => svc.world(runId),

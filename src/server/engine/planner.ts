@@ -20,7 +20,8 @@ export const PLANNER_DIR = "_planner";
 export function planChatPrompt(idea: string | null): string {
   const L = [
     "I opened Helm → New run → Plan with an agent. Load and follow the helm-planner skill: interview me briefly, check `bb helm doctor` and `bb helm models`, ask me which model to use for each role from the models available on this machine (recommend one per role and let me change it), ask where each app lives (an existing repository or a new folder), write the brief file, and run `bb helm plan`.",
-    "When `bb helm plan` succeeds, tell me the run id; the New run screen will offer to open it. Never run `bb helm start` unless I say so.",
+    "Keep it short: ask everything you need in one message, rely on the skill's facts about Helm, and never read Helm's own source code.",
+    "When `bb helm plan` succeeds, tell me the run id; the New run screen will offer to open it, and I start it with the Start run button. Never run `bb helm start` unless I say so.",
   ];
   if (idea) L.push("", "What I want to build:", "<idea>", idea.slice(0, TEXT_MAX), "</idea>");
   else L.push("", "Start by asking me what I want to build.");

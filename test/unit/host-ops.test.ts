@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, statSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -161,4 +161,24 @@ test("inspectPath on a linked worktree reports the worktree as its own top folde
   const nested = await ops.inspectPath({ path: join(main, "not", "yet") });
   assert.equal(nested.exists, false);
   assert.ok(nested.enclosingRepo && nested.enclosingRepo.endsWith("/lumen"), "a missing folder inside a repository names that repository");
+});
+
+test("inspectPath never rewrites the index of the human's repository (no optional locks)", async () => {
+  const dir = join(tmp(), "human");
+  mkdirSync(dir);
+  const env = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
+  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
+  writeFileSync(join(dir, "a.txt"), "a\n");
+  execFileSync("git", ["add", "."], { cwd: dir });
+  execFileSync("git", ["commit", "-qm", "init"], { cwd: dir, env });
+  // make the index's stat data stale (same content, new mtime): a plain `git status` would refresh and rewrite it
+  const later = new Date(Date.now() + 5_000);
+  utimesSync(join(dir, "a.txt"), later, later);
+  const before = statSync(join(dir, ".git", "index")).mtimeMs;
+  const info = await ops.inspectPath({ path: dir });
+  assert.equal(info.dirty, 0);
+  assert.equal(statSync(join(dir, ".git", "index")).mtimeMs, before, "the index was not written");
+  // control: without the guard, git does rewrite it, so the assertion above means something
+  execFileSync("git", ["status", "--porcelain"], { cwd: dir, env: { ...process.env, GIT_OPTIONAL_LOCKS: "1" } });
+  assert.notEqual(statSync(join(dir, ".git", "index")).mtimeMs, before, "control: plain git status refreshes the index");
 });

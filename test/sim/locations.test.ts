@@ -20,7 +20,7 @@ test("an existing repository is adopted on a Helm branch; the human's checkout, 
   const { runId } = h.engine.createRun({ name: "Tide work", brief: "finish tide", portfolio: pf(app("Tide", { path: repo, reads: ["/disk/work/core"] }), app("Gamma")), slots: CHEAP });
   const loc = await h.engine.locationReport(runId);
   assert.deepEqual(loc.problems, []);
-  assert.ok(loc.notes.some((n) => n.includes("existing repository /disk/work/tide") && n.includes("1 uncommitted change left untouched") && n.includes("helm/")), loc.notes.join("\n"));
+  assert.ok(loc.notes.some((n) => n.includes("existing repository /disk/work/tide") && n.includes("1 uncommitted change is NOT visible to agents: commit first") && n.includes("helm/")), loc.notes.join("\n"));
   assert.ok(loc.notes.some((n) => n.includes("Tide reads /disk/work/core")), loc.notes.join("\n"));
 
   const r = await h.engine.startRun(runId);

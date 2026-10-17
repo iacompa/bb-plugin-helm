@@ -652,3 +652,14 @@
 .helm .rt-new { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border-radius: 7px; color: var(--h-fg-3); font-size: 12px; }
 .helm .rt-new:hover { background: var(--h-surface-2); color: var(--h-fg); }
 .helm .hero .recent { width: 100%; display: flex; flex-direction: column; gap: 2px; text-align: left; }
+
+/* ───────────── start bar (a planned run that has not started) ───────────── */
+.helm .stagewrap { display: flex; flex-direction: column; }
+.helm .stagebody { position: relative; flex: 1; min-height: 0; min-width: 0; }
+.helm .startbar { flex: none; border-bottom: 1px solid var(--h-line); background: var(--h-surface); padding: 10px 16px; display: flex; flex-direction: column; gap: 8px; z-index: 13; }
+.helm .startbar.bad { box-shadow: inset 3px 0 0 var(--h-crit, #e5484d); }
+.helm .startbar .sb-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.helm .startbar .sb-more { display: flex; flex-direction: column; gap: 8px; padding-left: 42px; font-size: 12.5px; color: var(--h-fg-2); max-height: 40vh; overflow: auto; }
+.helm .startbar .sb-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.helm .ok-t { color: var(--h-ok-ink); }
+.helm .crit-t { color: var(--h-crit-ink, var(--h-crit, #e5484d)); }

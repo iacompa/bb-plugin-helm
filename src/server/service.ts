@@ -138,6 +138,15 @@ export class HelmService {
     return { runId, plan, forecast: pre.forecast, assumed: pre.assumed, problems, locations: loc.notes, runFolder: run.appsRoot };
   }
 
+  /** Read-only: can this planned run start, and what will Helm do with its folders? */
+  async readiness(runId: string) {
+    const run = this.engine.run(runId);
+    if (run.status !== "planning") return { ok: false, status: run.status, problems: [`The run is ${run.status}; only a planned run can start.`], notes: [], runFolder: run.appsRoot };
+    const loc = await this.engine.locationReport(runId);
+    const problems = [...(await this.slotProblems(run)), ...loc.problems];
+    return { ok: !problems.length, status: run.status, problems, notes: loc.notes, runFolder: run.appsRoot };
+  }
+
   /** Which required slots are unset or unavailable on the live catalog. */
   async slotProblems(run: RunInfo): Promise<string[]> {
     const plan = this.engine.plan(run.id);

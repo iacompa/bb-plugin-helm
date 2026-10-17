@@ -119,3 +119,21 @@ The open decisions from the brief (§17.2) took their defaults. Where reality on
       - every panel failure: a rejected request, a crash caught by the panel-wide boundary (which offers *Try again*), or a ThreadChat failure. These are reported through the `client_error` RPC.
 
       Request contents are never stored, only their shape (field names, types, lengths). `bb helm errors [--hours N] [--all] [--json] [--clear]` lists the entries, and `bb helm doctor` adds an `errors` check for the last 24 hours. This is how problems are debugged without a screen. `test/sim/rpc-json.test.ts` and `test/unit/journal.test.ts` guard the RPC boundary in both directions.
+
+31. **Starting a plan is one obvious step, and the panel remembers where you were (user report).** A user spent 25 minutes in "Plan with an agent", pressed **Open plan**, and saw a graph with no way forward. The only Start button was inside the run-name menu, and it said "Run started" even when the server refused (it ignored `ok: false`). The planner had also read Helm's source code to answer questions, wrongly claimed that adoption commits files, could not end an old run from the terminal, and sent the user to the panel. Leaving the panel lost the wizard and the planning conversation. Changes:
+    - **Start bar.** A run in `planning` shows a bar above the views: what it is (apps, the most agents, an estimate), whether it can start, and **Start run**. The checks come from `run_readiness`, a new read-only RPC that runs the same model and folder checks as `start`. Folder notes, the run folder, what starting does (wave 1 now, later waves by approval) and the committed-work-only rule are under **Details**, with **Dry run** and **Discard plan**. Every start goes through `useStartRun`, which reports a refusal and its reasons instead of claiming success.
+    - **Persistence.** `components/helm/persist.ts` (`useStored`; every stored value is shape-checked and falls back safely). The wizard's draft lives under `helm:wiz:*`: step, brief, name, portfolio, limits, models, wave approval, run folder, planner model, the planner session, and the planning conversation. Also saved: whether the wizard is open, the view, the selection, the inspector tab and width, and the drill-in. **Close** keeps the draft; **Discard** clears it; starting a run, or starting the plan the conversation made, clears it. An in-flight planner is re-asked on return.
+    - **Faster wizard.** **Skip to review** appears when every role already has a model.
+    - **Planner facts.** `helm-planner` now has an authoritative facts section and must not read Helm's source:
+      - nothing is created at plan time;
+      - adoption is one branch at HEAD at wave admission, with no commits or files;
+      - worktrees see committed work only;
+      - where the run folder and `_studio` go, and that the planner offers `--root`;
+      - read-only folders are an instruction, not a lock;
+      - how to end a run;
+      - updates happen only when the user presses Update.
+
+      The planner asks everything in one message and checks `bb helm runs` for live runs on the same folders.
+    - **Plan output.** Each adopted folder says when its branch is made and how many uncommitted changes agents will NOT see. The run folder is printed with `--root`, and the output says how to start and how to discard. Another live run on the same folders is named, with its end command.
+    - **`bb helm end --run <id> --yes`** cancels a run or discards a draft.
+    - **Git reads never write the human's index.** Host git commands run with `GIT_OPTIONAL_LOCKS=0`, so `git status` during planning doesn't refresh the index files of their checkout or worktrees. `test/unit/host-ops.test.ts` proves this against real git, with a control that shows plain `git status` does write the index.

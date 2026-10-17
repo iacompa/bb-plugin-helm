@@ -134,6 +134,7 @@ bb helm answer <needId> --message-file answer.md
 bb helm signoff <app>                       # Ready → Done; squad archived bottom-up
 bb helm sendback <app> --message-file why.md   # Ready → Build; gates reset, the lead is told why
 bb helm complete [--run <id>]               # stop and archive every remaining agent; repos stay
+bb helm end --run <id> --yes                # end a run now (cancel), or discard a draft plan
 ```
 
 - `signoff` is the human's acceptance of the app as judged — including anything listed as

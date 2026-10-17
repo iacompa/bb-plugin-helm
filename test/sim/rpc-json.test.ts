@@ -46,6 +46,7 @@ test("every read RPC returns plain JSON for a run with fewer than 30 apps", asyn
     ["node_get", { runId, nodeId: node.id }],
     ["app_get", { runId, appId: app.id }],
     ["ledger_list", { runId, limit: 50 }],
+    ["run_readiness", { runId }],
   ];
   for (const [name, input] of calls) {
     assert.ok(handlers[name], `${name} is registered`);

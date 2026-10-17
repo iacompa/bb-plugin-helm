@@ -45,6 +45,8 @@ export const RPC_SCHEMAS = {
     output: Any,
   },
   run_setSlots: { input: z.object({ runId: Id, slots: SlotsZ }), output: Any },
+  /** Read-only: whether a planned run can start (models, folders) and what Helm will do with each folder. */
+  run_readiness: { input: Run, output: Any },
   run_start: { input: z.object({ runId: Id, dryRun: z.boolean().optional() }), output: Any },
   run_finish: { input: z.object({ runId: Id, status: z.enum(["done", "cancelled"]) }), output: Any },
   world_get: { input: Run, output: Any },

@@ -36,7 +36,11 @@ In BB, open **Helm** in the sidebar and choose **New run**. In step 1, choose **
 - goes role by role (Orchestrator, Managers, Leads, UI, Code, platform, Security, Test, Reviewer, Slop Hunter, Research, Docs), listing the models **your** setup has and recommending one for each;
 - writes the brief and runs `bb helm plan`.
 
-Nothing spawns until you start the plan. Or use the terminal:
+Nothing spawns until you start the plan. When the planner has made it, press **Open plan to start it**. A plan that has not started shows a **Start run** bar at the top: it checks your models and folders first, says what will happen (wave 1 starts right away; Helm asks before later waves), and shows exactly what to fix if it can't start yet. **Details** in that bar offers a dry run and **Discard plan**.
+
+**Helm remembers where you were.** The New run wizard keeps its draft: brief, portfolio, models, and the planning conversation. Your view, selection and inspector tab are kept too. Leave the panel, reload, or open Helm in another window, and you come back to the same place. **Close** keeps the draft (New run reopens it). **Discard** clears it, and starting a run clears it.
+
+Or use the terminal:
 
 ```
 bb helm plan --brief-file brief.md --preset "Cheap dev run"   # nothing spawns; prints the shape, forecast, problems
@@ -50,19 +54,20 @@ bb helm stop <agent>              # bottom-up, subtree by default
 bb helm signoff <app>
 bb helm ledger                    # every change with its receipts
 bb helm complete --yes            # after every app is signed off
+bb helm end --run <id> --yes      # end a run now, or discard a draft plan
 ```
 
 A structured brief is read deterministically: `# Group` headings, then `- Name — tagline · iOS Android macOS Windows` lines.
 
 **Apps can live anywhere on your machine.** Add a folder to an app's line:
 - `- Tide — breathing app · iOS · /Volumes/Work/apps/tide` works in that folder.
-- An **existing repository** (or a linked worktree) is adopted. Helm creates one `helm/<run>/<app>` branch at your HEAD and adds **no files and no commits**. Your checkout, uncommitted changes and branches are never touched, and Helm never merges. You merge the signed-off branch yourself.
+- An **existing repository** (or a linked worktree) is adopted. When the app's wave is admitted, Helm creates one `helm/<run>/<app>` branch at your HEAD and adds **no files and no commits**. Your checkout, uncommitted changes and branches are never touched, and Helm never merges. You merge the signed-off branch yourself. Agents work in their own worktrees, so they see **committed work only**: commit anything they should build on first (`bb helm plan` counts the uncommitted changes per folder). Checking folders never writes your index (`GIT_OPTIONAL_LOCKS=0`).
 - A missing or empty folder becomes a new repository.
 - `· reads /path/a, ~/path/b` lists folders the app's agents may read but never change.
-- `--root <folder>` moves this run's new repositories, for example onto another disk.
+- `--root <folder>` moves this run's folder (its new repositories and Helm's `_studio` notes), for example onto another disk. The default is `~/Projects/helm/<run>`.
 - `bb helm plan` prints what will happen to every folder, and refuses unsafe ones: system folders, a folder inside another repository, a non-git folder with files. Free text is read by one short hidden planner thread on the model you choose (`--planner-model`, default: the `code` slot at medium). `bb helm <command> --help` covers every option. Every command accepts `--json`.
 
-**Several sessions at once.** Every run you open gets a tab under the top bar. Each tab shows whether the run is live and how many items need you, and runs keep going while you look at another tab. **+ New session** opens a fresh start page without touching your runs. From there you can write a brief, plan with an agent, or reopen any earlier run. Closing a tab only hides it; ending a run is still done from the run menu.
+**Several sessions at once.** Every run you open gets a tab under the top bar. Each tab shows whether the run is live and how many items need you, and runs keep going while you look at another tab. **+ New session** opens a fresh start page without touching your runs. From there you can write a brief, plan with an agent, or reopen any earlier run. Closing a tab only hides it; to end a run use the run menu or `bb helm end`.
 
 **Steering.** Every agent's inspector ends in a one-line **Steer…** box. Type an instruction and press Enter. It interrupts the agent's current turn, or tick *after its turn* to wait. You can also apply it to the agent's reports or its whole team. The line under the box shows who else hears about it: its parent gets it in full, and the levels above see one FYI line.
 
