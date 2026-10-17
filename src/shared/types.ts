@@ -51,7 +51,8 @@ export type SlotId =
   | "review"
   | "slop"
   | "research"
-  | "docs";
+  | "docs"
+  | "watcher";
 
 export interface ModelRef {
   providerId: string;

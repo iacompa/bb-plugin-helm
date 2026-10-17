@@ -87,6 +87,10 @@ test("A18: a failing agent raises a need with BB's error; Retry recovers it and 
 test("A19: a silent agent is nudged once, then raised as stalled — from Helm's own database, no polling", async () => {
   const h = await createHarness({ profileFor: role("ui", "silent") });
   const runId = await run(h, one());
+  // the plain watchdog: this run has no Watcher model
+  const r0 = h.repo.getRun(runId)!;
+  const { watcher: _w, ...noWatcher } = r0.slots;
+  h.repo.updateRun(runId, { slots: noWatcher });
   const ui = () => h.repo.listNodes(runId).find((n) => n.role === "ui")!;
   await h.clock.runUntil(h.clock.now() + 6 * H, { stopWhen: () => !!ui().threadId });
   const stall = h.repo.getRun(runId)!.limits.stallMinutes * 60_000;

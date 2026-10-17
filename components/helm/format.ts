@@ -130,7 +130,7 @@ export const TYPE_ICON: Record<DirectiveType, string> = {
   slots: "SlidersHorizontal",
 };
 
-export const SLOT_DEFS: Array<{ id: SlotId; group: "Coordination" | "Build" | "Gates" | "Support"; name: string; desc: string; role: Role }> = [
+export const SLOT_DEFS: Array<{ id: SlotId; group: "Coordination" | "Build" | "Gates" | "Support"; name: string; desc: string; role: Role | null }> = [
   { id: "orchestrator", group: "Coordination", name: "Orchestrator", desc: "Strategy, staffing and the portfolio view. Reads everything.", role: "orch" },
   { id: "manager", group: "Coordination", name: "Managers", desc: "Oversee up to four app leads each. Roll up status.", role: "mgr" },
   { id: "lead", group: "Coordination", name: "App leads", desc: "One per app: spec, contract, integration, decisions.", role: "lead" },
@@ -143,6 +143,7 @@ export const SLOT_DEFS: Array<{ id: SlotId; group: "Coordination" | "Build" | "G
   { id: "slop", group: "Gates", name: "Slop Hunter", desc: "AI-slop check: filler, fakes, dead code, invented APIs.", role: "slop" },
   { id: "research", group: "Support", name: "Research", desc: "Reads docs, SDKs and competitors for leads.", role: "research" },
   { id: "docs", group: "Support", name: "Docs", desc: "README, store listings, changelogs.", role: "docs" },
+  { id: "watcher", group: "Support", name: "Watcher", desc: "Optional light model (e.g. Haiku low) that checks agents that look stuck and nudges, restarts or escalates them. Wakes only when something looks wrong.", role: null },
 ];
 export const SLOT_GROUPS = ["Coordination", "Build", "Gates", "Support"] as const;
 

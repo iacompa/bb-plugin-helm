@@ -162,6 +162,7 @@ function emptyBySlot(): Record<SlotId, number> {
     slop: 0,
     research: 0,
     docs: 0,
+    watcher: 0,
   };
 }
 

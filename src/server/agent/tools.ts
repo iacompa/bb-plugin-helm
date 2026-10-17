@@ -3,6 +3,7 @@
 // tier, identity, parent and app come from the database, never from metadata
 // or arguments (§8.2, V12).
 
+import { applyVerdicts, watcherRun, type WatchVerdict } from "../engine/watch.ts";
 import { answerPrompt } from "../engine/prompts.ts";
 import { raiseInteractionNeed } from "../engine/events.ts";
 import { z } from "zod";
@@ -68,6 +69,12 @@ export const TOOL_DEFS: ToolDef[] = [
       "Steer anyone below you (your reports and their teams, never gates): tell (a binding instruction), pause, resume, or priority low|normal|high. The target must helm_ack; everyone between you and it, and above you, gets one FYI line; you get its ack as FYI. urgent (default true) interrupts its current turn, false waits for it. The human's directives win: you cannot resume what the human paused or override a priority the human set. Batch instructions: at most 3 per agent and 12 in total per 10 minutes.",
     parameters: z.object({ to: z.string().min(1).max(80), action: z.enum(["tell", "pause", "resume", "priority"]), text: z.string().max(1500).optional(), priority: z.enum(["low", "normal", "high"]).optional(), urgent: z.boolean().optional() }).strict(),
     presentation: { label: { pending: "Steering a report", completed: "Steered a report" }, icon: { glyph: "Sent" } },
+  },
+  {
+    name: "helm_watch",
+    description: "The Watcher's only tool: one verdict per agent from Helm's packet. ok (working, leave it) · nudge (interrupt with your note) · restart (stop a hung or looping turn and resume) · escalate (to its nearest active supervisor) · human (credentials, spending, private data, access, or nobody can fix it).",
+    parameters: z.object({ verdicts: z.array(z.object({ nodeId: z.string().min(1).max(120), verdict: z.enum(["ok", "nudge", "restart", "escalate", "human"]), note: z.string().min(1).max(600) }).strict()).min(1).max(20) }).strict(),
+    presentation: { label: { pending: "Checking agents", completed: "Checked agents" }, icon: { glyph: "Eye" } },
   },
   {
     name: "helm_approve",
@@ -163,6 +170,14 @@ export async function callTool(e: Engine, name: string, threadId: string, raw: u
   const parsed = def.parameters.safeParse(raw ?? {});
   if (!parsed.success) return { text: `Invalid arguments for ${name}: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`, isError: true };
   const node = e.repo.nodeByThread(threadId);
+  const watchRun = node ? null : watcherRun(e, threadId);
+  if (watchRun) {
+    if (name !== "helm_watch") return { text: "You are Helm's Watcher: helm_watch is your only tool.", isError: true };
+    const run = e.repo.getRun(watchRun);
+    if (!run || run.status === "cancelled" || run.status === "done") return { text: `The run is ${run?.status ?? "gone"}; stop now.`, isError: true };
+    return { text: await applyVerdicts(e, watchRun, (parsed.data as { verdicts: Array<{ nodeId: string; verdict: WatchVerdict; note: string }> }).verdicts), isError: false };
+  }
+  if (name === "helm_watch") return { text: "helm_watch is for Helm's Watcher.", isError: true };
   if (!node) {
     if (PLANNER_TOOLS.includes(name) && opts.planner) {
       const r = await opts.planner(threadId, (parsed.data as { portfolio?: unknown }).portfolio);

@@ -180,3 +180,15 @@ The open decisions from the brief (§17.2) took their defaults. Where reality on
     - The Orchestrator's own prompts, prompts whose parent has no live thread, and prompts unanswered after 15 minutes (watchdog, DB only) reach the human. `human` restores "ask me every time".
     - Pending prompts live in `meta` (`prompt:<run>:<interaction>`). An answer to an interaction already resolved in BB is a no-op.
     - The per-tier permission settings gained readable labels: Auto, Allow edits, Full access. They apply at spawn, because BB's thread update cannot change the mode.
+
+38. **The Watcher (user request).** Grok agents hung mid-turn: BB showed them active, but nothing happened for an hour. The watchdog's nudge was a queued message, and a queued message never reaches a hung turn. So every stalled card said "nudged once and has not answered".
+    - The plain watchdog now nudges with `steer`.
+    - New optional slot `watcher` (a light model, e.g. Haiku low or Luna medium; "Cheap dev run" and "Max quality" include Haiku low).
+    - With a Watcher, the 5-minute watchdog finds suspects from Helm's DB (silent past `stallMinutes`, or waiting after a failed command), at most 12 per pass. It reads only those threads from BB (state, last 500 characters of output, last report, nearest active supervisor) and sends one packet to a single hidden Watcher thread. The thread is replaced after 25 packets to keep its context small.
+    - The Watcher answers with `helm_watch` verdicts, its only tool:
+      - ok;
+      - nudge (steer);
+      - restart (stop the turn, then a queued resume message, in per-node FIFO order; a retry for failed agents);
+      - escalate (to the nearest supervisor that is alive: lead, then manager, then Orchestrator);
+      - human (a stalled card).
+    - Each agent is looked at once per stall window. No suspects means no tokens.

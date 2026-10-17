@@ -129,7 +129,7 @@ export function StudioPanel(props: {
   const forecastSet: StudioNode[] = useMemo(() => {
     if (nodes?.length) return nodes;
     const out: StudioNode[] = [];
-    for (const s of SLOT_DEFS) for (let i = 0; i < (bySlot?.[s.id] ?? 0); i++) out.push({ role: s.role, slot: s.id });
+    for (const s of SLOT_DEFS) if (s.role) for (let i = 0; i < (bySlot?.[s.id] ?? 0); i++) out.push({ role: s.role, slot: s.id });
     return out;
   }, [nodes, bySlot]);
   const fc = forecastNodes(forecastSet as Parameters<typeof forecastNodes>[0], slots, cat);

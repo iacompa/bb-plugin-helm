@@ -168,6 +168,10 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
   `bb helm ledger --limit 5` to confirm the receipt reaches `ack`.
 - **"Make all gates use model X"** → `bb helm models` to confirm the id, then
   `bb helm slots --slot review=… --slot slop=…` (or a `--slot` at plan time).
+- **Stuck agents / the Watcher**: with a `watcher` slot (a light model such as Haiku low),
+  Helm sends agents that look stuck to the Watcher. It nudges, restarts, or escalates them to
+  the nearest active supervisor; only what nobody can fix reaches the user. Add one mid-run
+  with `bb helm slots --slot watcher=<provider>/<model>:low`.
 - **Permission prompts**: by default an agent's prompts go to its supervisor, who answers
   with `helm_approve`. Only escalations (credentials, spending, private data, access), the
   Orchestrator's own prompts, and prompts unanswered for 15 minutes reach the user. Setting:

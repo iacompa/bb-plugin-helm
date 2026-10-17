@@ -3,6 +3,7 @@
 // The server makes no network calls of its own; it talks to BB through
 // bb.sdk and to the machine through Helm's host entry.
 
+import { WATCHER_INSTRUCTIONS, watcherRun } from "./src/server/engine/watch.ts";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { migrate, Repo, type SqlDb } from "./src/server/db/repo.ts";
 import { RealBB } from "./src/server/bb/real.ts";
@@ -98,6 +99,10 @@ export default async function plugin(bb: BbPluginApi) {
       const foreignOrigin = !!ctx.origin?.pluginId && ctx.origin.pluginId !== bb.pluginId;
       if (cand && !foreignOrigin && ((!cand.threadId && cand.status === "queued") || cand.threadId === ctx.thread.id)) node = cand;
     }
+    // the Watcher: a light model whose only tool is helm_watch (its id may not be stored yet on the first session)
+    const wm = readMeta({ helm: ctx.pluginMetadata.helm });
+    if (!node && (watcherRun(engine, ctx.thread.id) || (wm?.role === "watch" && wm.nodeId === "watch" && (!ctx.origin?.pluginId || ctx.origin.pluginId === bb.pluginId))))
+      return { tools: ["helm_watch"], skills: [], instructions: WATCHER_INSTRUCTIONS };
     if (!node) return { tools: [], skills: ["helm", "helm-planner"] };
     const role = ROLES[node.role];
     const parent = node.parentId ? repo.getNode(node.runId, node.parentId) : null;

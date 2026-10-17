@@ -65,6 +65,12 @@ export function createSimAgents(profileFor: (meta: HelmThreadMeta) => Profile = 
     if (/^(The human paused you|The human stopped)/.test(ctx.text)) return "paused";
     const role = meta.role;
     if (role === "planner") return planner(ctx, profile);
+    if (role === "watch") {
+      // the sim Watcher restarts every agent in the packet
+      const ids = [...ctx.text.matchAll(/^- id: (\S+)/gm)].map((x) => x[1]);
+      if (ids.length) await ctx.tool("helm_watch", { verdicts: ids.map((nodeId) => ({ nodeId, verdict: "restart", note: "no progress; resume from your last commit" })) });
+      return "idle";
+    }
     if (role === "orch" && !(await isAlsoLead(ctx))) return orchestrator(ctx);
     if (role === "mgr") return manager(ctx);
     if (role === "lead" || role === "orch") return lead(ctx, mm, log);

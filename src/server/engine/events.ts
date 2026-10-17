@@ -11,6 +11,7 @@ import { spendFromTokens } from "../domain/models.ts";
 import { isQuestion } from "../domain/directives.ts";
 import { nodeWorktree } from "./gates.ts";
 import { expirePrompts, getPrompt, rerouteOpenPrompts, routePrompt } from "./prompts.ts";
+import { sweep } from "./watch.ts";
 
 const TERMINAL = new Set(["done", "failed"]);
 const COMPACT_AT = 0.7;
@@ -243,6 +244,17 @@ export async function watchdog(e: Engine): Promise<{ nudged: string[]; stalled: 
   const now = e.now();
   for (const run of e.repo.activeRuns()) {
     const stallMs = run.limits.stallMinutes * 60_000;
+    // a run with a Watcher model hands suspects to it instead of nudging blindly
+    if (run.slots.watcher) {
+      try {
+        nudged.push(...(await sweep(e, run)));
+      } catch (err) {
+        e.log.warn(`watcher sweep for ${run.id} failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      if (expirePrompts(e, run.id, (n, i, note) => raiseInteractionNeed(e, n, i, note))) e.emit(run.id, "run.updated", { id: run.id });
+      e.proposeNextWave(run.id);
+      continue;
+    }
     for (const n of e.repo.nodesByStatus(run.id, ["running"])) {
       if (!n.threadId) continue;
       const last = n.lastActivityAt ?? n.spawnedAt ?? now;
@@ -251,7 +263,7 @@ export async function watchdog(e: Engine): Promise<{ nudged: string[]; stalled: 
       if (!flags.nudgedAt) {
         e.repo.tx(() => {
           e.repo.updateNode(run.id, n.id, { nudgedAt: now });
-          e.sendFromHelm(run.id, n.id, "status check: reply with helm_report (progress, blocked or done, with evidence).", { key: `nudge:${run.id}:${n.id}:${last}` });
+          e.sendFromHelm(run.id, n.id, "status check: reply with helm_report (progress, blocked or done, with evidence).", { mode: "steer", key: `nudge:${run.id}:${n.id}:${last}` });
           e.repo.event(run.id, n.id, "nudge", `no activity for ${Math.round((now - last) / 60_000)} min — nudged once`);
         });
         nudged.push(n.id);
