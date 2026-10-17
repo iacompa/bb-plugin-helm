@@ -283,6 +283,18 @@ export function StudioPanel(props: {
               </button>
             ) : null}
           </div>
+          {cur && !problem && !readOnly ? (
+            <div className="row" style={{ gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+              <button type="button" className="btn sm" onClick={() => change(everyRole(slots, required, () => true, cur))} title="Give every role this model">
+                Use for every role
+              </button>
+              {otherProviders(slots, cur.providerId).map((p) => (
+                <button key={p} type="button" className="btn sm" onClick={() => change(everyRole(slots, required, (r) => r.providerId === p, cur))} title={`Every role on ${providerLabel(cat, p)} gets this model — for when that provider is out of usage or down`}>
+                  Use instead of {providerLabel(cat, p)} everywhere
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
         <CatalogList key={sel} catalog={cat} value={cur} onPick={(m) => !readOnly && setSlot(sel, pickRef(m, cur))} />
         <div className="cat-foot">
@@ -339,6 +351,25 @@ export function StudioPanel(props: {
   );
 }
 
+/** `slots` with `to` in every role whose model matches (roles without a model count when required). */
+export function everyRole(slots: SlotMap, required: SlotId[], match: (r: ModelRef) => boolean, to: ModelRef): SlotMap {
+  const next: SlotMap = { ...slots };
+  for (const s of SLOT_DEFS) {
+    const r = slots[s.id];
+    if (r ? match(r) : required.includes(s.id) && match(to)) next[s.id] = { ...to };
+  }
+  return next;
+}
+
+/** Providers the slots use, other than `except`. */
+export function otherProviders(slots: SlotMap, except: string): string[] {
+  return [...new Set(Object.values(slots).flatMap((r) => (r && r.providerId !== except ? [r.providerId] : [])))];
+}
+
+function providerLabel(cat: ReturnType<typeof useHelm>["catalog"], id: string): string {
+  return cat?.providers.find((p) => p.id === id)?.label ?? id;
+}
+
 // ───────────── the modal ─────────────
 
 export function StudioModal() {
@@ -352,7 +383,7 @@ function StudioModalInner() {
   const run = h.data?.run ?? null;
   const base: SlotMap = run?.slots ?? {};
   const [draft, setDraft] = useState<SlotMap>(() => JSON.parse(JSON.stringify(base)) as SlotMap);
-  const [scope, setScope] = useState<"future" | "all">("future");
+  const [scope, setScope] = useState<"future" | "all">(() => (run && run.status !== "planning" ? "all" : "future"));
   const [problems, setProblems] = useState<Array<{ slot: string; message: string }>>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -362,7 +393,11 @@ function StudioModalInner() {
   const readOnly = !run || !!finished;
   const changes = changedSlots(draft, base);
   const started = run && run.status !== "planning";
-  const existing = changes.reduce((a, id) => a + nodes.filter((n) => n.slot === id && n.threadId && !n.modelOverride && !["done", "idle", "failed"].includes(n.status)).length, 0);
+  // "all" reaches every agent in the changed roles that is not done, per-agent overrides and failed agents included
+  const inRoles = nodes.filter((n) => changes.includes(n.slot) && n.status !== "done");
+  const existing = inRoles.filter((n) => n.threadId || n.status === "failed").length;
+  const moving = inRoles.filter((n) => n.threadId && n.model && draft[n.slot] && n.model.providerId !== draft[n.slot]!.providerId).length;
+  const failed = inRoles.filter((n) => n.status === "failed").length;
   const kept = changes.reduce((a, id) => a + nodes.filter((n) => n.slot === id && n.modelOverride).length, 0);
 
   const apply = async () => {
@@ -381,11 +416,14 @@ function StudioModalInner() {
         await h.rpc.call("run_setSlots", { runId: run.id, slots: changed });
         toast.success("Model Studio updated", { description: "The plan uses the new models when the run starts." });
       } else {
-        const text = `Model Studio — ${changes.map((id) => `${slotName(id)}: ${modelText(h.catalog, draft[id])}`).join("; ")} (${scope === "all" ? "future spawns and running agents’ next turn" : "future spawns"})`;
+        const text = `Model Studio — ${changes.map((id) => `${slotName(id)}: ${modelText(h.catalog, draft[id])}`).join("; ")} (${scope === "all" ? "every agent in these roles, now" : "future spawns"})`;
         const d = (await h.rpc.call("directive_create", { runId: run.id, directive: { type: "slots", target: "orch", slots: changed, slotsScope: scope, text } })) as DirectiveInfo;
         if (d?.id) h.firePulse(d);
         toast.success("Model Studio updated", {
-          description: scope === "all" ? `${plural(existing, "agent")} switch on their next turn. Orchestrator, managers and leads were told.` : "Future spawns use the new models. Orchestrator, managers and leads were told.",
+          description:
+            scope === "all"
+              ? `${plural(existing, "agent")} move to the new models${moving ? ` (${moving} restart in a new thread on the other provider)` : ""}${failed ? `; ${plural(failed, "failed agent")} retried` : ""}. Orchestrator, managers and leads were told.`
+              : "Future spawns use the new models. Orchestrator, managers and leads were told.",
         });
       }
       h.refetch();
@@ -441,14 +479,14 @@ function StudioModalInner() {
                     onChange={setScope}
                     options={[
                       ["future", "New agents only"],
-                      ["all", `Also running agents’ next turn${existing ? ` (${existing})` : ""}`],
+                      ["all", `Every agent in these roles, now${existing ? ` (${existing})` : ""}`],
                     ]}
                     style={{ alignSelf: "flex-start" }}
                   />
                   <span className="hint-t">
                     {scope === "all"
-                      ? `Existing agents switch on their next turn — nothing restarts.${kept ? ` ${plural(kept, "per-agent override")} ${kept === 1 ? "is" : "are"} kept.` : ""}`
-                      : "Agents already running keep their model. The Orchestrator and leads are told what future spawns will use."}
+                      ? `Agents on the same provider switch on their next turn. ${moving ? `${plural(moving, "agent")} on another provider restart${moving === 1 ? "s" : ""} in a new thread, in the same workspace with a hand-over (BB can't change a thread's provider). ` : "Agents on another provider restart in a new thread, in the same workspace with a hand-over. "}${failed ? `${plural(failed, "failed agent")} ${failed === 1 ? "is" : "are"} retried. ` : ""}${kept ? `${plural(kept, "per-agent override")} in these roles ${kept === 1 ? "is" : "are"} replaced.` : ""}`
+                      : `Agents already running keep their model.${kept ? ` ${plural(kept, "per-agent override")} ${kept === 1 ? "is" : "are"} kept.` : ""} The Orchestrator and leads are told what future spawns will use.`}
                   </span>
                 </>
               ) : (

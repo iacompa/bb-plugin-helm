@@ -160,3 +160,11 @@ The open decisions from the brief (§17.2) took their defaults. Where reality on
 
     Sign-off, failures, model problems, BB permission prompts and the budget cap still reach the human: the budget cap is the guard on spending. Switching autonomy on mid-run pushes the rule to every live agent as an FYI line, so it costs no extra turn. Role skills and briefs carry the rule. `test/sim/autonomy.test.ts` covers this, and the 20-app test now pins `ask`, because it covers wave approvals.
 
+
+35. **Model changes cross providers (user report).** A provider ran out of usage. The user switched agents to another provider, but they kept failing. BB's `threads.update` refuses a model from another provider ("changing providers requires starting a new thread"). Helm still recorded the new model, so the panel showed the new provider while each thread stayed on the old one.
+    - Before a model or slots change, Helm reads each affected thread's real provider (`ThreadState.providerId`). Same provider: `updateThread`, from the next turn, as before.
+    - Another provider: `replaceThreadTx`. The old thread is stopped, not archived, because it may own child threads; it is archived when the run ends (`retired:<run>`). The node is queued first in line. The new thread reuses the old environment (`reuse:<run>:<node>`), so uncommitted work stays, and gets a hand-over saying so. If that environment is gone, it starts from the integration branch.
+    - A stopped (idle) agent switches when it is retried. If `updateThread` still refuses (unknown provider), `handleUpdate` falls back to a replacement.
+    - Slots with scope `all` ("Every agent in these roles, now", now the default mid-run) also move per-agent overrides and failed agents, and retry the failed ones. The Model Studio adds **Use for every role** and **Use instead of <provider> everywhere**. The CLI adds `bb helm slots --slot role=… | --replace <provider> --with provider/model:level [--future]`.
+
+    `test/sim/model-switch.test.ts` covers this.

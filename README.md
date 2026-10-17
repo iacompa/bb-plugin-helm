@@ -50,6 +50,7 @@ bb helm status
 bb helm needs                     # approvals, questions, failures, sign-offs
 bb helm tell <agent> --message-file note.md
 bb helm model <agent> --model claude-sonnet-5-5 --provider claude-code --reasoning medium
+bb helm slots --replace codex --with claude-code/claude-sonnet-5-5:high   # a provider ran out: move every role off it now
 bb helm stop <agent>              # bottom-up, subtree by default
 bb helm signoff <app>
 bb helm ledger                    # every change with its receipts

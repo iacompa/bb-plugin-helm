@@ -287,6 +287,7 @@ export class RealBB implements BbPort {
       threadId,
       status: t.status,
       archived: !!t.archivedAt,
+      providerId: t.providerId ?? null,
       environmentId: t.environmentId,
       hostId: env?.hostId ?? null,
       path: env?.path ?? null,

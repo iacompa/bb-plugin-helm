@@ -99,6 +99,14 @@ export async function createDirective(e: Engine, runId: string, input: Directive
   }
   const cat = await e.catalog(e.repo.runHost(runId)).catch(() => null);
   const mname = (r: ModelRef | null | undefined) => modelName(cat, r);
+  // BB cannot move a thread to another provider: read each affected thread's real provider first
+  const threadProvider = new Map<string, string | null>();
+  if (type === "model" || (type === "slots" && input.slotsScope === "all")) {
+    const changedSlots = Object.keys(input.slots ?? {});
+    const ids = type === "model" ? new Set(resolveCascade(e.tree(runId), target.id, cascade)) : null;
+    const live = e.repo.listNodes(runId).filter((n) => n.threadId && n.status !== "done" && (ids ? ids.has(n.id) : changedSlots.includes(n.slot)));
+    await Promise.all(live.map(async (n) => threadProvider.set(n.id, (await e.port.threadState(n.threadId!).catch(() => null))?.providerId ?? null)));
+  }
 
   const out = e.repo.tx(() => {
     const seq = e.repo.nextSeq(runId, "directive");
@@ -111,6 +119,23 @@ export async function createDirective(e: Engine, runId: string, input: Directive
     let modelFrom: ModelRef | null = null;
     let briefVersion = target.briefVersion;
     const follow: Array<() => void> = [];
+    /** Give a node a model now: same provider switches in place, another provider gets a new thread. */
+    const switchModel = (n: NodeInfo, m: ModelRef, override: boolean): "recorded" | "updated" | "replaced" | "deferred" => {
+      e.repo.updateNode(runId, n.id, { model: m, modelOverride: override, providerId: m.providerId });
+      if (!n.threadId || n.status === "done") return "recorded";
+      const on = threadProvider.get(n.id) ?? n.model?.providerId ?? null;
+      if (on && on !== m.providerId) {
+        // a stopped agent switches when it is retried; any other agent moves now
+        if (n.status === "idle") {
+          e.repo.setMeta(`switch:${runId}:${n.id}`, "1");
+          return "deferred";
+        }
+        e.replaceThreadTx(runId, n, `model moved from ${on} to ${m.providerId}`, id);
+        return "replaced";
+      }
+      e.repo.enqueue({ id: e.oid(), runId, kind: "update", nodeId: n.id, payload: { model: m.modelId, reasoningLevel: m.reasoning }, idemKey: `${id}:update:${n.id}` });
+      return "updated";
+    };
 
     // ── effects ──
     switch (type) {
@@ -118,8 +143,7 @@ export async function createDirective(e: Engine, runId: string, input: Directive
         modelFrom = target.model;
         for (const nid of affected) {
           const n = nodes.get(nid)!;
-          e.repo.updateNode(runId, nid, { model: input.modelTo!, modelOverride: true, providerId: input.modelTo!.providerId });
-          if (n.threadId) e.repo.enqueue({ id: e.oid(), runId, kind: "update", nodeId: nid, payload: { model: input.modelTo!.modelId, reasoningLevel: input.modelTo!.reasoning }, idemKey: `${id}:update:${nid}` });
+          switchModel(n, input.modelTo!, true);
           e.repo.event(runId, nid, "model", `${mname(n.model)} → ${mname(input.modelTo)}`, id);
         }
         break;
@@ -174,7 +198,10 @@ export async function createDirective(e: Engine, runId: string, input: Directive
         for (const nid of affected) {
           const n = nodes.get(nid)!;
           if (!["failed", "idle", "needs"].includes(n.status)) continue;
-          if (n.threadId && THREAD_GONE.test(n.warning ?? "")) {
+          if (n.threadId && e.repo.getMeta(`switch:${runId}:${nid}`)) {
+            // its model moved to another provider while it was stopped: a new thread takes over
+            e.replaceThreadTx(runId, n, "retry on another provider", id);
+          } else if (n.threadId && THREAD_GONE.test(n.warning ?? "")) {
             // its thread is missing or was archived outside Helm: a new thread takes over, with a hand-over
             e.repo.updateNode(runId, nid, { status: "queued", threadId: null, environmentId: null, branch: null, firstInLine: true, warning: null, endedAt: null });
             e.repo.event(runId, nid, "respawn", `retry: previous thread ${n.threadId} is gone; a new thread takes over`);
@@ -199,14 +226,22 @@ export async function createDirective(e: Engine, runId: string, input: Directive
         const slots = { ...run.slots, ...(input.slots ?? {}) };
         e.repo.updateRun(runId, { slots });
         const changed = Object.keys(input.slots ?? {}) as SlotId[];
+        // "all": every agent in these roles moves now, per-agent overrides included, and failed ones retry
+        const now = input.slotsScope === "all";
         for (const n of nodes.values()) {
-          if (n.modelOverride || !changed.includes(n.slot)) continue;
+          if (!changed.includes(n.slot) || n.status === "done" || (n.modelOverride && !now)) continue;
           const m = slots[n.slot] ?? null;
           if (!m) continue;
-          if (!n.threadId) e.repo.updateNode(runId, n.id, { model: m, providerId: m.providerId });
-          else if (input.slotsScope === "all" && !TERMINAL.has(n.status)) {
-            e.repo.updateNode(runId, n.id, { model: m, providerId: m.providerId });
-            e.repo.enqueue({ id: e.oid(), runId, kind: "update", nodeId: n.id, payload: { model: m.modelId, reasoningLevel: m.reasoning }, idemKey: `${id}:update:${n.id}` });
+          if (!n.threadId) {
+            e.repo.updateNode(runId, n.id, { model: m, providerId: m.providerId, modelOverride: false, ...(now && n.status === "failed" ? { status: "queued" as const, firstInLine: true, warning: null } : {}) });
+            continue;
+          }
+          if (!now) continue;
+          const r = switchModel(n, m, false);
+          if (r === "updated" && n.status === "failed") {
+            e.repo.updateNode(runId, n.id, { status: "running", endedAt: null, lastActivityAt: ts, nudgedAt: null, warning: null });
+            e.repo.enqueue({ id: e.oid(), runId, kind: "retry", nodeId: n.id, payload: {}, idemKey: `${id}:retry:${n.id}` });
+            for (const need of e.repo.openNeedsFor(runId, n.id)) if (need.kind === "failed") e.repo.resolveNeed(runId, need.id, { action: "retry", text: "retried on the new model" });
           }
         }
         break;

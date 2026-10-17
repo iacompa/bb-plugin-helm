@@ -719,10 +719,11 @@ export async function completeRun(e: Engine, runId: string, status: "done" | "ca
       if (!["done", "failed"].includes(n.status)) e.repo.updateNode(runId, id, { status: n.threadId ? "idle" : n.status === "planned" ? "planned" : "idle", endedAt: e.now() });
     }
     const withThread = order.filter((id) => e.repo.getNode(runId, id)?.threadId);
-    if (withThread.length) {
-      // same nodeId so the per-node FIFO runs stop before archive
-      e.repo.enqueue({ id: e.oid(), runId, kind: "stop", nodeId: "orch", payload: { nodeIds: withThread }, idemKey: `stopall:${runId}` });
-      e.repo.enqueue({ id: e.oid(), runId, kind: "archive", nodeId: "orch", payload: { nodeIds: withThread }, idemKey: `archiveall:${runId}` });
+    const retired = e.retiredThreads(runId);
+    if (withThread.length || retired.length) {
+      // same nodeId so the per-node FIFO runs stop before archive; replaced threads go too
+      e.repo.enqueue({ id: e.oid(), runId, kind: "stop", nodeId: "orch", payload: { nodeIds: withThread, threadIds: retired }, idemKey: `stopall:${runId}` });
+      e.repo.enqueue({ id: e.oid(), runId, kind: "archive", nodeId: "orch", payload: { nodeIds: withThread, threadIds: retired }, idemKey: `archiveall:${runId}` });
     }
     e.repo.updateRun(runId, { status, endedAt: e.now() });
     for (const need of e.repo.listNeeds(runId, "open")) e.repo.resolveNeed(runId, need.id, { action: "run-ended" });

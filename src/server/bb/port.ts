@@ -46,6 +46,8 @@ export interface ThreadState {
   threadId: string;
   status: "active" | "error" | "idle" | "pending" | "starting" | "stopping";
   archived: boolean;
+  /** The provider the thread runs on; BB cannot change it on an existing thread. */
+  providerId: string | null;
   environmentId: string | null;
   hostId: string | null;
   path: string | null;

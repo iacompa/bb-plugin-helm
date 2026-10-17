@@ -85,6 +85,7 @@ export interface SimThread {
   archived: boolean;
   visibility: "hidden" | "visible";
   meta: HelmThreadMeta | null;
+  providerId: string;
   model: string;
   reasoning: string | null;
   ownerId: string | null;
@@ -229,7 +230,8 @@ export class SimBB implements BbPort {
     this.maybeFail("spawnThread");
     const project = this.projects.get(spec.projectId);
     if (!project) throw new Error(`HTTP 404: project ${spec.projectId}`);
-    const envId = this.id("env");
+    // reusing an environment keeps its id, like BB
+    const envId = spec.environment.kind === "reuse" ? spec.environment.environmentId : this.id("env");
     let path: string;
     let branch: string | null;
     if (spec.environment.kind === "worktree") {
@@ -256,6 +258,7 @@ export class SimBB implements BbPort {
       archived: false,
       visibility: spec.visibility,
       meta: spec.meta,
+      providerId: spec.model.providerId,
       model: spec.model.modelId,
       reasoning: spec.model.reasoning,
       ownerId: spec.lifecycleOwnerThreadId,
@@ -374,6 +377,7 @@ export class SimBB implements BbPort {
     this.maybeFail("updateThread");
     const t = this.threads.get(args.threadId);
     if (!t) throw new Error("HTTP 404");
+    if (args.model && !this.catalogData.models.some((m) => m.providerId === t.providerId && m.id === args.model)) throw new Error(`HTTP 400: Model "${args.model}" is not available in this thread's ${t.providerId} model catalog; changing providers requires starting a new thread`);
     if (args.model) t.model = args.model;
     if (args.reasoningLevel !== undefined) t.reasoning = args.reasoningLevel;
     if (args.title) t.title = args.title;
@@ -427,7 +431,7 @@ export class SimBB implements BbPort {
     const t = this.threads.get(threadId);
     if (!t) return null;
     const env = this.envs.get(t.environmentId);
-    return { threadId, status: t.status, archived: t.archived, environmentId: t.environmentId, hostId: this.hostId, path: env?.path ?? null, branch: env?.branch ?? null, hasPendingInteraction: t.interactions.length > 0 };
+    return { threadId, status: t.status, archived: t.archived, providerId: t.providerId, environmentId: t.environmentId, hostId: this.hostId, path: env?.path ?? null, branch: env?.branch ?? null, hasPendingInteraction: t.interactions.length > 0 };
   }
 
   async environment(environmentId: string): Promise<EnvInfo | null> {
@@ -484,7 +488,7 @@ export class SimBB implements BbPort {
   }
   /** A thread the human made themselves (for the Observatory). */
   addForeignThread(title: string): SimThread {
-    const t: SimThread = { id: this.id("thr"), projectId: "proj_user", environmentId: "", title, status: "idle", archived: false, visibility: "visible", meta: null, model: "claude-sonnet-5-5", reasoning: null, ownerId: null, parentThreadId: null, queue: [], turns: 0, tokens: 0, lastText: null, interactions: [], turnToken: 0, failures: 0, createdAt: this.now() };
+    const t: SimThread = { id: this.id("thr"), projectId: "proj_user", environmentId: "", title, status: "idle", archived: false, visibility: "visible", meta: null, providerId: "claude-code", model: "claude-sonnet-5-5", reasoning: null, ownerId: null, parentThreadId: null, queue: [], turns: 0, tokens: 0, lastText: null, interactions: [], turnToken: 0, failures: 0, createdAt: this.now() };
     this.threads.set(t.id, t);
     return t;
   }

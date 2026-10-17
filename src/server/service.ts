@@ -222,6 +222,27 @@ export class HelmService {
     return this.engine.run(runId);
   }
 
+  /**
+   * Change which model roles use. A planned run just records it; a started run applies it
+   * through a slots directive: "all" moves every agent in those roles now (another provider
+   * means a new thread in the same workspace; failed agents retry), "future" only new spawns.
+   */
+  async changeSlots(runId: string, slots: SlotMap, scope: "all" | "future" = "all"): Promise<{ run: RunInfo; directive: DirectiveInfo | null }> {
+    const ids = Object.keys(slots);
+    if (!ids.length) throw new HelmError("Name at least one role and its model.", "invalid_value");
+    const cat = await this.engine.catalog(this.repo.runHost(runId));
+    for (const [slot, ref] of Object.entries(slots)) {
+      const p = validateRef(cat, ref!);
+      if (p) throw new HelmError(`${slot}: ${p.message}`, "invalid_value");
+    }
+    const run = this.engine.run(runId);
+    if (run.status === "planning") return { run: await this.setSlots(runId, slots), directive: null };
+    if (run.status === "done" || run.status === "cancelled") throw new HelmError(`${run.name} is ${run.status}; its models can no longer change.`, "bad_state");
+    const text = `Models — ${ids.map((id) => `${id}: ${modelName(cat, slots[id as SlotId])}`).join("; ")} (${scope === "all" ? "every agent in these roles, now" : "future spawns"})`;
+    const directive = await this.directive(runId, { type: "slots", target: ORCH_ID, slots, slotsScope: scope, text });
+    return { run: this.engine.run(runId), directive };
+  }
+
   async start(runId: string, opts: { dryRun?: boolean } = {}) {
     const r = await this.engine.startRun(runId, { dryRun: opts.dryRun });
     return { ...r, run: this.engine.run(runId) };

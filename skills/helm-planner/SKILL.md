@@ -98,8 +98,9 @@ Orchestrator ─┬─ Manager (only when there are more than 4 apps; about 4 ap
   what the scanner can't. An app is Ready only when both pass the same commit, and only the
   user signs it off.
 - **Model swap**: any agent's model can be changed mid-run with
-  `bb helm model <node> --model … --provider … --reasoning …`. It applies from its next turn
-  and is recorded as a human override.
+  `bb helm model <node> --model … --provider … --reasoning …`, or for whole roles
+  `bb helm slots --slot role=… / --replace <provider> --with …`. The same provider applies from
+  the next turn. Another provider respawns the agent in its workspace with a hand-over.
 
 Agents per app = 1 lead + squad + 2 gates (with one app, the Orchestrator is the lead). For example,
 one lean single-platform app = Orchestrator + UI + Core + Reviewer + Slop Hunter = **5 agents**.

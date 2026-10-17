@@ -93,6 +93,7 @@ bb helm start <runId> --yes          # approve and start (no prompt)
 ```bash
 bb helm tell <node> --message-file f.md [--cascade self|reports|subtree] [--mode steer|queue] [--policy]
 bb helm model <node> --model <id> [--provider <id>] [--reasoning <level>]
+bb helm slots [--slot role=provider/model:level ...] [--replace <provider> --with provider/model:level] [--future]
 bb helm pause|resume|stop|retry <node> [--cascade self|reports|subtree]
 bb helm priority <app|node> low|normal|high
 ```
@@ -103,8 +104,15 @@ bb helm priority <app|node> low|normal|high
   policy (`P-n`) for that subtree: injected into future agents' briefs and `helm_context`.
   Every affected agent must `helm_ack` it; its parent gets the full notice; higher
   ancestors a digest line.
-- `model` — applies from the agent's next turn and marks it as a human override; agents are
-  told not to revert it.
+- `model` — marks a human override; agents are told not to revert it. On the same provider
+  it applies from the agent's next turn. On another provider BB needs a new thread: Helm stops
+  the old one and respawns the agent in the same workspace with a hand-over. A stopped agent
+  switches when retried.
+- `slots` — which model each role uses (orchestrator, manager, lead, ui, code, platform, …).
+  By default every agent in those roles moves now, including per-agent overrides and failed
+  agents, which are retried. `--future` changes only new spawns. `--replace codex --with …`
+  moves every role off a provider that is out of usage or down. With no flags, it prints the
+  current models by role. The model choice is the user's: ask which model, don't pick one.
 - `pause` holds an agent after its current step (Helm-implemented; only `resume` or `stop`
   wakes it). `stop` ends it (bottom-up with a cascade). `retry` re-runs a failed/stalled one.
 - `priority` feeds the scheduler; `high` work starts first when capacity is short.
@@ -159,7 +167,10 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N]   # show or change a 
   quoted heredoc, `bb helm tell frame.lead --message-file "$f"`, then
   `bb helm ledger --limit 5` to confirm the receipt reaches `ack`.
 - **"Make all gates use model X"** → `bb helm models` to confirm the id, then
-  `bb helm model <app>.review --model … --provider …` per gate (or a `--slot` at plan time).
+  `bb helm slots --slot review=… --slot slop=…` (or a `--slot` at plan time).
+- **"We're out of usage on Codex, move everything to X"** → `bb helm models` to confirm X's
+  id, then `bb helm slots --replace codex --with <provider>/<model>:<level>`. Then
+  `bb helm needs` to check that the failed cards closed.
 - **"Sign off Tide"** → `bb helm needs` (find the sign-off item, read its evidence and
   unverified notes to the user), confirm, `bb helm signoff tide`.
 

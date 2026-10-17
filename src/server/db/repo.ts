@@ -123,6 +123,9 @@ export class Repo {
   setMeta(key: string, value: string): void {
     this.run("INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
   }
+  deleteMeta(key: string): void {
+    this.run("DELETE FROM meta WHERE key = ?", key);
+  }
 
   // ───────────── runs ─────────────
   private toRun(r: Row): RunInfo {

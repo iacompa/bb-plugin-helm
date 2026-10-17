@@ -5,7 +5,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { cliCommand, defineCli, PluginCliError, type PluginCliContext, type PluginCliResult } from "@get-bb/plugin-sdk";
-import type { Cascade, Portfolio, Priority } from "../shared/types.ts";
+import type { Cascade, Portfolio, Priority, SlotId, SlotMap } from "../shared/types.ts";
 import { Planner } from "./engine/planner.ts";
 import { HelmError } from "./engine/engine.ts";
 import { parseSlotArg, type HelmService } from "./service.ts";
@@ -222,6 +222,35 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             if (!providerId) throw new PluginCliError("Say which provider with --provider.", { code: "missing_required" });
             const d = await svc.directive(run.id, { type: "model", target: node.id, cascade: i.options.cascade as Cascade | undefined, modelTo: { providerId, modelId: i.options.model, reasoning: i.options.reasoning ?? cur?.reasoning ?? null } });
             return out(i.options.json, { directive: d }, `${d.id}: ${d.summary}`);
+          }),
+      }),
+      slots: cliCommand({
+        summary: "Change which model each role uses, mid-run: every agent in those roles moves now (another provider gets a new thread in the same workspace; failed agents retry)",
+        options: {
+          run: RUN,
+          slot: { type: "string", repeatable: true, description: "role=provider/model:reasoning, e.g. ui=claude-code/claude-sonnet-5-5:high (repeatable)" },
+          replace: { type: "string", description: "Provider id to move off (out of usage or down): every role on it gets --with" },
+          with: { type: "string", description: "provider/model:reasoning for --replace" },
+          future: { type: "boolean", description: "Only agents spawned from now on; existing agents keep their models" },
+          json: JSON_OPT,
+        },
+        run: (i) =>
+          guard(async () => {
+            const run = runOf(i.options.run);
+            const slots: SlotMap = Object.fromEntries((i.options.slot ?? []).map(parseSlotArg));
+            if (i.options.replace) {
+              if (!i.options.with) throw new PluginCliError("Say which model replaces it with --with provider/model:reasoning.", { code: "missing_required" });
+              const to = parseSlotArg(`code=${i.options.with}`)[1];
+              const hit = Object.entries(run.slots).filter(([, r]) => r?.providerId === i.options.replace);
+              if (!hit.length) throw new PluginCliError(`No role of ${run.name} uses ${i.options.replace}.`, { code: "not_found", hint: `Roles use: ${[...new Set(Object.values(run.slots).map((r) => r?.providerId))].filter(Boolean).join(", ")}` });
+              for (const [id] of hit) slots[id as SlotId] ??= to;
+            }
+            if (!Object.keys(slots).length) {
+              const cur = Object.entries(run.slots).map(([id, r]) => `  ${id.padEnd(13)} ${r ? `${r.providerId}/${r.modelId}${r.reasoning ? `:${r.reasoning}` : ""}` : "(none)"}`);
+              return out(i.options.json, { slots: run.slots }, [`${run.name} — models by role:`, ...cur, "Change with --slot role=provider/model:reasoning, or --replace <provider> --with provider/model:reasoning."].join("\n"));
+            }
+            const r = await svc.changeSlots(run.id, slots, i.options.future ? "future" : "all");
+            return out(i.options.json, r, r.directive ? `${r.directive.id}: ${r.directive.summary}` : `${run.name} is still a plan: its roles now use the new models.`);
           }),
       }),
       pause: lifecycle("pause", "Pause an agent (and its subtree by default)"),

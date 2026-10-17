@@ -674,14 +674,47 @@ export class Engine {
   /** What a replacement thread needs from its predecessor, from Helm's own records (never a transcript). */
   handoverFor(runId: string, nodeId: string): string | null {
     const reps = this.repo.reportsFor(runId, nodeId, 8);
-    if (!reps.length) return null;
-    const lines = ["Helm's record of the previous thread in this role (newest first):"];
+    const lines: string[] = [];
+    if (this.repo.getMeta(`reuse:${runId}:${nodeId}`))
+      lines.push("You replace a thread that ran on another model, in the same workspace. Run `git status` and `git log` first: uncommitted changes there are your predecessor's work in progress — keep and finish them, do not start over.");
+    if (!reps.length) return lines.length ? lines.join("\n") : null;
+    lines.push("Helm's record of the previous thread in this role (newest first):");
     for (const r of reps.slice(0, 5)) {
       const ev = r.evidence.map((x) => `${x.kind} ${x.ref.slice(0, 12)}`).join(", ");
       lines.push(`- ${r.status}${r.verified ? "" : " (unverified)"}: ${r.summary.slice(0, 220)}${ev ? ` [${ev}]` : ""}`);
     }
     lines.push("Verified commits above are on the integration branch or your predecessor's branch: check with git before redoing work.");
     return lines.join("\n");
+  }
+
+  /**
+   * Move a node to a new thread. BB cannot change an existing thread's provider, so a
+   * model on another provider needs one. The old thread is stopped (not archived: it may
+   * own child threads) and archived when the run ends; the new thread continues in the
+   * same workspace with a hand-over. Call inside a transaction; the pump spawns it.
+   */
+  replaceThreadTx(runId: string, n: NodeInfo, why: string, key: string): void {
+    if (!n.threadId) return;
+    const old = n.threadId;
+    const envId = this.repo.nodeEnvironment(runId, n.id);
+    if (envId) this.repo.setMeta(`reuse:${runId}:${n.id}`, envId);
+    this.repo.deleteMeta(`switch:${runId}:${n.id}`);
+    this.repo.setMeta(`retired:${runId}`, JSON.stringify([...this.retiredThreads(runId), old]));
+    const paused = n.status === "paused";
+    this.repo.updateNode(runId, n.id, { status: paused ? "paused" : "queued", prevStatus: paused ? "queued" : null, threadId: null, firstInLine: true, warning: null, endedAt: null, nudgedAt: null });
+    this.repo.enqueue({ id: this.oid(), runId, kind: "stop", nodeId: n.id, payload: { threadIds: [old] }, idemKey: `${key}:stop:${n.id}` });
+    for (const need of this.repo.openNeedsFor(runId, n.id)) if (need.kind === "failed" || need.kind === "stalled") this.repo.resolveNeed(runId, need.id, { action: "replaced", text: why });
+    this.repo.event(runId, n.id, "respawn", `${why}: thread ${old} stops and a new thread takes over in the same workspace`);
+  }
+
+  /** Threads Helm replaced in this run; they are archived when the run ends. */
+  retiredThreads(runId: string): string[] {
+    try {
+      const v: unknown = JSON.parse(this.repo.getMeta(`retired:${runId}`) ?? "[]");
+      return Array.isArray(v) ? v.map(String) : [];
+    } catch {
+      return [];
+    }
   }
 
   /** Autonomy is high: the Orchestrator decides what does not need the human (see HUMAN_ONLY). */
@@ -875,6 +908,9 @@ export class Engine {
     }
     const app = n.appId ? this.repo.getApp(run.id, n.appId) : c1 ? this.repo.listApps(run.id)[0] ?? null : null;
     if (!app?.projectId) return { wait: "app repository" };
+    // a replacement thread (another provider) continues in its predecessor's workspace
+    const reuse = this.repo.getMeta(`reuse:${run.id}:${n.id}`);
+    if (reuse) return { kind: "reuse", environmentId: reuse };
     const integration = this.repo.appExtra(run.id, app.id).integrationBranch;
     // a lead's first thread starts the integration branch; a replacement lead continues from it
     if (this.isLeadNode(n)) return { kind: "worktree", hostId, baseBranch: integration ?? app.helmBranch ?? null };
@@ -905,8 +941,14 @@ export class Engine {
       }
     }
     const hostId = this.repo.runHost(run.id);
-    const env = this.envFor(run, n, hostId);
+    let env = this.envFor(run, n, hostId);
     if ("wait" in env) return { defer: DEFER_SHORT, reason: `waiting for ${env.wait}` };
+    if (env.kind === "reuse" && !(await this.port.environment(env.environmentId).catch(() => null))) {
+      // the predecessor's workspace is gone: start from the integration branch like any new thread
+      this.repo.deleteMeta(`reuse:${run.id}:${n.id}`);
+      env = this.envFor(run, n, hostId);
+      if ("wait" in env) return { defer: DEFER_SHORT, reason: `waiting for ${env.wait}` };
+    }
     const projectId = this.projectFor(run, n)!;
     // validate the model at spawn; never substitute (§7.4)
     const model = n.model ?? this.effectiveModel(run, n);
@@ -954,7 +996,8 @@ export class Engine {
     }
     const threadId = ref.threadId;
     this.repo.tx(() => {
-      this.repo.updateNode(run.id, n.id, { threadId, environmentId: ref!.environmentId, status: "running", spawnedAt: this.now(), lastActivityAt: this.now(), firstInLine: false, model, providerId: model.providerId, prevStatus: null });
+      this.repo.deleteMeta(`reuse:${run.id}:${n.id}`);
+      this.repo.updateNode(run.id, n.id, { ...(env.kind === "reuse" ? {} : { branch: null }), threadId, environmentId: ref!.environmentId, status: "running", spawnedAt: this.now(), lastActivityAt: this.now(), firstInLine: false, model, providerId: model.providerId, prevStatus: null });
       // directives stored before spawn were in the prompt: they are delivered now (§6.3)
       for (const d of this.repo.directivesBeforeSpawn(run.id, n.id)) this.repo.updateRecipient(run.id, d.id, n.id, { state: "delivered", deliveredAt: this.now() });
       this.repo.event(run.id, n.id, adopted ? "adopted" : "spawned", `${adopted ? "adopted existing thread" : "spawned"} on ${modelName(cat, model)}`, threadId);
@@ -1059,18 +1102,30 @@ export class Engine {
   private async handleUpdate(row: OutboxRow): Promise<HandlerResult> {
     const n = this.repo.getNode(row.runId, String(row.nodeId));
     if (!n?.threadId) return { done: true, result: { skipped: "no thread — applies at spawn" } };
-    await this.port.updateThread({ threadId: n.threadId, model: row.payload.model as string | undefined, reasoningLevel: (row.payload.reasoningLevel as string | null | undefined) ?? undefined });
+    try {
+      await this.port.updateThread({ threadId: n.threadId, model: row.payload.model as string | undefined, reasoningLevel: (row.payload.reasoningLevel as string | null | undefined) ?? undefined });
+    } catch (err) {
+      // the thread is on another provider than the new model: only a new thread can switch
+      if (!/changing providers|model catalog/i.test(String(err))) throw err;
+      this.repo.tx(() => {
+        const fresh = this.repo.getNode(row.runId, n.id);
+        if (fresh?.threadId === n.threadId && fresh.status !== "done") this.replaceThreadTx(row.runId, fresh, "the new model is on another provider", row.id);
+      });
+      this.emit(row.runId, "node.updated", this.repo.getNode(row.runId, n.id));
+      await this.pump(row.runId);
+      return { done: true, result: { replaced: true } };
+    }
     return { done: true };
   }
 
   private async handleStop(row: OutboxRow): Promise<HandlerResult> {
-    const ids = (row.payload.nodeIds as string[] | undefined) ?? [String(row.nodeId)];
-    for (const id of ids) {
-      const n = this.repo.getNode(row.runId, id);
-      if (!n?.threadId) continue;
-      const st = await this.port.threadState(n.threadId);
+    const byThread = (row.payload.threadIds as string[] | undefined) ?? [];
+    const ids = (row.payload.nodeIds as string[] | undefined) ?? (byThread.length ? [] : [String(row.nodeId)]);
+    const threads = [...ids.map((id) => this.repo.getNode(row.runId, id)?.threadId ?? null).filter((t): t is string => !!t), ...byThread];
+    for (const threadId of threads) {
+      const st = await this.port.threadState(threadId);
       if (!st || st.archived || st.status === "idle" || st.status === "error") continue;
-      await this.port.stopThread(n.threadId);
+      await this.port.stopThread(threadId);
     }
     const directiveId = typeof row.payload.directiveId === "string" ? row.payload.directiveId : null;
     if (directiveId)
@@ -1084,15 +1139,16 @@ export class Engine {
   }
 
   private async handleArchive(row: OutboxRow): Promise<HandlerResult> {
-    const ids = (row.payload.nodeIds as string[] | undefined) ?? [String(row.nodeId)];
+    const byThread = (row.payload.threadIds as string[] | undefined) ?? [];
+    const ids = (row.payload.nodeIds as string[] | undefined) ?? (byThread.length ? [] : [String(row.nodeId)]);
+    const threads = [...ids.map((id) => this.repo.getNode(row.runId, id)?.threadId ?? null).filter((t): t is string => !!t), ...byThread];
     const archived: string[] = [];
-    for (const id of ids) {
-      const n = this.repo.getNode(row.runId, id);
-      if (!n?.threadId) continue;
-      const st = await this.port.threadState(n.threadId);
+    for (const threadId of threads) {
+      if (archived.includes(threadId)) continue;
+      const st = await this.port.threadState(threadId);
       if (!st || st.archived) continue;
-      this.archiving.add(n.threadId);
-      archived.push(...(await this.port.archiveThread(n.threadId)));
+      this.archiving.add(threadId);
+      archived.push(...(await this.port.archiveThread(threadId)));
     }
     return { done: true, result: { archived } };
   }
