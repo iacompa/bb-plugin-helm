@@ -472,9 +472,9 @@ export class Repo {
   // ───────────── directives + recipients ─────────────
   insertDirective(d: Omit<DirectiveInfo, "recipients">): void {
     this.run(
-      `INSERT INTO directives(id, run_id, ts, type, target_node_id, cascade, mode, policy, text, value_json, model_from_json, model_to_json, affected_json, actor, implicit, summary)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      d.id, d.runId, d.ts, d.type, d.targetNodeId, d.cascade, d.mode, d.policy ? 1 : 0, d.text, js(d.value), js(d.modelFrom), js(d.modelTo), js(d.affected), d.actor, d.implicit ? 1 : 0, d.summary,
+      `INSERT INTO directives(id, run_id, ts, type, target_node_id, cascade, mode, policy, text, value_json, model_from_json, model_to_json, affected_json, actor, by_node, implicit, summary)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      d.id, d.runId, d.ts, d.type, d.targetNodeId, d.cascade, d.mode, d.policy ? 1 : 0, d.text, js(d.value), js(d.modelFrom), js(d.modelTo), js(d.affected), d.actor, d.byNode ?? null, d.implicit ? 1 : 0, d.summary,
     );
   }
   insertRecipient(runId: string, r: Omit<RecipientInfo, "deliveredAt" | "ackAt" | "ackNote"> & { outboxId: string | null }): void {
@@ -558,6 +558,7 @@ export class Repo {
       modelTo: j(r.model_to_json, null),
       affected: j(r.affected_json, []),
       actor: (r.actor as DirectiveInfo["actor"]) ?? "human",
+      byNode: s(r.by_node),
       implicit: b(r.implicit),
       summary: String(r.summary ?? ""),
       recipients: this.recipients(String(r.run_id), String(r.id)),
@@ -572,8 +573,9 @@ export class Repo {
   }
   directivesTouching(runId: string, nodeId: string): DirectiveInfo[] {
     return this.all(
-      "SELECT d.* FROM directives d JOIN directive_recipients r ON r.run_id = d.run_id AND r.directive_id = d.id WHERE d.run_id = ? AND r.node_id = ? ORDER BY d.ts DESC",
-      runId, nodeId,
+      // every directive this node was told about, plus those it issued as a supervisor
+      "SELECT d.* FROM directives d WHERE d.run_id = ? AND (d.by_node = ? OR EXISTS (SELECT 1 FROM directive_recipients r WHERE r.run_id = d.run_id AND r.directive_id = d.id AND r.node_id = ?)) ORDER BY d.ts DESC, d.id DESC",
+      runId, nodeId, nodeId,
     ).map((r) => this.toDirective(r));
   }
   directivesBeforeSpawn(runId: string, nodeId: string): DirectiveInfo[] {

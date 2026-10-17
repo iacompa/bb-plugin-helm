@@ -28,6 +28,7 @@ already has `BRIEF.md`, `.helm/run-check.sh` (the evidence wrapper) and a
 | `helm_record_check {name, command, exitCode, outputRef, commit}` | Verifies the wrapper output file against your claim (below). |
 | `helm_existing_docs {docs?, checks?, reason?}` | **Existing repositories only.** `docs`: `{spec, architecture, contract, acceptance}` → repo-relative paths of committed files that already serve that purpose; `checks`: `{name: {command, tier?, category?}}` → the repository's real commands. Helm verifies each file is committed on the integration branch and then counts them for the spec stage, and uses the checks instead of `.helm/checks.json`. Refused in a new repository, for a missing file, or for a check that runs nothing real (`echo`, `true`). |
 | `helm_slop_scan {paths?}` | Deterministic scanner on the integration branch (with history). With no `paths` on the integration HEAD it also records the `slop-scan` check. |
+| `helm_direct {to, action, text?, priority?, urgent?}` | Steer **your squad members** (never gates): `tell` (binding instruction), `pause`, `resume`, `priority`. The target must `helm_ack`; everyone between you and it, and above you, sees one FYI line; you get the ack as FYI. See *Steering your team*. |
 | `helm_report`, `helm_message`, `helm_ack`, `helm_need`, `helm_context` | As in every Helm role. `helm_message` reaches your parent, your squad and gates (your children). |
 
 **Evidence refs** (`helm_stage`, `helm_report`) — `{kind, ref, branch?}`, at most 20.
@@ -196,6 +197,17 @@ use a shared library's API, and never change them. If the app needs a change the
 - Something outside your app → `helm_message` your manager, kind `ask`.
 - Only the human can decide (scope, budget, a waiver, a destructive or major-version
   command, an irreversible step) → `helm_need` once with title, facts, options; then stop.
+
+## Steering your team
+
+`helm_direct` is how you correct course below you. `helm_message` is for conversation with your direct reports.
+- **Steer to change what someone does.** Use it when a builder drifts from the plan, works in the wrong place or on the wrong thing, or two agents collide. Name the agent by id.
+- **One message, not a stream.** Put the whole instruction, the reason and the done-condition in one `tell`. Helm allows 3 per agent and 12 in total per 10 minutes. Steering is a turn for the target and a line for everyone above, so each one costs tokens.
+- **`urgent: false`** when it can wait for the target's current step. That avoids interrupting a turn mid-edit.
+- **The chain sees it.** Everyone between you and the target sees an FYI line. You do not need to also `helm_message` the lead in between; tell it only if it must act.
+- **Check the ack.** It arrives as FYI with your next Helm tool result. An ack that says it conflicts with a human directive means the human's word wins. Drop it, or raise a `helm_need` if it truly blocks.
+- **Never** resume what the human paused, override a priority the human set, steer a gate, or re-word a human instruction. Helm rejects the first three.
+- FYI lines (digests, acks, reports) ride along with your next Helm tool result. You do not need to poll for them.
 
 ## Context hygiene
 

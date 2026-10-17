@@ -118,7 +118,7 @@ export function HelmProvider({ children, rootRef }: { children: ReactNode; rootR
   }, []);
   const onEffects = useCallback(
     (fx: BatchEffects) => {
-      for (const d of fx.created) if (d.actor === "human") firePulse(d);
+      for (const d of fx.created) if (d.actor !== "system") firePulse(d);
       if (fx.receipts.length) {
         const add = fx.receipts.map((r) => ({ key: ++key.current, ...r }));
         setFlashes((f) => [...f.slice(-30), ...add]);

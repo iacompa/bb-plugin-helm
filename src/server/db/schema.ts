@@ -130,4 +130,8 @@ ALTER TABLE apps ADD COLUMN helm_branch TEXT;
 ALTER TABLE apps ADD COLUMN user_branch TEXT;
 ALTER TABLE apps ADD COLUMN base_commit TEXT;
 `,
+  // 4 — supervisors steer their reports (helm_direct): the node that issued a directive.
+  `
+ALTER TABLE directives ADD COLUMN by_node TEXT;
+`,
 ];

@@ -337,3 +337,46 @@ export function allowedTypes(node: { tier: string; status: string; hasThread: bo
   if (node.tier === "gate") out.push("waive");
   return out;
 }
+
+// ───────────────────────────── supervisor steering (helm_direct) ─────────────────────────────
+
+/** What a supervisor may do to someone below it. Everything else (models, scope, stop, waivers) stays with the human. */
+export const AGENT_ACTIONS = ["tell", "pause", "resume", "priority"] as const;
+export type AgentAction = (typeof AGENT_ACTIONS)[number];
+
+/** Whether `by` may steer `target`: anyone strictly below it, except gates, whose independence only the human may touch. */
+export function steerProblem(tree: Tree, by: string, target: { id: string; tier: string }): string | null {
+  if (target.id === by) return "You cannot steer yourself.";
+  if (!ancestors(tree, target.id).includes(by)) return `${target.id} is not below you. Steer only your own reports and their teams; route anything else through your parent.`;
+  if (target.tier === "gate") return "Gates (Reviewer, Slop Hunter) judge independently; only the human can steer them. Send fixes to the builders instead.";
+  return null;
+}
+
+/**
+ * Who hears about a supervisor's directive. The target is told directly; everyone
+ * between the supervisor and the target, and everyone above the supervisor, gets
+ * one FYI line that rides along with their next turn (it never wakes them). The
+ * supervisor itself is not a recipient: it hears the acknowledgement instead.
+ */
+export function buildAgentRecipients(tree: Tree, by: string, target: string): Recipient[] {
+  const out: Recipient[] = [{ id: target, level: "direct", world: false }];
+  for (const a of ancestors(tree, target)) if (a !== by) out.push({ id: a, level: "digest", world: a === ORCH_ID });
+  return out;
+}
+
+export function agentNoticeText(d: NoticeDirective & { type: AgentAction }, level: RecipientLevel, ctx: NoticeContext & { byName: string; byId: string }): string {
+  const what =
+    d.type === "tell" ? `“${d.text}”` : d.type === "pause" ? `paused${d.text ? `: ${d.text}` : ""}` : d.type === "resume" ? `resumed${d.text ? `: ${d.text}` : ""}` : `priority set to ${String(d.value)}${d.text ? `: ${d.text}` : ""}`;
+  if (level === "direct") {
+    const tail = d.type === "pause" ? " Stop after the current step and wait." : d.type === "tell" ? " Follow it unless it conflicts with a human directive or policy; the human's word wins (say so in your ack)." : "";
+    return `Direction from ${ctx.byName} (${ctx.byId}, ${d.id}): ${what}.${tail} Reply with helm_ack ${d.id} in one line.`;
+  }
+  return `${d.id} · ${ctx.byName} → ${ctx.targetName}: ${what} (${ctx.clock}).`;
+}
+
+/** Ledger line for a supervisor's directive. */
+export function agentSummary(d: NoticeDirective & { type: AgentAction }, ctx: { byName: string; targetName: string }): string {
+  const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 2)}…` : s);
+  const what = d.type === "tell" ? `“${cut(d.text, 90)}”` : d.type === "priority" ? `priority ${String(d.value)}` : d.type === "pause" ? "paused" : "resumed";
+  return `${ctx.byName} → ${ctx.targetName}: ${what}`;
+}

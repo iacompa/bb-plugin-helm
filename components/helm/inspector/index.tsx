@@ -13,6 +13,7 @@ import { Overview } from "./overview.tsx";
 import { ChatTab } from "./chat.tsx";
 import { DirectTab } from "./direct.tsx";
 import { BriefTab, ChangesTab, CommsTab, ReportsTab } from "./tabs.tsx";
+import { QuickSteer } from "./quicksteer.tsx";
 
 const TABS: Array<[InspTab, string]> = [
   ["overview", "Overview"],
@@ -184,6 +185,7 @@ function NodeInspector({ n }: { n: SnapNode }) {
         {tab === "reports" ? <ReportsTab n={n} detail={detail} /> : null}
         {tab === "changes" ? <ChangesTab n={n} detail={detail} /> : null}
       </div>
+      {tab !== "direct" && tab !== "chat" ? <QuickSteer key={n.id} n={n} /> : null}
     </>
   );
 }

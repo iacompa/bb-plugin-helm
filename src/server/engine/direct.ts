@@ -4,7 +4,7 @@
 
 import type { Cascade, DirectiveInfo, DirectiveType, ModelRef, NodeInfo, SlotId, SlotMap } from "../../shared/types.ts";
 import { HelmError, type Engine } from "./engine.ts";
-import { bottomUp, buildRecipients, deliveryModeFor, directiveSummary, noticeFor, resolveCascade, touches, type NoticeDirective } from "../domain/directives.ts";
+import { AGENT_ACTIONS, agentNoticeText, agentSummary, bottomUp, buildAgentRecipients, buildRecipients, deliveryModeFor, directiveSummary, noticeFor, resolveCascade, steerProblem, touches, type AgentAction, type NoticeDirective } from "../domain/directives.ts";
 import { modelName, validateRef } from "../domain/models.ts";
 import { hhmm, pad4 } from "./context.ts";
 import { waiverProblem } from "../domain/verdict.ts";
@@ -31,6 +31,8 @@ export interface DirectiveInput {
   slotsScope?: "future" | "all";
   /** For waivers of S6: "I have rotated this credential". */
   rotatedConfirmed?: boolean;
+  /** A supervisor steering someone below it (helm_direct); validated by agentDirect. */
+  byNode?: string;
 }
 
 const SELF_ONLY: DirectiveType[] = ["approve", "deny", "answer", "plan", "signoff", "sendback", "waive", "slots", "spawn"];
@@ -68,9 +70,11 @@ export async function createDirective(e: Engine, runId: string, input: Directive
   const run = e.run(runId);
   const target = e.node(runId, input.target);
   const type = input.type;
-  const cascade: Cascade = SELF_ONLY.includes(type) ? "self" : input.cascade ?? "self";
+  const by = input.byNode ? e.node(runId, input.byNode) : null;
+  if (by && !(AGENT_ACTIONS as readonly string[]).includes(type)) throw new HelmError(`Supervisors cannot ${type}; only the human can.`, "invalid_value");
+  const cascade: Cascade = by || SELF_ONLY.includes(type) ? "self" : input.cascade ?? "self";
   const text = (input.text ?? "").trim();
-  const actor = input.actor ?? "human";
+  const actor = by ? "agent" : input.actor ?? "human";
   const humanMode = input.mode ?? "steer";
 
   // validation that needs I/O happens before the transaction
@@ -102,7 +106,7 @@ export async function createDirective(e: Engine, runId: string, input: Directive
     const ts = e.now();
     const tree = e.tree(runId);
     const affected = resolveCascade(tree, target.id, cascade);
-    const recipients = buildRecipients(tree, affected);
+    const recipients = by ? buildAgentRecipients(tree, by.id, target.id) : buildRecipients(tree, affected);
     const nodes = new Map(e.repo.listNodes(runId).map((n) => [n.id, n]));
     let modelFrom: ModelRef | null = null;
     let briefVersion = target.briefVersion;
@@ -218,25 +222,26 @@ export async function createDirective(e: Engine, runId: string, input: Directive
       case "tell":
         break;
     }
-    if (input.policy || type === "policy") {
+    if (!by && (input.policy || type === "policy")) {
       const pseq = e.repo.nextSeq(runId, "policy");
       const active = e.repo.listPolicies(runId);
       if (active.length >= 20) e.repo.retirePolicy(runId, active[0].id);
       e.repo.insertPolicy({ id: `P-${pseq}`, runId, text: text || directiveSummary({ id, type, cascade, text, ts }, { targetName: e.label(target), briefVersion, modelName: mname, touchedCount: 0, clock: hhmm(ts) }), scopeNodeId: target.id, fromDirective: id, createdAt: ts, retiredAt: null });
     }
-    if (touches(type)) for (const nid of affected) e.repo.updateNode(runId, nid, { touched: true });
+    if (!by && touches(type)) for (const nid of affected) e.repo.updateNode(runId, nid, { touched: true });
     const touchedCount = Number((e.repo.db.prepare("SELECT COUNT(*) AS c FROM nodes WHERE run_id = ? AND touched = 1").get(runId) as { c: number }).c);
 
     const nd: NoticeDirective = { id, type, cascade, text, value: input.value, modelFrom, modelTo: input.modelTo ?? null, implicit: input.implicit, ts };
     const ctx = { targetName: e.label(target), briefVersion, modelName: mname, touchedCount, clock: hhmm(ts) };
-    const summary = directiveSummary(nd, ctx);
-    e.repo.insertDirective({ id, runId, ts, type, targetNodeId: target.id, cascade, mode: humanMode, policy: !!input.policy || type === "policy", text, value: { value: input.value ?? null, needId: input.needId ?? null, findingIds: input.findingIds ?? null, slots: input.slots ?? null, slotsScope: input.slotsScope ?? null }, modelFrom, modelTo: input.modelTo ?? null, affected, actor, implicit: !!input.implicit, summary });
+    const actx = by ? { ...ctx, byName: e.label(by), byId: by.id } : null;
+    const summary = actx ? agentSummary(nd as NoticeDirective & { type: AgentAction }, actx) : directiveSummary(nd, ctx);
+    e.repo.insertDirective({ id, runId, ts, type, targetNodeId: target.id, cascade, mode: humanMode, policy: !!input.policy || type === "policy", text, value: { value: input.value ?? null, needId: input.needId ?? null, findingIds: input.findingIds ?? null, slots: input.slots ?? null, slotsScope: input.slotsScope ?? null }, modelFrom, modelTo: input.modelTo ?? null, affected, actor, byNode: by?.id ?? null, implicit: !!input.implicit, summary });
 
     // ── recipients and delivery ──
     const need = input.needId ? e.repo.getNeed(runId, input.needId) : null;
     for (const r of recipients) {
       const n = nodes.get(r.id)!;
-      const notice = noticeFor(nd, r, ctx);
+      const notice = actx ? agentNoticeText(nd as NoticeDirective & { type: AgentAction }, r.level, actx) : noticeFor(nd, r, ctx);
       let state: "queued" | "delivered" | "rec" = "queued";
       let outboxId: string | null = null;
       if (r.level === "digest") {
@@ -298,8 +303,53 @@ export function ack(e: Engine, node: NodeInfo, directiveId: string, note: string
   if (r.state === "ack") return `${directiveId} already acknowledged.`;
   e.repo.updateRecipient(node.runId, directiveId, node.id, { state: "ack", ackAt: e.now(), ackNote: (note ?? "").slice(0, 300), deliveredAt: r.deliveredAt ?? e.now() });
   e.repo.event(node.runId, node.id, "ack", `acknowledged ${directiveId}${note ? `: ${note.slice(0, 120)}` : ""}`, directiveId);
+  // the outcome travels up as one FYI line (never a wake-up): to the supervisor that
+  // asked, and to the acknowledging agent's parent when that parent was not told directly
+  if (r.level === "direct") {
+    const line = `${e.label(node)} acknowledged ${directiveId}${note ? `: ${note.slice(0, 200)}` : "."}`;
+    const up = new Set([d.byNode, node.parentId].filter((x): x is string => !!x && x !== node.id));
+    for (const id of up) if (!d.recipients.some((x) => x.nodeId === id && x.level !== "digest")) e.fyi(node.runId, id, line, directiveId);
+  }
   e.emit(node.runId, "receipt.updated", { directiveId, nodeId: node.id, state: "ack" });
   return `Acknowledged ${directiveId}.`;
+}
+
+// ───────────────────────────── supervisor steering ─────────────────────────────
+
+const STEER_WINDOW_MS = 10 * 60_000;
+const STEER_PER_TARGET = 3;
+const STEER_PER_SUPERVISOR = 12;
+
+/** helm_direct: a supervisor steers someone below it. The human's directives always win. */
+export async function agentDirect(e: Engine, by: NodeInfo, p: { to: string; action: AgentAction; text?: string; priority?: string; urgent?: boolean }): Promise<string> {
+  const runId = by.runId;
+  const target = e.repo.getNode(runId, p.to);
+  if (!target) return `No node ${p.to}. Use ids from helm_context or helm_world.`;
+  const problem = steerProblem(e.tree(runId), by.id, target);
+  if (problem) return `Rejected: ${problem}`;
+  const text = (p.text ?? "").trim();
+  if (p.action === "tell" && !text) return "Rejected: say what you want (text).";
+  if (p.action === "priority" && !["low", "normal", "high"].includes(String(p.priority))) return "Rejected: priority must be low, normal or high.";
+  if (target.status === "done") return `Rejected: ${e.label(target)} is done.`;
+  if (p.action === "pause" && (target.status === "paused" || TERMINAL.has(target.status))) return `${e.label(target)} is ${target.status}; nothing to pause.`;
+  if (p.action === "resume" && target.status !== "paused") return `${e.label(target)} is not paused.`;
+  const history = e.repo.directivesTouching(runId, target.id).filter((d) => d.affected.includes(target.id));
+  if (p.action === "resume") {
+    const last = history.find((d) => d.type === "pause" || d.type === "resume");
+    if (last?.type === "pause" && last.actor !== "agent") return `Rejected: the human paused ${e.label(target)} (${last.id}); only the human can resume it.`;
+  }
+  if (p.action === "priority") {
+    const last = history.find((d) => d.type === "priority");
+    if (last && last.actor !== "agent") return `Rejected: the human set ${e.label(target)}'s priority (${last.id}); raise a helm_need if it should change.`;
+  }
+  const since = e.now() - STEER_WINDOW_MS;
+  const mine = e.repo.listDirectives(runId, 200).filter((d) => d.byNode === by.id && d.ts >= since);
+  if (mine.filter((d) => d.targetNodeId === target.id).length >= STEER_PER_TARGET) return `Rejected: you already steered ${e.label(target)} ${STEER_PER_TARGET} times in 10 minutes. Put everything in one message and let it work.`;
+  if (mine.length >= STEER_PER_SUPERVISOR) return `Rejected: ${STEER_PER_SUPERVISOR} directives in 10 minutes is the limit. Batch your instructions.`;
+  const d = await createDirective(e, runId, { type: p.action, target: target.id, text, value: p.action === "priority" ? p.priority : undefined, mode: p.urgent === false ? "queue" : "steer", byNode: by.id });
+  const told = d.recipients.filter((r) => r.level === "digest").length;
+  const when = target.threadId ? (TERMINAL.has(target.status) ? "it was not woken; it reads this when it next starts" : "delivered now") : "it reads this when it starts";
+  return `${d.id} sent to ${e.label(target)} (${when}). ${told ? `${told} above ${told === 1 ? "it sees" : "them see"} one FYI line. ` : ""}You will get its acknowledgement as FYI.`;
 }
 
 /** One reminder for unacked direct/full notices when the node goes idle (§6.4). */

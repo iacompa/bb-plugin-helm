@@ -50,7 +50,7 @@ gate verdicts). Only the human moves Ready → Done (`signoff`) or Ready → Bui
 | `bb helm runs` | All runs with ids and status. |
 | `bb helm world [--run <id>]` | The same data the Orchestrator's `helm_world` returns: stages, open needs, recent directives with receipts, touched agents, policies, managers and apps. |
 | `bb helm needs` | Open Needs-you items (`N-…`): kind, title, asking node, age. |
-| `bb helm ledger [--limit <n>]` | Recent directives (`D-…`) with per-agent receipts (queued → delivered → ack/rec, or failed). |
+| `bb helm ledger [--limit <n>]` | Recent directives (`D-…`) with per-agent receipts (queued → delivered → ack/rec, or failed). It includes steers by supervisors (`Manager → Agent: …`), which agents give with `helm_direct`; the human's directives always win. |
 | `bb helm models` | Live model catalog with NEW flags and the current slots. |
 | `bb helm doctor` | Safe environment probes (no spawning); pass/fail per probe. |
 

@@ -61,7 +61,7 @@ export function createSimAgents(profileFor: (meta: HelmThreadMeta) => Profile = 
     }
     // acknowledge binding notices (digests answer "no ack needed", which is fine)
     const ids = [...new Set([...ctx.text.matchAll(ACK_RE)].map((x) => x[1]))];
-    if (/(Message from the human|The human |Your direct report|Reminder: please call helm_ack|Changes made before you started)/.test(ctx.text)) for (const id of ids) await ctx.tool("helm_ack", { directiveId: id, note: "adapted my plan" });
+    if (/(Message from the human|The human |Your direct report|Direction from |Reminder: please call helm_ack|Changes made before you started)/.test(ctx.text)) for (const id of ids) await ctx.tool("helm_ack", { directiveId: id, note: "adapted my plan" });
     if (/^(The human paused you|The human stopped)/.test(ctx.text)) return "paused";
     const role = meta.role;
     if (role === "planner") return planner(ctx, profile);

@@ -23,7 +23,7 @@ export function world(e: Engine, runId: string, opts: { appsPage?: number } = {}
   const fc = forecast(nodes.map((n) => ({ role: n.role, slot: n.slot, model: n.model })), run.slots, e.settings.weights);
   const stages = Object.fromEntries(STAGES.map((s) => [s.id, apps.filter((a) => a.stage === s.id).length])) as Record<Stage, number>;
   const needs = e.repo.listNeeds(runId, "open").map((x) => ({ id: x.id, kind: x.kind, title: x.title, node: x.nodeId, ageMin: age(e, x.createdAt) }));
-  const recent = e.repo.listDirectives(runId, 15).map((d) => ({ id: d.id, type: d.type, target: d.targetNodeId, summary: d.summary, ageMin: age(e, d.ts), receipts: receiptCounts(d) }));
+  const recent = e.repo.listDirectives(runId, 15).map((d) => ({ id: d.id, type: d.type, target: d.targetNodeId, by: d.byNode ?? "human", summary: d.summary, ageMin: age(e, d.ts), receipts: receiptCounts(d) }));
   const touched = nodes.filter((n) => n.touched).map((n) => n.id);
   const policies = e.repo.listPolicies(runId).map((p) => ({ id: p.id, text: p.text, scope: p.scopeNodeId }));
   const page = Math.max(0, opts.appsPage ?? 0);
@@ -68,7 +68,7 @@ export function worldBlock(e: Engine, runId: string): string {
   L.push(`Run ${w.run.name} — ${w.run.status}${w.run.spawnsPaused ? " · SPAWNS PAUSED" : ""} · ${w.run.apps} apps · ${w.run.agents.spawned} agents spawned (${w.run.agents.running} running) · spend ${fmtUnits(w.run.spend.units)} of ${fmtUnits(w.run.spend.cap)}`);
   L.push(`Stages: ${Object.entries(w.stages).filter(([, v]) => v).map(([k, v]) => `${k} ${v}`).join(" · ") || "—"}`);
   if (w.needs.length) L.push(`Needs the human: ${w.needs.map((x) => `${x.id} ${x.kind} — ${x.title}`).slice(0, 8).join("; ")}`);
-  if (w.recentDirectives.length) L.push("Recent changes by the human:", ...w.recentDirectives.slice(0, 8).map((d) => `- ${d.id} ${d.summary}`));
+  if (w.recentDirectives.length) L.push("Recent directives (by the human unless a supervisor is named):", ...w.recentDirectives.slice(0, 8).map((d) => `- ${d.id} ${d.summary}`));
   if (w.policies.length) L.push("Standing policies:", ...w.policies.map((p) => `- ${p.id} (${p.scope}): ${p.text}`));
   for (const m of w.managers) L.push(`${m.name}: ${m.apps.map((a) => `${a.name} ${a.stage}${a.blockers.length ? ` [${a.blockers.length} blockers]` : ""}`).join(", ")}`);
   return L.join("\n");

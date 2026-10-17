@@ -274,6 +274,9 @@ export function ReportsTab({ n, detail }: { n: SnapNode; detail: NodeDetail | nu
 // ───────────── Changes ─────────────
 
 function roleFor(d: DirectiveInfo, n: SnapNode, label: (id: string) => string): [string, string] {
+  if (d.byNode === n.id) return [`This agent steered ${label(d.targetNodeId)}`, "acc"];
+  if (d.byNode && d.targetNodeId === n.id) return [`Steered by ${label(d.byNode)}`, "acc"];
+  if (d.byNode) return [`FYI — ${label(d.byNode)} steered ${label(d.targetNodeId)}`, ""];
   if (d.targetNodeId === n.id) return ["You changed this agent", "human"];
   if (d.affected.includes(n.id)) return [`Cascaded from ${label(d.targetNodeId)}`, "human"];
   const r = d.recipients.find((x) => x.nodeId === n.id);
@@ -293,7 +296,7 @@ export function ChangesTab({ n, detail }: { n: SnapNode; detail: NodeDetail | nu
   const policies = s.policies.filter((p) => !p.retiredAt);
   return (
     <div className="pad col" style={{ gap: 10 }}>
-      <div className="hint-t">Every change you made to this agent, anything below it, or anything it should know about. The same list the Orchestrator reads.</div>
+      <div className="hint-t">Every change to this agent or anything below it, by you or by a supervisor, and every steer this agent gave its own team. The same list the Orchestrator reads.</div>
       {list.length ? (
         list.map((d) => {
           const [role, cls] = roleFor(d, n, label);

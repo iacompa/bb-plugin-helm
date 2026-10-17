@@ -271,7 +271,9 @@ export interface DirectiveInfo {
   modelFrom: ModelRef | null;
   modelTo: ModelRef | null;
   affected: string[];
-  actor: "human" | "system";
+  actor: "human" | "system" | "agent";
+  /** The supervisor that issued it, when actor is "agent" (helm_direct). */
+  byNode: string | null;
   implicit: boolean;
   summary: string;
   recipients: RecipientInfo[];

@@ -36,6 +36,7 @@ export function LedgerView() {
   const data = h.data;
   const [filter, setFilter] = useState("all");
   const [agent, setAgent] = useState("all");
+  const [source, setSource] = useState("all");
   const [pending, setPending] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [older, setOlder] = useState<DirectiveInfo[] | null>(null);
@@ -51,7 +52,9 @@ export function LedgerView() {
   if (!data) return <div className="pagewrap"><div className="page"><h2>Change ledger</h2><span className="muted">Loading…</span></div></div>;
 
   const targets = [...new Set(all.map((d) => d.targetNodeId))].map((id) => ({ id, label: trailLabel(data.nodes[id], data.apps) || id })).sort((a, b) => a.label.localeCompare(b.label));
-  const list = all.filter((d) => ledgerMatch(d, filter) && (agent === "all" || d.targetNodeId === agent || d.affected.includes(agent)) && (!pending || pendingReceipts(d) > 0));
+  const fromMatch = (d: DirectiveInfo) => source === "all" || (source === "agent" ? d.actor === "agent" : d.actor !== "agent");
+  const list = all.filter((d) => ledgerMatch(d, filter) && fromMatch(d) && (agent === "all" || d.targetNodeId === agent || d.affected.includes(agent) || d.byNode === agent) && (!pending || pendingReceipts(d) > 0));
+  const bySupervisors = all.filter((d) => d.actor === "agent").length;
   const touched = data.nodeOrder.filter((id) => data.nodes[id].touched).length;
   const policies = [...data.policies].sort((a, b) => Number(!!a.retiredAt) - Number(!!b.retiredAt) || b.createdAt - a.createdAt);
 
@@ -80,7 +83,7 @@ export function LedgerView() {
         <div className="row" style={{ alignItems: "flex-start" }}>
           <div className="grow">
             <h2>Change ledger</h2>
-            <p className="lead">Every intervention you make, who was told, and whether they acknowledged it. The Orchestrator reads this same list, so it always knows what you changed and why.</p>
+            <p className="lead">Every intervention, yours and your supervisors' (when the Orchestrator, a Manager or a Lead steers someone below it), with who was told and whether they acknowledged it. The Orchestrator reads this same list, so it always knows what changed and why.</p>
           </div>
           <button type="button" className="btn sm" onClick={() => void exportJsonl()} disabled={!all.length}>
             <Ic name="Download" size="sm" /> Export JSONL
@@ -125,6 +128,11 @@ export function LedgerView() {
               </option>
             ))}
           </select>
+          <select className="select" aria-label="Filter by who sent it" value={source} onChange={(e) => setSource(e.target.value)} style={{ maxWidth: 170 }}>
+            <option value="all">From anyone</option>
+            <option value="human">From you</option>
+            <option value="agent">From supervisors ({bySupervisors})</option>
+          </select>
           <label className="check" style={{ alignItems: "center" }}>
             <input type="checkbox" checked={pending} onChange={(e) => setPending(e.target.checked)} /> Receipts pending
           </label>
@@ -166,6 +174,11 @@ export function LedgerRow({ d, data, open, onToggle }: { d: DirectiveInfo; data:
           {d.cascade !== "self" ? <span className="pill" style={{ marginLeft: 6 }}>{d.cascade === "reports" ? "+ reports" : "everyone below"}</span> : null}
           {d.implicit ? <span className="pill" style={{ marginLeft: 6 }} title="Typed directly in the agent's thread">typed in thread</span> : null}
           {d.actor === "system" ? <span className="pill" style={{ marginLeft: 6 }}>system</span> : null}
+          {d.byNode ? (
+            <span className="pill acc" style={{ marginLeft: 6 }} title="Sent by a supervisor with helm_direct">
+              by {trailLabel(data.nodes[d.byNode], data.apps) || d.byNode}
+            </span>
+          ) : null}
           <div className="sub">
             <Fmt text={d.summary} />
           </div>
@@ -228,7 +241,7 @@ export function LedgerDetail({ d, data }: { d: DirectiveInfo; data: RunState }) 
       </div>
       {d.text && d.type !== "tell" ? (
         <div className="hint-t">
-          Your text: “<Fmt text={d.text} />”
+          {d.byNode ? "Their" : "Your"} text: “<Fmt text={d.text} />”
         </div>
       ) : null}
       <div className="lbl">What each recipient received</div>

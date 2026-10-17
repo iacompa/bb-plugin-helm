@@ -77,6 +77,8 @@ export interface PlanPreview {
 
 const STUDIO_DIR = "_studio";
 const DEFER_SHORT = 3_000;
+/** How long unread FYI lines wait for a free ride on a tool result before they are sent on their own. */
+const FLUSH_MS = 120_000;
 
 export class Engine {
   readonly repo: Repo;
@@ -1146,18 +1148,35 @@ export class Engine {
     this.outbox.kick();
   }
 
+  /** Unread FYI lines as one block for a tool result, marked read; "" when there are none. */
+  takeInbox(runId: string, nodeId: string): string {
+    const lines = this.repo.unflushedInbox(runId, nodeId);
+    if (!lines.length) return "";
+    const shown = lines.slice(-10).map((l) => `- ${l.text.slice(0, 300)}`);
+    if (lines.length > 10) shown.unshift(`- (${lines.length - 10} older lines not shown)`);
+    this.repo.tx(() => {
+      this.repo.markInboxFlushed(lines.map((l) => l.id));
+      this.markDigestDelivered(runId, nodeId, lines);
+    });
+    return `FYI since you last heard from Helm (no reply needed):\n${shown.join("\n")}`;
+  }
+
   /** Queue an FYI line; it rides along with the node's next message, or is sent on its own while it is active. */
   fyi(runId: string, nodeId: string, text: string, directiveId: string | null = null): void {
     this.repo.pushInbox(runId, nodeId, text, directiveId);
     this.scheduleFlush(runId, nodeId);
   }
 
-  /** While a node is active, unflushed FYI lines go out within ~20 s, coalesced into one message (§6.6). */
+  /**
+   * While a node is active, unread FYI lines are delivered with its next Helm tool result
+   * (free). Only lines still unread after FLUSH_MS go out as one coalesced message (§6.6),
+   * so an agent that never calls a Helm tool still hears them.
+   */
   scheduleFlush(runId: string, nodeId: string): void {
     const n = this.repo.getNode(runId, nodeId);
     if (n?.status === "running" && n.threadId) {
-      const win = Math.floor(this.now() / 20_000);
-      this.repo.enqueue({ id: this.oid(), runId, kind: "send", nodeId, payload: { kind: "flush" }, idemKey: `flush:${runId}:${nodeId}:${win}`, notBefore: (win + 1) * 20_000 });
+      const win = Math.floor(this.now() / FLUSH_MS);
+      this.repo.enqueue({ id: this.oid(), runId, kind: "send", nodeId, payload: { kind: "flush" }, idemKey: `flush:${runId}:${nodeId}:${win}`, notBefore: (win + 1) * FLUSH_MS });
       this.outbox.kick();
     }
   }

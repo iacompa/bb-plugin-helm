@@ -10,7 +10,7 @@ import type { NodeInfo } from "../../shared/types.ts";
 import { toolsForNode, PLANNER_TOOLS } from "../domain/roles.ts";
 import { PortfolioSchema, normalizePortfolio } from "../domain/brief.ts";
 import { VerdictSchema } from "../domain/verdict.ts";
-import { ack } from "../engine/direct.ts";
+import { ack, agentDirect } from "../engine/direct.ts";
 import { assignFix, declareExisting, publishContract, recordCheck, releaseSquadMembers, report, slopScan, spawnSquad, stageRequest, verdict } from "../engine/gates.ts";
 import { context, digest, world } from "../engine/world.ts";
 import { validateDelta } from "../engine/delta.ts";
@@ -49,6 +49,13 @@ export const TOOL_DEFS: ToolDef[] = [
     description: "Message your parent, a child, or a sibling in the same app (kind info|ask|handoff). Cross-app traffic goes up through your manager or the Orchestrator.",
     parameters: z.object({ to: z.string().min(1).max(80), text: z.string().min(1).max(2000), kind: z.enum(["info", "ask", "handoff"]).default("info") }).strict(),
     presentation: { label: { pending: "Sending a message", completed: "Sent a message" }, icon: { glyph: "MessageSquare" } },
+  },
+  {
+    name: "helm_direct",
+    description:
+      "Steer anyone below you (your reports and their teams, never gates): tell (a binding instruction), pause, resume, or priority low|normal|high. The target must helm_ack; everyone between you and it, and above you, gets one FYI line; you get its ack as FYI. urgent (default true) interrupts its current turn, false waits for it. The human's directives win: you cannot resume what the human paused or override a priority the human set. Batch instructions: at most 3 per agent and 12 in total per 10 minutes.",
+    parameters: z.object({ to: z.string().min(1).max(80), action: z.enum(["tell", "pause", "resume", "priority"]), text: z.string().max(1500).optional(), priority: z.enum(["low", "normal", "high"]).optional(), urgent: z.boolean().optional() }).strict(),
+    presentation: { label: { pending: "Steering a report", completed: "Steered a report" }, icon: { glyph: "Sent" } },
   },
   { name: "helm_world", description: "The whole run from Helm's database: stages, needs, recent human directives with receipts, touched agents, policies, managers and apps. Always current.", parameters: z.object({ appsPage: z.number().int().min(0).max(20).optional() }).strict(), presentation: { label: { pending: "Reading world state", completed: "Read world state" }, icon: { glyph: "Globe" } } },
   {
@@ -96,6 +103,7 @@ export const TOOL_NAMES = TOOL_DEFS.map((t) => t.name);
 
 const TIER_NAME: Record<string, string> = {
   helm_world: "the Orchestrator",
+  helm_direct: "the Orchestrator, Managers and App Leads",
   helm_propose_plan: "the Orchestrator",
   helm_propose_wave: "the Orchestrator",
   helm_set_priority: "the Orchestrator and Managers",
@@ -109,6 +117,9 @@ const TIER_NAME: Record<string, string> = {
   helm_slop_scan: "App Leads, specialists and gates",
   helm_verdict: "gates (Reviewer, Slop Hunter)",
 };
+
+/** Tools whose result already carries the unread FYI lines (helm_context marks them read). */
+const INBOX_FREE = new Set(["helm_context", "helm_digest", "helm_verdict"]);
 
 export interface ToolResult {
   text: string;
@@ -137,7 +148,10 @@ export async function callTool(e: Engine, name: string, threadId: string, raw: u
   e.repo.updateNode(node.runId, node.id, { lastActivityAt: e.now(), nudgedAt: null });
   try {
     const text = await dispatch(e, node, name, parsed.data as Record<string, unknown>);
-    return { text, isError: text.startsWith("Rejected") || text.startsWith("No ") };
+    const isError = text.startsWith("Rejected") || text.startsWith("No ");
+    // FYI lines ride along with the tool result the agent is already reading: no extra turn
+    const fyi = INBOX_FREE.has(name) ? "" : e.takeInbox(node.runId, node.id);
+    return { text: fyi ? `${text}\n\n${fyi}` : text, isError };
   } catch (err) {
     if (err instanceof HelmError) return { text: err.message, isError: true };
     e.log.error(`tool ${name} for ${node.id} failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
@@ -159,6 +173,8 @@ async function dispatch(e: Engine, node: NodeInfo, name: string, p: Record<strin
     }
     case "helm_message":
       return message(e, node, String(p.to), String(p.text), String(p.kind ?? "info"));
+    case "helm_direct":
+      return agentDirect(e, node, p as never);
     case "helm_world":
       return JSON.stringify(world(e, node.runId, { appsPage: p.appsPage as number | undefined }));
     case "helm_propose_plan":

@@ -75,7 +75,7 @@ test("an unknown node asks for a refetch (it needs a label) but is shown at once
 test("directive.created then receipt.updated patch the ledger; duplicates are ignored", () => {
   const d: DirectiveInfo = {
     id: "D-0001", runId: "r1", ts: 1, type: "tell", targetNodeId: "lumen.ui", cascade: "self", mode: "steer", policy: false, text: "hi", value: null, modelFrom: null, modelTo: null,
-    affected: ["lumen.ui"], actor: "human", implicit: false, summary: "Message to UI builder",
+    affected: ["lumen.ui"], actor: "human", byNode: null, implicit: false, summary: "Message to UI builder",
     recipients: [
       { directiveId: "D-0001", nodeId: "lumen.ui", level: "direct", world: false, state: "queued", notice: "Message from the human (D-0001): “hi”.", deliveredAt: null, ackAt: null, ackNote: null },
       { directiveId: "D-0001", nodeId: "lumen.lead", level: "full", world: false, state: "queued", notice: "…", deliveredAt: null, ackAt: null, ackNote: null },

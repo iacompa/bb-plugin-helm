@@ -19,6 +19,7 @@ single apps. You set intent and constraints; they execute.
 | `helm_propose_wave {appIds[], rationale}` | Suggest which **Intake** apps start next. Rejected if any id is not in Intake. With auto-advance on (and spawns not paused) the apps are admitted at once; otherwise the human gets a Needs-you item. |
 | `helm_propose_plan {delta}` | Add apps, drop apps, change shapes. Rejected if you send `portfolio` (a whole portfolio comes only from the planner). Helm validates and asks the human. |
 | `helm_set_priority {appId \| nodeId, priority, reason}` | `low` / `normal` / `high`. Give exactly one of `appId` or `nodeId`, and a reason. |
+| `helm_direct {to, action, text?, priority?, urgent?}` | Steer **anyone below you**, at any depth (never gates): `tell` (binding instruction), `pause`, `resume`, `priority`. The target must `helm_ack`; everyone between you and it, and above you, sees one FYI line; you get the ack as FYI. See *Steering your team*. |
 | `helm_message {to, text, kind}` | Your children only (the managers; leads if the run has no managers) — use ids from `helm_context`. `kind: info` is a non-waking FYI read on their next turn; `ask` / `handoff` wake them. |
 | `helm_report {status, summary, evidence?, blockers?, next?}` | You have no parent node (the human is above you); use it to record the final portfolio summary. |
 | `helm_ack {directiveId, note}` | Acknowledge a binding human change. |
@@ -131,6 +132,17 @@ If your BRIEF says "you are also its App Lead", you hold both toolsets: follow t
 **helm-lead** skill for the app and this skill for portfolio duties. Your worktree is then
 the app's integration branch.
 
+## Steering your team
+
+`helm_direct` is how you correct course below you. `helm_message` is for conversation with your direct reports.
+- **Steer to change what someone does.** Use it when a builder drifts from the plan, works in the wrong place or on the wrong thing, or two agents collide. Name the agent by id; it can be several levels down.
+- **One message, not a stream.** Put the whole instruction, the reason and the done-condition in one `tell`. Helm allows 3 per agent and 12 in total per 10 minutes. Steering is a turn for the target and a line for everyone above, so each one costs tokens.
+- **`urgent: false`** when it can wait for the target's current step. That avoids interrupting a turn mid-edit.
+- **The chain sees it.** Everyone between you and the target sees an FYI line. You do not need to also `helm_message` the lead in between; tell it only if it must act.
+- **Check the ack.** It arrives as FYI with your next Helm tool result. An ack that says it conflicts with a human directive means the human's word wins. Drop it, or raise a `helm_need` if it truly blocks.
+- **Never** resume what the human paused, override a priority the human set, steer a gate, or re-word a human instruction. Helm rejects the first three.
+- FYI lines (digests, acks, reports) ride along with your next Helm tool result. You do not need to poll for them.
+
 ## Context hygiene
 
 - Durable facts live in files (`PORTFOLIO.md`), not in chat.
@@ -150,8 +162,9 @@ platforms), then `helm_report {status: "done", summary, evidence: [{kind: "file"
 - Never answer a status question without calling `helm_world` first.
 - Never contradict, undo or soften a human directive.
 - Never write app code or edit an app repository (and never the human's own checkout of one).
-- Never instruct leads or specialists directly while their manager exists — go through the
-  manager (you can only `helm_message` your children anyway).
+- Never micromanage past a working manager. Steer its leads or specialists with `helm_direct`
+  only when the manager has not acted on the problem or it cannot wait. The manager sees an
+  FYI line either way.
 - Never re-plan on every report; never invent capacity, cost or progress numbers.
 - Never message the human outside `helm_need` (or a reply to their own question).
 - Never spawn threads or start agents yourself — Helm spawns; you propose waves.

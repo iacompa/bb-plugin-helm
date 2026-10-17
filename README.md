@@ -62,6 +62,14 @@ A structured brief is read deterministically: `# Group` headings, then `- Name â
 - `--root <folder>` moves this run's new repositories, for example onto another disk.
 - `bb helm plan` prints what will happen to every folder, and refuses unsafe ones: system folders, a folder inside another repository, a non-git folder with files. Free text is read by one short hidden planner thread on the model you choose (`--planner-model`, default: the `code` slot at medium). `bb helm <command> --help` covers every option. Every command accepts `--json`.
 
+**Steering.** Every agent's inspector ends in a one-line **Steerâ€¦** box. Type an instruction and press Enter. It interrupts the agent's current turn, or tick *after its turn* to wait. You can also apply it to the agent's reports or its whole team. The line under the box shows who else hears about it: its parent gets it in full, and the levels above see one FYI line.
+
+Supervisors steer too. The Orchestrator, Managers and Leads can instruct, pause, resume or reprioritize anyone below them with `helm_direct`:
+- everyone up the chain sees it, and the graph pulses along that path;
+- the ledger shows who steered whom, and can be filtered to steers from supervisors;
+- your own directives always win: supervisors cannot resume what you paused, override a priority you set, or steer the review gates.
+
+FYI lines reach agents with their next Helm tool result rather than as separate messages, so being kept informed costs no extra turns.
 ## Settings
 
 Settings live under `bb plugin config helm`:

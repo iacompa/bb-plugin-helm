@@ -392,7 +392,9 @@ export function GraphView({ active }: { active: boolean }) {
     timers.current.forEach(clearTimeout);
     timers.current = [];
     const label = (vid: string, i: number): string => {
-      if (i === 0) return `You · ${TYPE_LABEL[d.type] ?? d.type}`;
+      const by = d.byNode ? trailLabel(data.nodes[d.byNode], data.apps) || d.byNode : null;
+      if (i === 0) return `${by ? `${by} →` : "You ·"} ${TYPE_LABEL[d.type] ?? d.type}`;
+      if (d.byNode && vid === d.byNode) return `${by} · sent it`;
       const n = data.nodes[vid];
       const app = data.apps[vid];
       const who = n ? trailLabel(n, data.apps) : app ? `${app.name} lead` : vid.startsWith("frame:") ? data.apps[vid.slice(6)]?.name ?? "" : vid;
