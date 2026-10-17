@@ -10,6 +10,7 @@ import { createDirective, remindUnacked } from "./direct.ts";
 import { spendFromTokens } from "../domain/models.ts";
 import { isQuestion } from "../domain/directives.ts";
 import { nodeWorktree } from "./gates.ts";
+import { expirePrompts, getPrompt, rerouteOpenPrompts, routePrompt } from "./prompts.ts";
 
 const TERMINAL = new Set(["done", "failed"]);
 const COMPACT_AT = 0.7;
@@ -172,14 +173,21 @@ function needKindFor(i: InteractionLite): NeedKind {
 }
 
 async function onInteraction(e: Engine, node: NodeInfo, i: InteractionLite): Promise<void> {
-  if (e.repo.needByInteraction(i.id)) return;
-  e.repo.tx(() => {
+  if (e.repo.needByInteraction(i.id) || getPrompt(e, node.runId, i.id)) return;
+  if (routePrompt(e, node, i)) return;
+  e.repo.tx(() => raiseInteractionNeed(e, node, i));
+  e.emit(node.runId, "node.updated", e.repo.getNode(node.runId, node.id));
+}
+
+/** An agent's BB prompt as a Needs-you card (call inside a transaction). */
+export function raiseInteractionNeed(e: Engine, node: NodeInfo, i: InteractionLite, note = ""): void {
+  {
     e.raiseNeed(node.runId, {
       kind: needKindFor(i),
       nodeId: node.id,
       appId: node.appId,
       title: `${e.label(node)}: ${i.title}`.slice(0, 200),
-      body: i.body,
+      body: note ? `${note}\n${i.body}` : i.body,
       evidence: "",
       options: i.kind === "approval" ? ["Approve", "Deny"] : i.options.length ? i.options : ["Answer"],
       interactionId: i.id,
@@ -187,8 +195,7 @@ async function onInteraction(e: Engine, node: NodeInfo, i: InteractionLite): Pro
       data: { questions: i.questions, decisions: i.decisions, threadId: i.threadId },
       setNodeNeeds: true,
     });
-  });
-  e.emit(node.runId, "node.updated", e.repo.getNode(node.runId, node.id));
+  }
 }
 
 /** V18 — the human typed straight into an agent's thread: record an implicit `tell` so the chain is told. */
@@ -253,6 +260,7 @@ export async function watchdog(e: Engine): Promise<{ nudged: string[]; stalled: 
         if (raised) stalled.push(n.id);
       }
     }
+    if (expirePrompts(e, run.id, (n, i, note) => raiseInteractionNeed(e, n, i, note))) e.emit(run.id, "run.updated", { id: run.id });
     e.proposeNextWave(run.id);
   }
   e.outbox.kick();
@@ -263,6 +271,8 @@ export async function watchdog(e: Engine): Promise<{ nudged: string[]; stalled: 
 
 export async function reconcile(e: Engine, runId: string): Promise<{ checked: number; changes: string[] }> {
   const changes: string[] = [];
+  const rerouted = rerouteOpenPrompts(e, runId);
+  if (rerouted) changes.push(`${rerouted} waiting permission prompts sent to the agents' supervisors`);
   const run = e.run(runId);
   const nodes = e.repo.listNodes(runId).filter((n) => !["planned", "done"].includes(n.status));
   for (const n of nodes) {

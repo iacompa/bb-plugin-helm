@@ -3,6 +3,8 @@
 // tier, identity, parent and app come from the database, never from metadata
 // or arguments (§8.2, V12).
 
+import { answerPrompt } from "../engine/prompts.ts";
+import { raiseInteractionNeed } from "../engine/events.ts";
 import { z } from "zod";
 import type { Engine } from "../engine/engine.ts";
 import { HelmError } from "../engine/engine.ts";
@@ -67,6 +69,12 @@ export const TOOL_DEFS: ToolDef[] = [
     parameters: z.object({ to: z.string().min(1).max(80), action: z.enum(["tell", "pause", "resume", "priority"]), text: z.string().max(1500).optional(), priority: z.enum(["low", "normal", "high"]).optional(), urgent: z.boolean().optional() }).strict(),
     presentation: { label: { pending: "Steering a report", completed: "Steered a report" }, icon: { glyph: "Sent" } },
   },
+  {
+    name: "helm_approve",
+    description: "Answer a permission prompt from one of your delegates (sent to you as 'Permission request … prompt <id>'). allow: ordinary work for its task. deny: destructive, outside its worktree, or unclear. escalate: credentials or secrets, spending real money, private data, or access only the human can grant.",
+    parameters: z.object({ promptId: z.string().min(1).max(120), decision: z.enum(["allow", "deny", "escalate"]), reason: z.string().min(1).max(400) }).strict(),
+    presentation: { label: { pending: "Answering a permission prompt", completed: "Answered a permission prompt" }, icon: { glyph: "SecurityCheck" } },
+  },
   { name: "helm_world", description: "The whole run from Helm's database: stages, needs, recent human directives with receipts, touched agents, policies, managers and apps. Always current.", parameters: z.object({ appsPage: z.number().int().min(0).max(20).optional() }).strict(), presentation: { label: { pending: "Reading world state", completed: "Read world state" }, icon: { glyph: "Globe" } } },
   {
     name: "helm_propose_plan",
@@ -113,6 +121,7 @@ export const TOOL_NAMES = TOOL_DEFS.map((t) => t.name);
 
 const TIER_NAME: Record<string, string> = {
   helm_world: "the Orchestrator",
+  helm_approve: "the Orchestrator, Managers and App Leads",
   helm_direct: "the Orchestrator, Managers and App Leads",
   helm_propose_plan: "the Orchestrator",
   helm_propose_wave: "the Orchestrator",
@@ -223,6 +232,8 @@ async function dispatch(e: Engine, node: NodeInfo, name: string, p: Record<strin
       return stageRequest(e, node, p.to as never, (p.evidence as never) ?? []);
     case "helm_assign_fix":
       return assignFix(e, node, String(p.findingId), String(p.nodeId));
+    case "helm_approve":
+      return answerPrompt(e, node, String(p.promptId), p.decision as "allow" | "deny" | "escalate", String(p.reason), (n, i, note) => raiseInteractionNeed(e, n, i, note));
     case "helm_record_check":
       return recordCheck(e, node, p as never);
     case "helm_existing_docs":

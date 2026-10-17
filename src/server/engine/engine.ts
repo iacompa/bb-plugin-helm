@@ -1223,7 +1223,13 @@ export class Engine {
   }
 
   private async handleInteraction(row: OutboxRow): Promise<HandlerResult> {
-    await this.port.respondInteraction({ threadId: String(row.payload.threadId), interactionId: String(row.payload.interactionId), answer: row.payload.answer as never });
+    try {
+      await this.port.respondInteraction({ threadId: String(row.payload.threadId), interactionId: String(row.payload.interactionId), answer: row.payload.answer as never });
+    } catch (err) {
+      // answered in BB directly, or the thread moved on: nothing left to answer
+      if (/409|already resolved|not found|404/i.test(String(err))) return { done: true, result: { skipped: "already answered" } };
+      throw err;
+    }
     return { done: true };
   }
 

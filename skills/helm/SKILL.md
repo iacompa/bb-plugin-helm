@@ -168,6 +168,11 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
   `bb helm ledger --limit 5` to confirm the receipt reaches `ack`.
 - **"Make all gates use model X"** → `bb helm models` to confirm the id, then
   `bb helm slots --slot review=… --slot slop=…` (or a `--slot` at plan time).
+- **Permission prompts**: by default an agent's prompts go to its supervisor, who answers
+  with `helm_approve`. Only escalations (credentials, spending, private data, access), the
+  Orchestrator's own prompts, and prompts unanswered for 15 minutes reach the user. Setting:
+  "Who approves agents' permission prompts". Per-role modes (Auto, Allow edits, Full access)
+  are Helm settings and apply to agents spawned afterwards.
 - **A card asks which permission mode a provider should use** (e.g. Grok supports only
   accept-edits or full) → that is the user's access decision: explain both (accept-edits
   sends every command to them; full runs commands unchecked) and ask. Then

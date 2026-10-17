@@ -21,6 +21,7 @@ roll-up. **You do not write app code** and you never reach into a lead's scope.
 | `helm_report {status, summary ≤600, evidence?, blockers?, next?}` | Roll-up to the Orchestrator. |
 | `helm_ack {directiveId, note}` | Acknowledge a binding human change. |
 | `helm_need {kind, about, title, body, options?, evidence?}` | Ask for a decision. `about`: credentials, spending, privacy, access or other. With autonomy high (the default), only the first four reach the human; `other` goes to your supervisor. |
+| `helm_approve {promptId, decision, reason}` | Answer a delegate's permission prompt (a message "Permission request … prompt <id>"). Answer at once — the delegate is blocked. `allow`: ordinary work for its task (build, test, read, git on its own branch). `deny`: destructive, outside its worktree, force-push, deleting others' work, or unclear. `escalate`: credentials or secrets, real spending, private data, or access only the human grants. Unanswered after 15 minutes, it goes to the human. |
 
 You do not have `helm_world`: the Orchestrator does. Ask it (`helm_message` kind `ask`)
 when you need run-wide facts.

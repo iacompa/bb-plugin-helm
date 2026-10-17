@@ -16,6 +16,8 @@ export interface HelmSettings {
   /** Run-level standing policies seeded at run start (§6.7). */
   runPolicies: string[];
   autoAdvance: "ask" | "auto";
+  /** Who answers an agent's BB permission prompt: its supervisor (escalating only what the human must decide) or the human. */
+  approvePrompts: "supervisor" | "human";
 }
 
 export const DEFAULT_SETTINGS: HelmSettings = {
@@ -28,6 +30,7 @@ export const DEFAULT_SETTINGS: HelmSettings = {
   createRemote: false,
   runPolicies: ["Slop gates are zero-tolerance for secrets, placeholders and invented dependencies."],
   autoAdvance: "ask",
+  approvePrompts: "supervisor",
 };
 
 export interface Logger {

@@ -7,7 +7,13 @@ import { DEFAULT_SETTINGS, type HelmSettings } from "./engine/context.ts";
 import { SEED_WEIGHTS } from "./domain/models.ts";
 import type { PermissionMode } from "./bb/port.ts";
 
-const PERM = { type: "select", options: ["auto", "accept-edits", "full"] as string[], default: "auto" } as const;
+const PERM_NOTE = "Applies to agents spawned after the change (BB sets a thread's mode when it starts). A provider that cannot run this mode asks you once which of its modes to use.";
+const PERM = {
+  type: "select",
+  options: ["auto", "accept-edits", "full"] as string[],
+  experimental_optionLabels: { auto: "Auto: BB's safety check allows routine commands and asks about risky ones", "accept-edits": "Allow edits: file edits go ahead, commands ask for approval", full: "Full access: no permission checks" },
+  default: "auto",
+} as const;
 
 export const SETTINGS_DESCRIPTORS = {
   appsRoot: { type: "string", label: "Apps root folder", description: "Default parent folder for new app repositories: <root>/<run>/<app>. An app can also name its own folder or an existing repository anywhere (brief: \"- Name — tagline · macOS · /path/to/repo\"), and bb helm plan --root sets this per run.", default: DEFAULT_SETTINGS.appsRoot },
@@ -27,11 +33,19 @@ export const SETTINGS_DESCRIPTORS = {
     default: "high",
   },
   autoAdvance: { type: "select", label: "Later waves", options: ["ask", "auto"] as string[], experimental_optionLabels: { ask: "Ask me before each wave", auto: "Run waves automatically" }, default: "ask" },
-  permissionOrchestrator: { ...PERM, label: "Permission mode: Orchestrator" },
-  permissionManager: { ...PERM, label: "Permission mode: Managers" },
-  permissionLead: { ...PERM, label: "Permission mode: App Leads" },
-  permissionSpecialist: { ...PERM, label: "Permission mode: Specialists" },
-  permissionGate: { ...PERM, label: "Permission mode: gates" },
+  permissionOrchestrator: { ...PERM, label: "Permission mode: Orchestrator", description: PERM_NOTE },
+  permissionManager: { ...PERM, label: "Permission mode: Managers", description: PERM_NOTE },
+  permissionLead: { ...PERM, label: "Permission mode: App Leads", description: PERM_NOTE },
+  permissionSpecialist: { ...PERM, label: "Permission mode: Specialists", description: PERM_NOTE },
+  permissionGate: { ...PERM, label: "Permission mode: gates", description: PERM_NOTE },
+  approvePrompts: {
+    type: "select",
+    label: "Who approves agents' permission prompts",
+    description: "A builder's prompt goes to its lead, a lead's to its manager, a manager's to the Orchestrator. They escalate to you only for credentials, spending, private data or access, and a prompt nobody answers in 15 minutes comes to you. The Orchestrator's own prompts always come to you.",
+    options: ["supervisor", "human"] as string[],
+    experimental_optionLabels: { supervisor: "Their supervisor approves for me", human: "Ask me every time" },
+    default: "supervisor",
+  },
   showLeadsInSidebar: { type: "boolean", label: "Show App Leads in the BB sidebar", default: false },
   zeroTolerance: { type: "string", label: "Zero-tolerance slop categories", description: "Comma-separated rule ids that block Ready.", default: DEFAULT_SETTINGS.zeroTolerance.join(",") },
   createRemote: { type: "boolean", label: "Create a git remote per app", default: false },
@@ -86,6 +100,7 @@ export function toHelmSettings(v: Values, warn: (m: string) => void = () => {}):
     zeroTolerance: typeof v.zeroTolerance === "string" ? v.zeroTolerance.split(/[,\s]+/).filter((x) => /^S\d+$/.test(x)) : DEFAULT_SETTINGS.zeroTolerance,
     createRemote: v.createRemote === true,
     autoAdvance: v.autoAdvance === "auto" ? "auto" : "ask",
+    approvePrompts: v.approvePrompts === "human" ? "human" : "supervisor",
   };
 }
 

@@ -123,6 +123,9 @@ export class Repo {
   setMeta(key: string, value: string): void {
     this.run("INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, value);
   }
+  metaByPrefix(prefix: string): Array<[string, string]> {
+    return this.all("SELECT key, value FROM meta WHERE key LIKE ? ESCAPE '\\'", `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`).map((r) => [String(r.key), String(r.value)]);
+  }
   deleteMeta(key: string): void {
     this.run("DELETE FROM meta WHERE key = ?", key);
   }

@@ -173,3 +173,10 @@ The open decisions from the brief (§17.2) took their defaults. Where reality on
     - When a provider cannot run the tier's configured mode and the run has no choice for it (`limits.providerPermission`), the agent waits in `needs`. One decision card per provider and run asks the human which supported mode to use.
     - Helm never picks for the human. Dropping to `accept-edits` sends every command to Needs you. Raising to `full` grants more access than the human configured. This is an access decision (HUMAN_ONLY), so autonomy never answers it.
     - The answer, or `bb helm limits --permission acp-grok=full`, is stored on the run and releases the held agents at once.
+
+37. **Supervisors approve their delegates' permission prompts (user request).** In accept-edits mode, every command a Grok agent ran became a card in Needs you ("i dont want to keep approving things"). Blanket automatic approval was considered, partly built, and dropped: nothing would review the commands. Instead:
+    - Setting `approvePrompts`, default `supervisor`. An agent's BB approval prompt goes to its parent: a builder's or gate's to its lead, a lead's to its manager, a manager's to the Orchestrator. It arrives as a waking message. The parent answers with `helm_approve {promptId, decision: allow|deny|escalate, reason}`.
+    - Only the parent can answer. Allow and deny are sent to BB and recorded as events. Escalate raises the normal Needs-you card, noting who escalated and why.
+    - The Orchestrator's own prompts, prompts whose parent has no live thread, and prompts unanswered after 15 minutes (watchdog, DB only) reach the human. `human` restores "ask me every time".
+    - Pending prompts live in `meta` (`prompt:<run>:<interaction>`). An answer to an interaction already resolved in BB is a no-op.
+    - The per-tier permission settings gained readable labels: Auto, Allow edits, Full access. They apply at spawn, because BB's thread update cannot change the mode.
