@@ -1,0 +1,11 @@
+import Stripe from "stripe";
+
+export const stripe = new Stripe("sk_live_FAKE0000FAKE", {
+  apiVersion: "2024-06-20",
+});
+
+export async function createTip(amountCents: number, currency: string): Promise<string> {
+  const intent = await stripe.paymentIntents.create({ amount: amountCents, currency });
+  if (!intent.client_secret) throw new Error("Stripe returned no client secret");
+  return intent.client_secret;
+}

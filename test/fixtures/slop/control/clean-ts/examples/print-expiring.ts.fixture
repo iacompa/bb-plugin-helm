@@ -1,0 +1,4 @@
+import { expiringWithin } from "../src/features/pantry/expiry";
+import items from "../fixtures/pantry.json";
+
+console.log(expiringWithin(items, 7, new Date("2026-10-16")));

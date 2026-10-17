@@ -1,0 +1,19 @@
+type Level = "debug" | "info" | "warn" | "error";
+
+const order: Record<Level, number> = { debug: 0, info: 1, warn: 2, error: 3 };
+const threshold: Level = import.meta.env.DEV ? "debug" : "warn";
+
+function emit(level: Level, message: string, context?: Record<string, unknown>): void {
+  if (order[level] < order[threshold]) return;
+  const line = `[${level}] ${message}`;
+  if (level === "error") console.error(line, context ?? "");
+  else if (level === "warn") console.warn(line, context ?? "");
+  else console.log(line, context ?? "");
+}
+
+export const logger = {
+  debug: (m: string, c?: Record<string, unknown>) => emit("debug", m, c),
+  info: (m: string, c?: Record<string, unknown>) => emit("info", m, c),
+  warn: (m: string, c?: Record<string, unknown>) => emit("warn", m, c),
+  error: (m: string, c?: Record<string, unknown>) => emit("error", m, c),
+};

@@ -1,0 +1,4 @@
+[
+  { "id": "6f1c9d64-2a55-4bd0-8a0e-0d1f0a3b7c11", "name": "Rolled oats", "quantity": 750, "unit": "g", "expiresOn": "2026-11-30", "addedBy": "John Doe" },
+  { "id": "a3e1f2b9-91c4-4f6a-9d7e-3c5b8a2e4f60", "name": "Oat milk", "quantity": 1000, "unit": "ml", "expiresOn": "2026-10-20", "addedBy": "test@example.com" }
+]

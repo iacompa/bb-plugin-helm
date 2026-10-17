@@ -1,0 +1,4 @@
+{
+  "loggers": ["app/src/main/java/com/example/ledger/util/AppLog.kt"],
+  "allow": []
+}

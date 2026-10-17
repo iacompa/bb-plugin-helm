@@ -1,0 +1,20 @@
+import { logger } from "./logger";
+
+const storageKey = "pantry/items/v3/by-location";
+
+export function loadCached<T>(parse: (raw: unknown) => T): T | null {
+  const raw = localStorage.getItem(storageKey);
+  if (raw === null) return null;
+  try {
+    return parse(JSON.parse(raw));
+  } catch (err) {
+    // A cache from an older schema is expected after upgrades: drop it and refetch.
+    logger.info("discarding incompatible cache", { error: String(err) });
+    localStorage.removeItem(storageKey);
+    return null;
+  }
+}
+
+export function saveCached(value: unknown): void {
+  localStorage.setItem(storageKey, JSON.stringify(value));
+}

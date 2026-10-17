@@ -1,0 +1,21 @@
+/* Today screen */
+"today.title" = "Today";
+"today.total %lld %lld" = "%1$lld of %2$lld ml";
+"today.progress.accessibility %lld" = "%lld millilitres so far today";
+
+/* History */
+"history.title" = "History";
+"history.empty.title" = "Nothing logged yet";
+"history.empty.body" = "Tap an amount on Today to log your first glass.";
+
+/* Settings */
+"settings.title" = "Settings";
+"settings.profile" = "Profile";
+"settings.name.placeholder" = "Your name";
+"settings.goal" = "Daily goal";
+
+/* Errors */
+"error.title" = "Something went wrong";
+"error.load" = "Your history couldn't be read. It hasn't been deleted.";
+"error.save" = "That glass wasn't saved. Check free storage and try again.";
+"common.ok" = "OK";

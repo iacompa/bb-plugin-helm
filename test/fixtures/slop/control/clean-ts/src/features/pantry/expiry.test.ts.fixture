@@ -1,0 +1,15 @@
+import { describe, expect, it } from "vitest";
+import { daysLeft, expiringWithin } from "./expiry";
+
+const today = new Date("2026-10-16T09:00:00");
+
+describe("expiry", () => {
+  it("counts calendar days, not 24h periods", () => {
+    expect(daysLeft({ expiresOn: "2026-10-17" }, today)).toBe(1);
+  });
+
+  it("returns soonest first", () => {
+    const items = [{ expiresOn: "2026-10-20" }, { expiresOn: "2026-10-18" }, { expiresOn: "2026-12-01" }];
+    expect(expiringWithin(items, 7, today).map((i) => i.expiresOn)).toEqual(["2026-10-18", "2026-10-20"]);
+  });
+});

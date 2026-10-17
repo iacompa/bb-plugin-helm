@@ -1,0 +1,12 @@
+import { z } from "zod";
+
+export const PantryItem = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1),
+  quantity: z.number().int().nonnegative(),
+  unit: z.enum(["g", "ml", "pcs"]),
+  expiresOn: z.string().date(),
+});
+
+export type PantryItem = z.infer<typeof PantryItem>;
+export const PantryItems = z.array(PantryItem);

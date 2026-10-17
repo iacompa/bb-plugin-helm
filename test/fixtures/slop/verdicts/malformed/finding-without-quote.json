@@ -1,0 +1,48 @@
+{
+  "repo": "s6-live-key",
+  "expectProblem": "needs path, line and an exact quote",
+  "verdict": {
+    "gate": "slop",
+    "appId": "tipjar",
+    "commit": "9f2c1ab",
+    "verdict": "fail",
+    "summary": "A live Stripe key is hard-coded in the payments client and committed in .env.",
+    "checks": [
+      {
+        "id": "scan",
+        "ok": false,
+        "how": "helm_slop_scan on 9f2c1ab -> 4 blockers",
+        "ref": "reports/slop/scan.json"
+      },
+      {
+        "id": "AC-03",
+        "ok": true,
+        "how": "ran .helm/run-check.sh tests -- npm test -> 14 passed",
+        "ref": "reports/tests/vitest.txt"
+      }
+    ],
+    "findings": [
+      {
+        "id": "F-1",
+        "rule": "S6",
+        "severity": "blocker",
+        "path": "src/payments/stripe.ts",
+        "line": 3,
+        "quote": "export const stripe = new Stripe(\"sk_live_FAKE0000FAKE\", {",
+        "why": "Live Stripe secret key committed in source.",
+        "fix": "Load it from the environment at runtime and rotate the key."
+      },
+      {
+        "id": "F-2",
+        "rule": "S6",
+        "severity": "blocker",
+        "path": ".env",
+        "line": 0,
+        "quote": "",
+        "why": "Committed .env holds the live key.",
+        "fix": "Remove .env from the repo and history; rotate."
+      }
+    ],
+    "unverified": []
+  }
+}

@@ -1,0 +1,13 @@
+import { differenceInCalendarDays, parseISO } from "date-fns";
+
+export interface Expiring {
+  expiresOn: string;
+}
+
+export function daysLeft(item: Expiring, today: Date): number {
+  return differenceInCalendarDays(parseISO(item.expiresOn), today);
+}
+
+export function expiringWithin<T extends Expiring>(items: T[], days: number, today: Date): T[] {
+  return items.filter((i) => daysLeft(i, today) <= days).sort((a, b) => a.expiresOn.localeCompare(b.expiresOn));
+}

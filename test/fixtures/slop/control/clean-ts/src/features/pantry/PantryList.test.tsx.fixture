@@ -1,0 +1,22 @@
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { PantryList } from "./PantryList";
+import { MockPantry } from "@app/test/mocks/MockPantry";
+
+vi.mock("@app/lib/api");
+
+describe("PantryList", () => {
+  it("filters by name", () => {
+    render(<PantryList items={MockPantry.items} onRemove={() => {}} />);
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "oat" } });
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  // TODO: cover the expiry badge once dates are injectable
+  it("removes an item", () => {
+    const onRemove = vi.fn();
+    render(<PantryList items={MockPantry.items} onRemove={onRemove} />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Remove" })[0]);
+    expect(onRemove).toHaveBeenCalledWith(MockPantry.items[0].id);
+  });
+});

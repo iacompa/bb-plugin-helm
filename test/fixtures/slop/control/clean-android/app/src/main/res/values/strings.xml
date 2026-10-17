@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Ledger</string>
+    <string name="search_hint">Search transactions</string>
+    <string name="amount_hint">e.g. 12.50</string>
+    <string name="empty_title">No transactions yet</string>
+    <string name="empty_body">Add your first expense with the + button.</string>
+    <string name="error_rates">Exchange rates are out of date. Amounts are shown in their original currency.</string>
+    <string name="error_save">The transaction wasn\'t saved. Try again.</string>
+    <string name="retry">Retry</string>
+</resources>

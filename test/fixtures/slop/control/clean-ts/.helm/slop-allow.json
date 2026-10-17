@@ -1,0 +1,5 @@
+{
+  "allow": [
+    { "rule": "S5", "path": "src/lib/logger.ts", "reason": "Project logger wrapper; console output is level-gated and dev-only for debug level." }
+  ]
+}

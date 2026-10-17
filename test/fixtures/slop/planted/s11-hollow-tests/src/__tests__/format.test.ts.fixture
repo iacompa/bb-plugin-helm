@@ -1,0 +1,13 @@
+import { describe, it } from "vitest";
+import { formatEta, trackingUrl } from "../format";
+
+describe("formatEta", () => {
+  it("formats minutes", () => {
+    formatEta(42);
+  });
+
+  it("formats hours and minutes", () => {
+    formatEta(135);
+    trackingUrl("dhl", "JD0146");
+  });
+});

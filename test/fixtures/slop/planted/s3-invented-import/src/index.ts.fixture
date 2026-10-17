@@ -1,0 +1,9 @@
+import { readFile } from "node:fs/promises";
+import { Transaction } from "./lib/schema";
+import { monthToDate, forecastLabel } from "./insights/monthly";
+
+export async function report(path: string): Promise<string> {
+  const raw = JSON.parse(await readFile(path, "utf8")) as unknown[];
+  const transactions = raw.map((r) => Transaction.parse(r));
+  return `${monthToDate(transactions, new Date())} so far, ${forecastLabel(transactions)} projected`;
+}

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="search_hint">Buchungen durchsuchen</string>
+    <string name="amount_hint">z. B. 12,50</string>
+    <string name="empty_title">Noch keine Buchungen</string>
+    <string name="empty_body">Füge deine erste Ausgabe mit + hinzu.</string>
+    <string name="error_rates">Die Wechselkurse sind veraltet. Beträge werden in der Originalwährung angezeigt.</string>
+    <string name="error_save">Die Buchung wurde nicht gespeichert. Bitte erneut versuchen.</string>
+    <string name="retry">Erneut versuchen</string>
+</resources>

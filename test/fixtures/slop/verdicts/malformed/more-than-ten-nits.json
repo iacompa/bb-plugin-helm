@@ -1,0 +1,158 @@
+{
+  "repo": "s6-live-key",
+  "expectProblem": "11 nits",
+  "verdict": {
+    "gate": "slop",
+    "appId": "tipjar",
+    "commit": "9f2c1ab",
+    "verdict": "fail",
+    "summary": "A live Stripe key is hard-coded in the payments client and committed in .env.",
+    "checks": [
+      {
+        "id": "scan",
+        "ok": false,
+        "how": "helm_slop_scan on 9f2c1ab -> 4 blockers",
+        "ref": "reports/slop/scan.json"
+      },
+      {
+        "id": "AC-03",
+        "ok": true,
+        "how": "ran .helm/run-check.sh tests -- npm test -> 14 passed",
+        "ref": "reports/tests/vitest.txt"
+      }
+    ],
+    "findings": [
+      {
+        "id": "F-1",
+        "rule": "S6",
+        "severity": "blocker",
+        "path": "src/payments/stripe.ts",
+        "line": 3,
+        "quote": "export const stripe = new Stripe(\"sk_live_FAKE0000FAKE\", {",
+        "why": "Live Stripe secret key committed in source.",
+        "fix": "Load it from the environment at runtime and rotate the key."
+      },
+      {
+        "id": "F-2",
+        "rule": "S6",
+        "severity": "blocker",
+        "path": ".env",
+        "line": 2,
+        "quote": "STRIPE_SECRET_KEY=sk_live_FAKE0000FAKE",
+        "why": "Committed .env holds the live key.",
+        "fix": "Remove .env from the repo and history; rotate."
+      },
+      {
+        "id": "F-3",
+        "rule": "R",
+        "severity": "nit",
+        "path": "src/server.ts",
+        "line": 1,
+        "quote": "import { Hono } from \"hono\";",
+        "why": "Style nit.",
+        "fix": "Tidy it."
+      },
+      {
+        "id": "F-4",
+        "rule": "R",
+        "severity": "nit",
+        "path": "src/server.ts",
+        "line": 2,
+        "quote": "import { createTip } from \"./payments/stripe\";",
+        "why": "Style nit.",
+        "fix": "Tidy it."
+      },
+      {
+        "id": "F-5",
+        "rule": "R",
+        "severity": "nit",
+        "path": "src/server.ts",
+        "line": 4,
+        "quote": "const app = new Hono();",
+        "why": "Style nit.",
+        "fix": "Tidy it."
+      },
+      {
+        "id": "F-6",
+        "rule": "R",
+        "severity": "nit",
+        "path": "src/server.ts",
+        "line": 6,
+        "quote": "app.post(\"/tips\", async (c) => {",
+        "why": "Style nit.",
+        "fix": "Tidy it."
+      },
+      {
+        "id": "F-7",
+        "rule": "R",
+        "severity": "nit",
+        "path": "src/server.ts",
+        "line": 7,
+        "quote": "const { amountCents, currency } = await c.req.json<{ amountCents: number; currency: string }>();",
+        "why": "Style nit.",
+        "fix": "Tidy it."
+      },
+      {
+        "id": "F-8",
+        "rule": "R",
+        "severity": "nit",
+        "path": "src/server.ts",
+        "line": 8,
+        "quote": "return c.json({ error: \"Minimum tip is 1.00\" }, 400);",
+        "why": "Style nit.",
+        "fix": "Tidy it."
+      },
+      {
+        "id": "F-9",
+        "rule": "R",
+        "severity": "nit",
+        "path": "src/server.ts",
+        "line": 9,
+        "quote": "return c.json({ clientSecret: await createTip(amountCents, currency) });",
+        "why": "Style nit.",
+        "fix": "Tidy it."
+      },
+      {
+        "id": "F-10",
+        "rule": "R",
+        "severity": "nit",
+        "path": "src/server.ts",
+        "line": 10,
+        "quote": "});",
+        "why": "Style nit.",
+        "fix": "Tidy it."
+      },
+      {
+        "id": "F-11",
+        "rule": "R",
+        "severity": "nit",
+        "path": "src/server.ts",
+        "line": 12,
+        "quote": "export default app;",
+        "why": "Style nit.",
+        "fix": "Tidy it."
+      },
+      {
+        "id": "F-12",
+        "rule": "R",
+        "severity": "nit",
+        "path": "src/server.ts",
+        "line": 1,
+        "quote": "import { Hono } from \"hono\";",
+        "why": "Style nit.",
+        "fix": "Tidy it."
+      },
+      {
+        "id": "F-13",
+        "rule": "R",
+        "severity": "nit",
+        "path": "src/server.ts",
+        "line": 2,
+        "quote": "import { createTip } from \"./payments/stripe\";",
+        "why": "Style nit.",
+        "fix": "Tidy it."
+      }
+    ],
+    "unverified": []
+  }
+}

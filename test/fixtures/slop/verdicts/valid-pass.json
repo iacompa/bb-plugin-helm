@@ -1,0 +1,36 @@
+{
+  "repo": "s6-live-key",
+  "verdict": {
+    "gate": "review",
+    "appId": "tipjar",
+    "commit": "9f2c1ab0c3d4",
+    "verdict": "pass",
+    "summary": "Acceptance criteria met; one nit on the minimum-tip message.",
+    "checks": [
+      {
+        "id": "AC-03",
+        "ok": true,
+        "how": "ran .helm/run-check.sh tests -- npm test -> 14 passed",
+        "ref": "reports/tests/vitest.txt"
+      }
+    ],
+    "findings": [
+      {
+        "id": "F-3",
+        "rule": "R",
+        "severity": "nit",
+        "path": "src/server.ts",
+        "line": 8,
+        "quote": "return c.json({ error: \"Minimum tip is 1.00\" }, 400);",
+        "why": "Minimum is hard-coded in USD formatting.",
+        "fix": "Format the minimum with the request currency."
+      }
+    ],
+    "unverified": [
+      {
+        "what": "Stripe webhook retries",
+        "reason": "No Stripe test account in the gate sandbox"
+      }
+    ]
+  }
+}

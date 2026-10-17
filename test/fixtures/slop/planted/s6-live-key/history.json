@@ -1,0 +1,4 @@
+[
+  { "commit": "4be1c0ffee5a1d2b3c4d5e6f708192a3b4c5d6e7", "path": "src/config.ts", "line": "export const GITHUB_TOKEN = \"ghp_0000FAKE0000FAKE0000FAKE0000FAKE00\";" },
+  { "commit": "4be1c0ffee5a1d2b3c4d5e6f708192a3b4c5d6e7", "path": "src/config.ts", "line": "export const PORT = Number(process.env.PORT ?? 8787);" }
+]

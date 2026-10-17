@@ -1,0 +1,14 @@
+"today.title" = "Heute";
+"today.total %lld %lld" = "%1$lld von %2$lld ml";
+"today.progress.accessibility %lld" = "Heute bisher %lld Milliliter";
+"history.title" = "Verlauf";
+"history.empty.title" = "Noch nichts eingetragen";
+"history.empty.body" = "Tippe auf Heute auf eine Menge, um dein erstes Glas einzutragen.";
+"settings.title" = "Einstellungen";
+"settings.profile" = "Profil";
+"settings.name.placeholder" = "Dein Name";
+"settings.goal" = "Tagesziel";
+"error.title" = "Etwas ist schiefgelaufen";
+"error.load" = "Dein Verlauf konnte nicht gelesen werden. Er wurde nicht gelöscht.";
+"error.save" = "Das Glas wurde nicht gespeichert. Prüfe den freien Speicher und versuche es erneut.";
+"common.ok" = "OK";

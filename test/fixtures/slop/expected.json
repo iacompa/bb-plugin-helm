@@ -1,0 +1,55 @@
+{
+  "_comment": "Per planted fixture: the findings the deterministic scanner must report ({rule, path, line}; line matches within ±1, history findings use line 0). Fixture files stored as <name>.fixture are scanned as <name>; history.json is passed as `history`, not scanned.",
+  "s1-todo-in-view": [
+    { "rule": "S1", "path": "Sources/Reader/Views/ArticleView.swift", "line": 12 },
+    { "rule": "S1", "path": "Sources/Reader/Views/ArticleView.swift", "line": 15 },
+    { "rule": "S1", "path": "Sources/Reader/Views/ArticleView.swift", "line": 21 },
+    { "rule": "S1", "path": "Sources/Reader/Services/ShareService.swift", "line": 5 }
+  ],
+  "s2-fake-user-in-prod": [
+    { "rule": "S2", "path": "app/src/main/java/com/example/crew/data/StubProfileRepository.kt", "line": 5 },
+    { "rule": "S2", "path": "app/src/main/java/com/example/crew/data/StubProfileRepository.kt", "line": 7 },
+    { "rule": "S2", "path": "app/src/main/java/com/example/crew/data/StubProfileRepository.kt", "line": 9 },
+    { "rule": "S2", "path": "app/src/main/java/com/example/crew/data/StubProfileRepository.kt", "line": 10 },
+    { "rule": "S2", "path": "app/src/main/java/com/example/crew/di/AppModule.kt", "line": 4 },
+    { "rule": "S2", "path": "app/src/main/java/com/example/crew/di/AppModule.kt", "line": 7 }
+  ],
+  "s3-invented-import": [
+    { "rule": "S3", "path": "src/insights/monthly.ts", "line": 2 },
+    { "rule": "S3", "path": "src/insights/monthly.ts", "line": 3 },
+    { "rule": "S3", "path": "package.json", "line": 13 }
+  ],
+  "s5-debug-logging": [
+    { "rule": "S5", "path": "Sources/Courier/Auth/LoginViewModel.swift", "line": 25 },
+    { "rule": "S5", "path": "Sources/Courier/Auth/LoginViewModel.swift", "line": 26 },
+    { "rule": "S5", "path": "Sources/Courier/Network/APIClient.swift", "line": 17 }
+  ],
+  "s6-live-key": [
+    { "rule": "S6", "path": "src/payments/stripe.ts", "line": 3 },
+    { "rule": "S6", "path": ".env", "line": 1 },
+    { "rule": "S6", "path": ".env", "line": 2 },
+    { "rule": "S6", "path": "test/uploads.test.ts", "line": 8 },
+    { "rule": "S6", "path": "src/config.ts", "line": 0 }
+  ],
+  "s7-narration": [
+    { "rule": "S7", "path": "src/cart.ts", "line": 1 },
+    { "rule": "S7", "path": "src/cart.ts", "line": 2 },
+    { "rule": "S7", "path": "src/cart.ts", "line": 5 },
+    { "rule": "S7", "path": "src/cart.ts", "line": 14 },
+    { "rule": "S7", "path": "src/cart.ts", "line": 23 },
+    { "rule": "S7", "path": "src/cart.ts", "line": 27 },
+    { "rule": "S7", "path": "src/cart.ts", "line": 30 },
+    { "rule": "S7", "path": "src/cart.ts", "line": 34 }
+  ],
+  "s11-hollow-tests": [
+    { "rule": "S11", "path": "src/__tests__/format.test.ts", "line": 5 },
+    { "rule": "S11", "path": "src/__tests__/parcels.test.ts", "line": 3 },
+    { "rule": "S11", "path": "src/__tests__/parcels.test.ts", "line": 16 },
+    { "rule": "S11", "path": "src/__tests__/parcels.test.ts", "line": 19 }
+  ],
+  "s12-swallowed": [
+    { "rule": "S12", "path": "Sources/Journal/Store/JournalStore.swift", "line": 18 },
+    { "rule": "S12", "path": "Sources/Journal/Store/JournalStore.swift", "line": 24 },
+    { "rule": "S12", "path": "Sources/Journal/Store/JournalStore.swift", "line": 32 }
+  ]
+}

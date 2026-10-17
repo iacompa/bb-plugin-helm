@@ -1,0 +1,12 @@
+import { Hono } from "hono";
+import { createTip } from "./payments/stripe";
+
+const app = new Hono();
+
+app.post("/tips", async (c) => {
+  const { amountCents, currency } = await c.req.json<{ amountCents: number; currency: string }>();
+  if (!Number.isInteger(amountCents) || amountCents < 100) return c.json({ error: "Minimum tip is 1.00" }, 400);
+  return c.json({ clientSecret: await createTip(amountCents, currency) });
+});
+
+export default app;

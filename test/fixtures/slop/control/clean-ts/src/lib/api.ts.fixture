@@ -1,0 +1,37 @@
+import { z } from "zod";
+import { logger } from "./logger";
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
+const BASE = import.meta.env.VITE_API_BASE_URL;
+
+/** Exponential backoff with full jitter so a household of devices doesn't retry in lockstep. */
+function backoffMs(attempt: number): number {
+  return Math.random() * Math.min(8_000, 250 * 2 ** attempt);
+}
+
+export async function getJson<T>(path: string, schema: z.ZodType<T>, attempts = 3): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const res = await fetch(`${BASE}${path}`, { headers: { Accept: "application/json" } });
+      if (res.status >= 500) throw new ApiError(`server error on ${path}`, res.status);
+      if (!res.ok) throw new ApiError(`request failed on ${path}`, res.status);
+      return schema.parse(await res.json());
+    } catch (err) {
+      lastError = err;
+      // 4xx will not fix itself on retry; surface it immediately.
+      if (err instanceof ApiError && err.status < 500) throw err;
+      logger.warn("retrying request", { path, attempt });
+      await new Promise((r) => setTimeout(r, backoffMs(attempt)));
+    }
+  }
+  throw lastError;
+}

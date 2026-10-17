@@ -1,0 +1,15 @@
+import { startOfMonth, isAfter } from "date-fns";
+import { forecastSpend } from "budget-forecast-sdk";
+import { formatMoney, formatMoneyCompact, sumCents } from "../lib/money";
+import type { Transaction } from "../lib/schema";
+
+export function monthToDate(transactions: Transaction[], now: Date): string {
+  const since = startOfMonth(now);
+  const spent = sumCents(transactions.filter((t) => isAfter(t.bookedAt, since)).map((t) => t.amountCents));
+  return formatMoney(spent);
+}
+
+export function forecastLabel(transactions: Transaction[]): string {
+  const projected = forecastSpend(transactions.map((t) => t.amountCents));
+  return formatMoneyCompact(projected);
+}

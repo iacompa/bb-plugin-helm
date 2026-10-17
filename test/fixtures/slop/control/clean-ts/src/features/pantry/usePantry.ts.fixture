@@ -1,0 +1,33 @@
+import { useCallback, useEffect, useState } from "react";
+import { getJson } from "@app/lib/api";
+import { loadCached, saveCached } from "@app/lib/storage";
+import { PantryItems, type PantryItem } from "./schema";
+
+type State =
+  | { status: "loading" }
+  | { status: "error"; error: unknown }
+  | { status: "ready"; items: PantryItem[] };
+
+export function usePantry() {
+  const [state, setState] = useState<State>(() => {
+    const cached = loadCached((raw) => PantryItems.parse(raw));
+    return cached ? { status: "ready", items: cached } : { status: "loading" };
+  });
+
+  const reload = useCallback(() => {
+    getJson("/items", PantryItems)
+      .then((items) => {
+        saveCached(items);
+        setState({ status: "ready", items });
+      })
+      .catch((error: unknown) => setState({ status: "error", error }));
+  }, []);
+
+  useEffect(reload, [reload]);
+
+  const remove = useCallback((id: string) => {
+    setState((s) => (s.status === "ready" ? { ...s, items: s.items.filter((i) => i.id !== id) } : s));
+  }, []);
+
+  return { ...state, reload, remove };
+}

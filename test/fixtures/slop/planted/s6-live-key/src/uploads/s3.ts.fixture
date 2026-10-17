@@ -1,0 +1,7 @@
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+
+const client = new S3Client({ region: process.env.AWS_REGION });
+
+export async function putReceipt(key: string, body: Uint8Array): Promise<void> {
+  await client.send(new PutObjectCommand({ Bucket: process.env.RECEIPTS_BUCKET, Key: key, Body: body }));
+}

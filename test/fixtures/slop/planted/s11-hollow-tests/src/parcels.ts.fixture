@@ -1,0 +1,13 @@
+export interface Parcel {
+  code: string;
+  carrier: string;
+  delivered: boolean;
+}
+
+export function pending(parcels: Parcel[]): Parcel[] {
+  return parcels.filter((p) => !p.delivered);
+}
+
+export async function refresh(parcels: Parcel[], fetchStatus: (code: string) => Promise<boolean>): Promise<Parcel[]> {
+  return Promise.all(parcels.map(async (p) => ({ ...p, delivered: await fetchStatus(p.code) })));
+}

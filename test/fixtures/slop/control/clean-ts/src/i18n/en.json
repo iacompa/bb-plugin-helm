@@ -1,0 +1,10 @@
+{
+  "title": "Pantry",
+  "loading": "Loading your pantry…",
+  "loadError": "Your pantry couldn't be loaded.",
+  "retry": "Try again",
+  "searchPlaceholder": "Search your pantry",
+  "empty": "Nothing here yet. Add what's in the cupboard to see what expires first.",
+  "expiresSoon": "Use within {days} days",
+  "remove": "Remove"
+}

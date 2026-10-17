@@ -1,0 +1,11 @@
+import en from "./en.json";
+
+// German strings ship with 1.0; until then every locale falls back to English.
+const tables = { en } as const;
+type Key = keyof typeof en;
+
+const lang = (navigator.language.slice(0, 2) in tables ? navigator.language.slice(0, 2) : "en") as keyof typeof tables;
+
+export function t(key: Key): string {
+  return tables[lang][key] ?? en[key];
+}

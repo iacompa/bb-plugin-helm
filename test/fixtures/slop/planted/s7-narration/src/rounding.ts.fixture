@@ -1,0 +1,9 @@
+// Banker's rounding: half-cent ties go to the even cent so that summing many
+// discounted lines does not drift upward against the payment provider's total.
+export function roundHalfEven(value: number): number {
+  const floor = Math.floor(value);
+  const diff = value - floor;
+  if (diff > 0.5) return floor + 1;
+  if (diff < 0.5) return floor;
+  return floor % 2 === 0 ? floor : floor + 1;
+}

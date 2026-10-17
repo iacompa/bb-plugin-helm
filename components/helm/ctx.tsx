@@ -1,0 +1,267 @@
+// Frame-level state shared by every Helm area: the selected run, its live
+// store, the catalog, view/selection/inspector state, overlays and pulses.
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import type { Catalog, DirectiveInfo, DirectiveType, InspTab, ReceiptState, RunListItem, SnapApp, SnapNode, View } from "./types.ts";
+import { useCatalog, useHelmRpc, useRunData, useRuns, type HelmRpc } from "./data.ts";
+import type { BatchEffects, RunState } from "./store.ts";
+
+export interface PulseEvent {
+  key: number;
+  directive: DirectiveInfo;
+}
+export interface ReceiptFlash {
+  key: number;
+  directiveId: string;
+  nodeId: string;
+  state: ReceiptState;
+}
+
+export interface StudioOpts {
+  /** focus this slot when opening */
+  slot?: string;
+}
+
+export interface HelmCtx {
+  rpc: HelmRpc;
+  rootRef: RefObject<HTMLDivElement | null>;
+  runs: RunListItem[] | null;
+  runsError: string | null;
+  refreshRuns: () => void;
+  runId: string | null;
+  setRunId: (id: string | null) => void;
+  data: RunState | null;
+  rev: number;
+  loading: boolean;
+  error: string | null;
+  refetch: () => void;
+  catalog: Catalog | null;
+  catalogError: string | null;
+  loadCatalog: (opts?: { refresh?: boolean; markSeen?: boolean }) => Promise<Catalog | null>;
+
+  view: View;
+  setView: (v: View) => void;
+  sel: string | null;
+  /** select a node (or ghost id "ghost:<threadId>") and open the inspector */
+  select: (id: string | null, opts?: { tab?: InspTab; dtype?: DirectiveType; keepClosed?: boolean }) => void;
+  tab: InspTab;
+  setTab: (t: InspTab) => void;
+  /** a directive type the Direct tab should start with (set by "Model", "Pause"… actions) */
+  draftType: { type: DirectiveType; key: number } | null;
+  inspOpen: boolean;
+  setInspOpen: (v: boolean) => void;
+  inspWide: boolean;
+  setInspWide: (v: boolean) => void;
+  drill: string | null;
+  setDrill: (appId: string | null) => void;
+  /** go to the graph and centre a node */
+  focusNode: (id: string) => void;
+  focusReq: { id: string; key: number } | null;
+  observatory: boolean;
+  setObservatory: (v: boolean) => void;
+
+  studio: StudioOpts | null;
+  openStudio: (o?: StudioOpts) => void;
+  closeStudio: () => void;
+  wizardOpen: boolean;
+  setWizardOpen: (v: boolean) => void;
+
+  /** realtime-derived animation triggers */
+  pulse: PulseEvent | null;
+  /** fire a pulse locally right after sending (the realtime echo is de-duplicated) */
+  firePulse: (d: DirectiveInfo) => void;
+  flashes: ReceiptFlash[];
+
+  /** helpers over the live store */
+  node: (id: string | null | undefined) => SnapNode | null;
+  app: (id: string | null | undefined) => SnapApp | null;
+}
+
+const Ctx = createContext<HelmCtx | null>(null);
+
+export function useHelm(): HelmCtx {
+  const c = useContext(Ctx);
+  if (!c) throw new Error("useHelm outside HelmProvider");
+  return c;
+}
+
+const LS_RUN = "helm:lastRun";
+function lsGet(k: string): string | null {
+  try {
+    return globalThis.localStorage?.getItem(k) ?? null;
+  } catch {
+    return null;
+  }
+}
+function lsSet(k: string, v: string | null) {
+  try {
+    if (v === null) globalThis.localStorage?.removeItem(k);
+    else globalThis.localStorage?.setItem(k, v);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+export function HelmProvider({ children, rootRef }: { children: ReactNode; rootRef: RefObject<HTMLDivElement | null> }) {
+  const rpc = useHelmRpc();
+  const { runs, error: runsError, refresh: refreshRuns } = useRuns(rpc);
+  const [runId, setRunIdState] = useState<string | null>(() => lsGet(LS_RUN));
+  const { catalog, error: catalogError, load: loadCatalog } = useCatalog(rpc);
+
+  const [pulse, setPulse] = useState<PulseEvent | null>(null);
+  const [flashes, setFlashes] = useState<ReceiptFlash[]>([]);
+  const pulsed = useRef(new Set<string>());
+  const key = useRef(0);
+  const firePulse = useCallback((d: DirectiveInfo) => {
+    if (pulsed.current.has(d.id)) return;
+    pulsed.current.add(d.id);
+    setPulse({ key: ++key.current, directive: d });
+  }, []);
+  const onEffects = useCallback(
+    (fx: BatchEffects) => {
+      for (const d of fx.created) if (d.actor === "human") firePulse(d);
+      if (fx.receipts.length) {
+        const add = fx.receipts.map((r) => ({ key: ++key.current, ...r }));
+        setFlashes((f) => [...f.slice(-30), ...add]);
+      }
+    },
+    [firePulse],
+  );
+  const { state: data, rev, loading, error, refetch } = useRunData(rpc, runId, onEffects);
+
+  // pick a run: the remembered one if it still exists, else the newest
+  useEffect(() => {
+    if (!runs) return;
+    if (runId && runs.some((r) => r.id === runId)) return;
+    const next = runs[0]?.id ?? null;
+    setRunIdState(next);
+    lsSet(LS_RUN, next);
+  }, [runs, runId]);
+
+  const [view, setView] = useState<View>("graph");
+  const [sel, setSel] = useState<string | null>(null);
+  const [tab, setTab] = useState<InspTab>("overview");
+  const [draftType, setDraftType] = useState<{ type: DirectiveType; key: number } | null>(null);
+  const [inspOpen, setInspOpen] = useState<boolean>(() => {
+    const w = rootRef.current?.clientWidth ?? globalThis.innerWidth ?? 1400;
+    return w > 1100;
+  });
+  const [inspWide, setInspWide] = useState(false);
+  const [drill, setDrill] = useState<string | null>(null);
+  const [focusReq, setFocusReq] = useState<{ id: string; key: number } | null>(null);
+  const [observatory, setObservatory] = useState(false);
+  const [studio, setStudio] = useState<StudioOpts | null>(null);
+  const [wizardOpen, setWizardOpen] = useState(false);
+
+  const setRunId = useCallback((id: string | null) => {
+    setRunIdState(id);
+    lsSet(LS_RUN, id);
+    setSel(null);
+    setDrill(null);
+    setTab("overview");
+  }, []);
+
+  const select = useCallback((id: string | null, opts: { tab?: InspTab; dtype?: DirectiveType; keepClosed?: boolean } = {}) => {
+    setSel(id);
+    if (opts.tab) setTab(opts.tab);
+    if (opts.dtype) setDraftType({ type: opts.dtype, key: ++key.current });
+    if (id && !opts.keepClosed) setInspOpen(true);
+  }, []);
+
+  const node = useCallback((id: string | null | undefined) => (id && data ? data.nodes[id] ?? null : null), [data, rev]); // eslint-disable-line react-hooks/exhaustive-deps
+  const app = useCallback((id: string | null | undefined) => (id && data ? data.apps[id] ?? null : null), [data, rev]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const focusNode = useCallback(
+    (id: string) => {
+      const n = data?.nodes[id];
+      setView("graph");
+      // a specialist or gate is easiest to see inside its squad; tier nodes in the portfolio
+      if (n && n.appId && (n.tier === "specialist" || n.tier === "gate" || n.tier === "lead")) setDrill(n.appId);
+      else if (n) setDrill(null);
+      setSel(id);
+      setInspOpen(true);
+      setFocusReq({ id, key: ++key.current });
+    },
+    [data],
+  );
+
+  // drop selection that vanished with a refetch
+  useEffect(() => {
+    if (sel && data && !sel.startsWith("ghost:") && !data.nodes[sel]) setSel(null);
+    if (drill && data && !data.apps[drill]) setDrill(null);
+  }, [data, rev, sel, drill]);
+
+  const value = useMemo<HelmCtx>(
+    () => ({
+      rpc,
+      rootRef,
+      runs,
+      runsError,
+      refreshRuns,
+      runId,
+      setRunId,
+      data,
+      rev,
+      loading,
+      error,
+      refetch,
+      catalog,
+      catalogError,
+      loadCatalog,
+      view,
+      setView,
+      sel,
+      select,
+      tab,
+      setTab,
+      draftType,
+      inspOpen,
+      setInspOpen,
+      inspWide,
+      setInspWide,
+      drill,
+      setDrill,
+      focusNode,
+      focusReq,
+      observatory,
+      setObservatory,
+      studio,
+      openStudio: (o: StudioOpts = {}) => setStudio(o),
+      closeStudio: () => setStudio(null),
+      wizardOpen,
+      setWizardOpen,
+      pulse,
+      firePulse,
+      flashes,
+      node,
+      app,
+    }),
+    [rpc, rootRef, runs, runsError, refreshRuns, runId, setRunId, data, rev, loading, error, refetch, catalog, catalogError, loadCatalog, view, sel, select, tab, draftType, inspOpen, inspWide, drill, focusNode, focusReq, observatory, studio, wizardOpen, pulse, firePulse, flashes, node, app],
+  );
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+// ───────────── Escape stack: the top-most overlay closes first ─────────────
+
+const escStack: Array<{ id: number; fn: () => void }> = [];
+let escId = 0;
+/** Register an Escape handler while `active`; the most recent registration wins. */
+export function useEscape(fn: () => void, active = true) {
+  const ref = useRef(fn);
+  ref.current = fn;
+  useEffect(() => {
+    if (!active) return;
+    const id = ++escId;
+    escStack.push({ id, fn: () => ref.current() });
+    return () => {
+      const i = escStack.findIndex((e) => e.id === id);
+      if (i >= 0) escStack.splice(i, 1);
+    };
+  }, [active]);
+}
+/** Run the top-most Escape handler. Returns false when nothing was open. */
+export function popEscape(): boolean {
+  const top = escStack[escStack.length - 1];
+  if (!top) return false;
+  top.fn();
+  return true;
+}

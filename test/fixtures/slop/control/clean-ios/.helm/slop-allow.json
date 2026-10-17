@@ -1,0 +1,6 @@
+{
+  "loggers": ["Sources/Tide/Support/Log.swift"],
+  "allow": [
+    { "rule": "S5", "path": "Sources/Tide/Support/Log.swift", "reason": "Project logger wrapper: the only place allowed to write to the console, levels gated by build configuration." }
+  ]
+}
