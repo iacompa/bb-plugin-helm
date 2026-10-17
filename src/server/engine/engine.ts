@@ -605,9 +605,21 @@ export class Engine {
 
   private pumpRun(run: RunInfo): void {
     if (run.status !== "running") return;
-    const queued = this.repo.nodesByStatus(run.id, ["queued"]).filter((n) => !n.threadId && !this.repo.pendingForNode(n.id, run.id).some((o) => o.kind === "spawn"));
+    const spawning = (runId: string, nodeId: string) => this.repo.pendingForNode(nodeId, runId).some((o) => o.kind === "spawn");
+    // a parent is "on its way" when it has a thread or a spawn queued; until then its children wait
+    // for it and must not take a slot, or they can hold every slot while the parent waits for one
+    const parentReady = (runId: string, parentId: string | null) => {
+      if (!parentId) return true;
+      const p = this.repo.getNode(runId, parentId);
+      return !p || !!p.threadId || spawning(runId, p.id);
+    };
+    const queued = this.repo
+      .nodesByStatus(run.id, ["queued"])
+      .filter((n) => !n.threadId && !spawning(run.id, n.id) && parentReady(run.id, n.parentId));
     if (!queued.length) return;
-    const pendingSpawns = this.repo.db.prepare("SELECT COUNT(*) AS c FROM outbox WHERE kind = 'spawn' AND state IN ('pending','inflight')").get() as { c: number };
+    // spawns already queued count against concurrency, except ones blocked on a parent that is not on its way (they hold no thread)
+    const pendingRows = this.repo.db.prepare("SELECT run_id AS r, node_id AS n FROM outbox WHERE kind = 'spawn' AND state IN ('pending','inflight')").all() as Array<{ r: string; n: string }>;
+    const pendingSpawns = { c: pendingRows.filter((o) => parentReady(o.r, this.repo.getNode(o.r, o.n)?.parentId ?? null)).length };
     const apps = new Map(this.repo.listApps(run.id).map((a) => [a.id, a]));
     const eligible: Eligible[] = queued.map((n) => {
       const app = n.appId ? apps.get(n.appId) : undefined;
@@ -645,6 +657,8 @@ export class Engine {
         this.repo.updateNode(run.id, id, { warning: null });
       }
     });
+    // children of the supervisors just queued may start now, if capacity allows
+    this.pumpAgain = true;
   }
 
   /** What a replacement thread needs from its predecessor, from Helm's own records (never a transcript). */

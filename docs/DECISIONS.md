@@ -137,3 +137,11 @@ The open decisions from the brief (§17.2) took their defaults. Where reality on
     - **Plan output.** Each adopted folder says when its branch is made and how many uncommitted changes agents will NOT see. The run folder is printed with `--root`, and the output says how to start and how to discard. Another live run on the same folders is named, with its end command.
     - **`bb helm end --run <id> --yes`** cancels a run or discards a draft.
     - **Git reads never write the human's index.** Host git commands run with `GIT_OPTIONAL_LOCKS=0`, so `git status` during planning doesn't refresh the index files of their checkout or worktrees. `test/unit/host-ops.test.ts` proves this against real git, with a control that shows plain `git status` does write the index.
+
+32. **A run that started but never spawned (incident).** A 22-app run at concurrency 4 showed the Orchestrator *queued, no thread yet* indefinitely, and a steer did not help. At start, the Orchestrator and the six Managers are all first in line. The scheduler's tie-break (fair share, then node id) put `m0`…`m3` ahead of `orch`, so the four Managers took all four slots. Their spawns then waited for the Orchestrator's thread, and the Orchestrator waited for a slot, forever. Fixes, in `domain/scheduler.ts` and `Engine.pumpRun`:
+    - **Supervisors first.** In the start batch, the Orchestrator goes before the Managers, and the Managers before everyone else.
+    - **Children wait without holding a slot.** A node is not admitted until its parent has a thread or a queued spawn.
+    - **Recovery.** Spawns already blocked on a parent that isn't on its way don't count against concurrency, so a run that is already stuck frees itself.
+    - **Children follow in the same pass.** The pump goes round again after admitting supervisors, so their children are admitted straight away.
+
+    Reconcile at startup pumps every live run, so stuck runs recover when the plugin updates. `test/sim/start-order.test.ts` reproduces the stuck state, and all three of its tests fail without the fix.

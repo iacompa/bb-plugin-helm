@@ -70,14 +70,17 @@ export interface Eligible {
   providerId: string | null;
 }
 
-/** Sort key per §4.3: first-in-line, app priority, stage depth (gates first), fair share, age. */
+/** At start the Orchestrator, then Managers, go first: a child cannot spawn before its parent has a thread. */
+const SUPERVISOR_RANK: Partial<Record<Tier, number>> = { orchestrator: 0, manager: 1 };
+
+/** Sort key per §4.3: first-in-line, supervisors before their teams, app priority, stage depth (gates first), fair share, age. */
 export function prioritize(nodes: Eligible[]): Eligible[] {
   const managerTurn = new Map<string, number>();
   const byKey = nodes.map((n) => {
     const m = n.managerId ?? "_";
     const turn = managerTurn.get(m) ?? 0;
     managerTurn.set(m, turn + 1);
-    return { n, key: [n.firstInLine ? 0 : 1, PRIO[n.appPriority], -(n.appStage ? STAGE_IDX[n.appStage] : 0) - (n.tier === "gate" ? 1 : 0), turn, n.createdAt] };
+    return { n, key: [n.firstInLine ? 0 : 1, n.firstInLine ? SUPERVISOR_RANK[n.tier] ?? 2 : 2, PRIO[n.appPriority], -(n.appStage ? STAGE_IDX[n.appStage] : 0) - (n.tier === "gate" ? 1 : 0), turn, n.createdAt] };
   });
   byKey.sort((a, b) => {
     for (let i = 0; i < a.key.length; i++) if (a.key[i] !== b.key[i]) return a.key[i] - b.key[i];
