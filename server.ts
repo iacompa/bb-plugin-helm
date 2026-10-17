@@ -63,6 +63,7 @@ export default async function plugin(bb: BbPluginApi) {
   });
   installEventHandler(engine, { selfPluginIds: [bb.pluginId] });
   svc = new HelmService(engine);
+  svc.writeSettings = settings.write;
   const planner = new Planner(engine, (s) => bb.realtime.publish(PLANNER_CHANNEL, { id: s.id, status: s.status }));
   planner.install();
   svc.planner = planner;

@@ -47,6 +47,8 @@ export const RPC_SCHEMAS = {
   run_setSlots: { input: z.object({ runId: Id, slots: SlotsZ }), output: Any },
   /** Read-only: whether a planned run can start (models, folders) and what Helm will do with each folder. */
   run_readiness: { input: Run, output: Any },
+  settings_permissions: { input: z.object({}), output: Any },
+  settings_setPermissions: { input: z.object({ modes: z.record(z.enum(["orchestrator", "manager", "lead", "specialist", "gate"]), z.enum(["auto", "accept-edits", "full"])).optional(), approvePrompts: z.enum(["supervisor", "human"]).optional() }), output: Any },
   /** Change a run's concurrency and budget cap, before or during the run. */
   run_setLimits: { input: z.object({ runId: Id, concurrency: z.number().int().min(1).max(48).optional(), budgetCap: z.number().positive().max(1e9).optional(), autonomy: z.enum(["high", "ask"]).optional() }), output: Any },
   run_start: { input: z.object({ runId: Id, dryRun: z.boolean().optional() }), output: Any },

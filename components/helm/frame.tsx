@@ -212,7 +212,7 @@ function TopBar() {
   const h = useHelm();
   const { data, view, setView, catalog } = h;
   const conn = useRealtimeConnectionState();
-  const [pop, setPop] = useState<{ kind: "run" | "cap"; el: HTMLElement } | null>(null);
+  const [pop, setPop] = useState<{ kind: "run" | "cap" | "perm"; el: HTMLElement } | null>(null);
   const toggle = (kind: "run" | "cap", el: HTMLElement) => setPop((p) => (p && p.kind === kind ? null : { kind, el }));
   const run = data?.run ?? null;
   const nodes = useMemo(() => (data ? data.nodeOrder.map((id) => data.nodes[id]) : []), [data, h.rev]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -305,6 +305,10 @@ function TopBar() {
           </span>
         </>
       ) : null}
+      <button type="button" className="btn" onClick={(e) => setPop(pop?.kind === "perm" ? null : { kind: "perm", el: e.currentTarget })} title="Permissions: what agents may do, and who approves their prompts" aria-label="Permissions" aria-expanded={pop?.kind === "perm"} data-testid="permissions">
+        <Ic name="SecurityCheck" size="sm" />
+        <span className="btn-lbl"> Permissions</span>
+      </button>
       <button type="button" className="btn" onClick={() => h.openStudio()} title="Model Studio" aria-label="Model Studio" data-testid="studio">
         <Ic name="SlidersHorizontal" size="sm" />
         <span className="btn-lbl"> Models</span>
@@ -320,6 +324,7 @@ function TopBar() {
     </header>
     {pop?.kind === "run" ? <RunPopover anchor={pop.el} onClose={() => setPop(null)} /> : null}
     {pop?.kind === "cap" ? <CapPopover anchor={pop.el} onClose={() => setPop(null)} /> : null}
+    {pop?.kind === "perm" ? <PermPopover anchor={pop.el} onClose={() => setPop(null)} /> : null}
     </>
   );
 }
@@ -566,6 +571,115 @@ function LimitsEditor() {
         </div>
       ) : null}
     </div>
+  );
+}
+
+type PermMode = "auto" | "accept-edits" | "full";
+type Perms = { modes: Record<string, PermMode>; approvePrompts: "supervisor" | "human" };
+const PERM_ROLES: Array<[string, string]> = [
+  ["orchestrator", "Orchestrator"],
+  ["manager", "Managers"],
+  ["lead", "App leads"],
+  ["specialist", "Builders (UI, code, platform…)"],
+  ["gate", "Gates (Reviewer, Slop Hunter)"],
+];
+const PERM_MODES: Array<[PermMode, string]> = [
+  ["auto", "Auto"],
+  ["accept-edits", "Allow edits"],
+  ["full", "Full access"],
+];
+
+/** Helm's permission settings, editable from the panel (the same values as BB → Settings → Helm). */
+function PermPopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => void }) {
+  const h = useHelm();
+  const [saved, setSaved] = useState<Perms | null>(null);
+  const [draft, setDraft] = useState<Perms | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    h.rpc.call("settings_permissions", {}).then(
+      (r: Perms) => live && (setSaved(r), setDraft(r)),
+      (e: unknown) => live && toast.error("Could not read Helm's permission settings", { description: errMsg(e) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [h.rpc]);
+  const dirty = !!saved && !!draft && JSON.stringify(saved) !== JSON.stringify(draft);
+  const save = async () => {
+    if (!draft) return;
+    setBusy(true);
+    try {
+      const r = (await h.rpc.call("settings_setPermissions", draft)) as Perms;
+      setSaved(r);
+      setDraft(r);
+      toast.success("Permissions saved", { description: "New agents start with these modes. Running agents keep the mode they started with." });
+    } catch (e) {
+      toast.error("Could not save permissions", { description: errMsg(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Popover anchor={anchor} onClose={onClose} width={440} align="right" label="Permissions">
+      <div className="ph">
+        <span>Permissions</span>
+        <button type="button" className="iconbtn sm" onClick={onClose} aria-label="Close">
+          <Ic name="X" size="sm" />
+        </button>
+      </div>
+      <div className="pb">
+        {!draft ? (
+          <span className="muted">Loading…</span>
+        ) : (
+          <div className="col" style={{ gap: 12 }}>
+            <div className="field">
+              <span className="lbl">Who approves agents' permission prompts</span>
+              <div className="seg" role="radiogroup" aria-label="Who approves agents' permission prompts">
+                {([["supervisor", "Their supervisor, for me"], ["human", "Me, every time"]] as const).map(([v, l]) => (
+                  <button key={v} type="button" role="radio" aria-checked={draft.approvePrompts === v} className={draft.approvePrompts === v ? "on" : ""} disabled={busy} onClick={() => setDraft({ ...draft, approvePrompts: v })}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <span className="hint-t">
+                {draft.approvePrompts === "supervisor"
+                  ? "A builder's prompt goes to its lead, a lead's to its manager, a manager's to the Orchestrator. You get only credentials, spending, private data or access, the Orchestrator's own prompts, and anything unanswered for 15 minutes."
+                  : "Every permission prompt from every agent comes to Needs you."}
+              </span>
+            </div>
+            <div className="field">
+              <span className="lbl">What each role may do</span>
+              {PERM_ROLES.map(([tier, label]) => (
+                <div key={tier} className="row" style={{ justifyContent: "space-between", gap: 8, marginTop: 4 }}>
+                  <span style={{ minWidth: 0 }}>{label}</span>
+                  <div className="seg" role="radiogroup" aria-label={`Permission mode: ${label}`}>
+                    {PERM_MODES.map(([v, l]) => (
+                      <button key={v} type="button" role="radio" aria-checked={draft.modes[tier] === v} className={draft.modes[tier] === v ? "on" : ""} disabled={busy} onClick={() => setDraft({ ...draft, modes: { ...draft.modes, [tier]: v } })}>
+                        {l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <span className="hint-t">
+                <b>Auto</b>: BB's safety check allows routine commands and asks about risky ones. <b>Allow edits</b>: file edits go ahead, commands ask. <b>Full access</b>: no permission checks. Applies to agents started after you save; running agents keep their mode. Some providers (e.g. Grok) have no Auto mode.
+              </span>
+            </div>
+            {dirty ? (
+              <div className="row" style={{ gap: 8 }}>
+                <button type="button" className="btn sm primary" disabled={busy} onClick={() => void save()} data-testid="save-permissions">
+                  {busy ? "Saving…" : "Save"}
+                </button>
+                <button type="button" className="btn sm ghost" disabled={busy} onClick={() => setDraft(saved)}>
+                  Reset
+                </button>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+    </Popover>
   );
 }
 

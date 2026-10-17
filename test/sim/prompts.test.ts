@@ -77,3 +77,22 @@ test("approval cards already waiting in Needs you move to the supervisors when t
   assert.equal(humanCards(h, runId).length, 0);
   assert.equal(pendingPrompts(h.engine, runId)[0]?.approverId, lead.id);
 });
+
+test("the panel reads and writes the permission settings (per role, and who approves)", async () => {
+  const { HelmService } = await import("../../src/server/service.ts");
+  const { toHelmSettings } = await import("../../src/server/settings.ts");
+  const h = await createHarness();
+  const svc = new HelmService(h.engine);
+  const stored: Record<string, string> = {};
+  svc.writeSettings = async (v) => {
+    Object.assign(stored, v);
+    Object.assign(h.engine.settings, toHelmSettings(stored));
+  };
+  assert.deepEqual(svc.permissions().approvePrompts, "supervisor");
+  const r = await svc.setPermissions({ modes: { lead: "full", specialist: "accept-edits" }, approvePrompts: "human" });
+  assert.deepEqual(stored, { permissionLead: "full", permissionSpecialist: "accept-edits", approvePrompts: "human" });
+  assert.equal(r.modes.lead, "full");
+  assert.equal(r.modes.manager, "auto");
+  assert.equal(r.approvePrompts, "human");
+  await assert.rejects(svc.setPermissions({ modes: { boss: "full" } as never }), /Unknown role/);
+});

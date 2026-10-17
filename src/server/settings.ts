@@ -105,11 +105,21 @@ export function toHelmSettings(v: Values, warn: (m: string) => void = () => {}):
 }
 
 /** Define the settings and keep a synchronous copy current for the engine. */
-export async function bindSettings(bb: BbPluginApi): Promise<() => HelmSettings> {
+export type SettingsWriter = (values: Partial<Record<keyof typeof SETTINGS_DESCRIPTORS, string | number | boolean>>) => Promise<void>;
+
+/** Helm's live settings, plus a writer for the panel (the same values as BB's Settings page). */
+export async function bindSettings(bb: BbPluginApi): Promise<(() => HelmSettings) & { write: SettingsWriter }> {
   const handle = bb.settings.define(SETTINGS_DESCRIPTORS);
   let current = toHelmSettings((await handle.get()) as Values, (m) => bb.log.warn(m));
   handle.onChange((next) => {
     current = toHelmSettings(next as Values, (m) => bb.log.warn(m));
   });
-  return () => current;
+  const write: SettingsWriter = async (values) => {
+    await handle.experimental_set(values as never);
+    current = toHelmSettings((await handle.get()) as Values, (m) => bb.log.warn(m));
+  };
+  return Object.assign(() => current, { write });
 }
+
+/** The setting key for each tier's permission mode. */
+export const PERMISSION_KEYS = { orchestrator: "permissionOrchestrator", manager: "permissionManager", lead: "permissionLead", specialist: "permissionSpecialist", gate: "permissionGate" } as const;

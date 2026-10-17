@@ -1,7 +1,8 @@
 // The service layer: one set of functions behind the CLI, the RPC and the UI,
 // so a directive sent from any surface is the same code path (§9 rules).
 
-import type { Autonomy, DirectiveInfo, ModelRef, NodeInfo, PermissionMode, Portfolio, RunInfo, SlotId, SlotMap } from "../shared/types.ts";
+import type { Autonomy, DirectiveInfo, ModelRef, NodeInfo, PermissionMode, Portfolio, RunInfo, SlotId, SlotMap, Tier } from "../shared/types.ts";
+import { PERMISSION_KEYS, type SettingsWriter } from "./settings.ts";
 import { SLOT_IDS, SEED_PRESETS, modelName, validateRef } from "./domain/models.ts";
 import { ORCH_ID } from "./domain/topology.ts";
 import { createDirective, previewDirective, resolveNeed, type DirectiveInput, type NeedResolution } from "./engine/direct.ts";
@@ -40,6 +41,8 @@ export class HelmService {
   private portfolioTimers = new Map<string, () => void>();
 
   planner: Planner | null = null;
+  /** Writes Helm's BB settings (set by the plugin factory; absent in tests that do not need it). */
+  writeSettings: SettingsWriter | null = null;
 
   constructor(readonly engine: Engine) {}
 
@@ -143,6 +146,25 @@ export class HelmService {
    * and the budget cap. Raising the cap above the spend lifts a budget pause. Recorded as an event
    * and told to the Orchestrator as one FYI line.
    */
+  /** Per-role permission modes and who approves agents' prompts (Helm settings, shared with BB's Settings page). */
+  permissions() {
+    const s = this.engine.settings;
+    return { modes: { ...s.permissionMode }, approvePrompts: s.approvePrompts };
+  }
+
+  async setPermissions(input: { modes?: Partial<Record<Tier, PermissionMode>>; approvePrompts?: "supervisor" | "human" }) {
+    if (!this.writeSettings) throw new HelmError("Settings cannot be written here.", "bad_state");
+    const values: Record<string, string> = {};
+    for (const [tier, mode] of Object.entries(input.modes ?? {})) {
+      const key = PERMISSION_KEYS[tier as Tier];
+      if (!key || !["auto", "accept-edits", "full"].includes(String(mode))) throw new HelmError(`Unknown role or mode: ${tier}=${String(mode)}.`, "invalid_value");
+      values[key] = String(mode);
+    }
+    if (input.approvePrompts) values.approvePrompts = input.approvePrompts;
+    if (Object.keys(values).length) await this.writeSettings(values);
+    return this.permissions();
+  }
+
   async setLimits(runId: string, input: { concurrency?: number; budgetCap?: number; autonomy?: Autonomy; permission?: { providerId: string; mode: PermissionMode } }) {
     let run = this.engine.run(runId);
     if (run.status === "done" || run.status === "cancelled") throw new HelmError(`The run is ${run.status}; its limits can no longer change.`, "bad_state");
