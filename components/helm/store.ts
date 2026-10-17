@@ -255,3 +255,19 @@ export function openNeeds(s: Pick<RunState, "needs">): NeedInfo[] {
 export function managerOfApp(s: Pick<RunState, "managers">, appId: string): PlannedManager | null {
   return s.managers.find((m) => m.appIds.includes(appId)) ?? null;
 }
+
+/**
+ * Session tabs: which run to show and which tabs stay open once the runs list is known.
+ * A run that no longer exists closes; on the first load the remembered run, else an open
+ * tab, else (first visit ever) the newest run is shown. After that a null run is a
+ * deliberate fresh session and stays blank.
+ */
+export function resolveSession(runIds: string[], runId: string | null, tabs: string[], opts: { firstLoad: boolean; firstVisit: boolean }): { runId: string | null; tabs: string[] } {
+  const exists = new Set(runIds);
+  let open = tabs.filter((id) => exists.has(id));
+  let next = runId;
+  if (next && !exists.has(next)) next = open[0] ?? null;
+  else if (!next && opts.firstLoad) next = open[0] ?? (opts.firstVisit ? runIds[0] ?? null : null);
+  if (next && !open.includes(next)) open = [...open, next];
+  return { runId: next, tabs: open };
+}

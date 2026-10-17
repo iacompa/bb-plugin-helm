@@ -64,7 +64,7 @@
   min-height: 0;
   width: 100%;
   display: grid;
-  grid-template-rows: 52px minmax(0, 1fr);
+  grid-template-rows: 52px auto minmax(0, 1fr);
   container-type: inline-size;
   container-name: helm;
   background: var(--h-bg);
@@ -635,3 +635,20 @@
   .helm .nbody, .helm .nfoot { padding-left: 14px; }
 }
 @container helm (max-width: 700px) { .helm .chip.cap { display: none; } .helm .search { width: 170px; } }
+
+/* session tabs: several runs open at once, plus a fresh start page */
+.helm .runtabs { display: flex; align-items: center; gap: 4px; padding: 0 10px; background: var(--h-surface); border-bottom: 1px solid var(--h-line); overflow-x: auto; scrollbar-width: none; min-width: 0; }
+.helm .runtabs:empty { display: none; }
+.helm .runtabs::-webkit-scrollbar { display: none; }
+.helm .rtab { display: flex; align-items: center; flex: none; max-width: 240px; height: 34px; border-bottom: 2px solid transparent; color: var(--h-fg-2); }
+.helm .rtab.on { border-bottom-color: var(--h-accent); color: var(--h-fg); }
+.helm .rtab .rt-main { display: flex; align-items: center; gap: 7px; min-width: 0; height: 28px; padding: 0 6px 0 9px; border-radius: 7px; font-weight: 550; font-size: 12.5px; }
+.helm .rtab .rt-main:hover { background: var(--h-surface-2); }
+.helm .rtab .rt-main .trunc { min-width: 0; }
+.helm .rtab .rt-st { font-size: 11px; color: var(--h-fg-3); font-weight: 450; }
+.helm .rtab .rt-x { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--h-fg-3); opacity: 0; }
+.helm .rtab:hover .rt-x, .helm .rtab.on .rt-x, .helm .rtab .rt-x:focus-visible { opacity: 1; }
+.helm .rtab .rt-x:hover { background: var(--h-surface-3); color: var(--h-fg); }
+.helm .rt-new { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border-radius: 7px; color: var(--h-fg-3); font-size: 12px; }
+.helm .rt-new:hover { background: var(--h-surface-2); color: var(--h-fg); }
+.helm .hero .recent { width: 100%; display: flex; flex-direction: column; gap: 2px; text-align: left; }

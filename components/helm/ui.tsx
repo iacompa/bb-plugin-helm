@@ -228,7 +228,8 @@ export function Popover({ anchor, onClose, width = 360, align = "left", label, c
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   useEscape(onClose);
   useLayoutEffect(() => {
-    const root = rootRef.current;
+    // measure against the box the popover is actually positioned in
+    const root = (ref.current?.offsetParent as HTMLElement | null) ?? rootRef.current;
     if (!anchor || !root || !ref.current) return;
     const rr = root.getBoundingClientRect();
     const a = anchor.getBoundingClientRect();
@@ -253,6 +254,8 @@ export function Popover({ anchor, onClose, width = 360, align = "left", label, c
   useEffect(() => {
     setTimeout(() => ref.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus(), 20);
   }, []);
+  // positions are relative to the Helm root, so render a Popover as a direct child of it
+  // (never inside the top bar, whose box would size and clip it)
   return (
     <div ref={ref} className="pop" role="dialog" aria-label={label} style={{ width, left: pos?.left ?? -9999, top: pos?.top ?? 0, visibility: pos ? "visible" : "hidden" }}>
       {children}

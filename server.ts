@@ -44,7 +44,8 @@ export default async function plugin(bb: BbPluginApi) {
     log,
     publish: (runId, event, payload) => {
       realtime.push(runId, event, payload);
-      if (event === "run.updated") bb.realtime.publish(RUNS_CHANNEL, { runId, payload });
+      // the runs list (session tabs) shows status and open needs for every run, not just the one on screen
+      if (event === "run.updated" || event === "need.created" || event === "need.resolved") bb.realtime.publish(RUNS_CHANNEL, { runId, event });
       if (PORTFOLIO_EVENTS.has(event)) svc?.portfolioChanged(runId);
     },
   });

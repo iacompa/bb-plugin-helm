@@ -21,7 +21,7 @@ export function registerRpc(bb: BbPluginApi, svc: HelmService): void {
   const e = svc.engine;
   const primaryCatalog = async (refresh = false) => e.catalog(await e.port.primaryHostId(), refresh);
   bb.rpc.register(RPC, {
-    run_list: () => ({ runs: svc.repo.listRuns().sort((a, b) => b.createdAt - a.createdAt).map((r) => ({ ...r, spend: e.spend(r.id), apps: svc.repo.listApps(r.id).length })) }),
+    run_list: () => ({ runs: svc.repo.listRuns().sort((a, b) => b.createdAt - a.createdAt).map((r) => ({ ...r, spend: e.spend(r.id), apps: svc.repo.listApps(r.id).length, needs: svc.repo.listNeeds(r.id, "open").length })) }),
     run_get: ({ runId }) => svc.snapshot(runId),
     run_create: (input) => svc.plan(input as never),
     run_setSlots: ({ runId, slots }) => svc.setSlots(runId, slots as SlotMap),

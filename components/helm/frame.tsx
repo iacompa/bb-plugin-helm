@@ -15,7 +15,7 @@ import { LedgerView } from "./ledger.tsx";
 import { NeedsView } from "./needs.tsx";
 import { Inspector } from "./inspector/index.tsx";
 import { StudioModal } from "./studio.tsx";
-import { EXAMPLES, WizardModal, seedWizardBrief } from "./wizard.tsx";
+import { EXAMPLES, WizardModal, seedWizardBrief, seedWizardMode } from "./wizard.tsx";
 
 export function HelmApp() {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -69,15 +69,16 @@ function Frame() {
     return () => document.removeEventListener("keydown", onKey);
   }, [rootRef, inspOpen, setInspOpen, setView]);
 
-  const noRuns = h.runs !== null && h.runs.length === 0;
-  const showInspector = inspOpen && !!data;
+  const startPage = h.runs !== null && (h.runs.length === 0 || !h.runId);
+  const showInspector = inspOpen && !!data && !!h.runId;
 
   return (
     <>
       <TopBar />
+      <RunTabs />
       <div className="main">
         <section className="stagewrap" aria-label="Main view">
-          {noRuns ? (
+          {startPage ? (
             <Hero />
           ) : !data ? (
             <div className="hero">
@@ -126,6 +127,51 @@ function Frame() {
   );
 }
 
+// ───────────── session tabs ─────────────
+
+function RunTabs() {
+  const h = useHelm();
+  const runs = h.runs ?? [];
+  if (!runs.length) return <div className="runtabs" />;
+  const byId = new Map(runs.map((r) => [r.id, r]));
+  const open = h.tabs.filter((id) => byId.has(id));
+  return (
+    <div className="runtabs" role="tablist" aria-label="Open sessions">
+      {open.map((id) => {
+        const r = byId.get(id)!;
+        const live = r.status === "running" || r.status === "paused";
+        return (
+          <div key={id} className={cx("rtab", id === h.runId && "on")}>
+            <button type="button" role="tab" aria-selected={id === h.runId} className="rt-main" onClick={() => h.setRunId(id)} title={`${r.name} · ${plural(r.apps, "app")} · ${r.status}`}>
+              <span className={cx("live-dot", !live && "off")} />
+              <span className="trunc">{r.name}</span>
+              {live ? null : <span className="rt-st">{r.status}</span>}
+              {r.needs ? (
+                <span className="count warn" aria-label={`${r.needs} need you`}>
+                  {r.needs}
+                </span>
+              ) : null}
+            </button>
+            <button type="button" className="rt-x" onClick={() => h.closeTab(id)} aria-label={`Close ${r.name} (the run keeps going)`} title="Close this tab — the run keeps going">
+              <Ic name="X" size="sm" />
+            </button>
+          </div>
+        );
+      })}
+      {!h.runId ? (
+        <div className="rtab on">
+          <span className="rt-main">
+            <Ic name="Plus" size="sm" /> New session
+          </span>
+        </div>
+      ) : null}
+      <button type="button" className="rt-new" onClick={h.newSession} title="Start a fresh session (your runs keep going)" data-testid="new-session">
+        <Ic name="Plus" size="sm" /> {h.runId ? "New session" : ""}
+      </button>
+    </div>
+  );
+}
+
 // ───────────── top bar ─────────────
 
 function TopBar() {
@@ -152,6 +198,7 @@ function TopBar() {
   );
 
   return (
+    <>
     <header className="topbar">
       <div className="brand">
         <span className="logo">
@@ -159,7 +206,7 @@ function TopBar() {
         </span>
         <span className="wm">Helm</span>
       </div>
-      {h.runs && h.runs.length ? (
+      {h.runId && h.runs && h.runs.length ? (
         <button type="button" className="runsw" onClick={(e) => toggle("run", e.currentTarget)} aria-label="Run details and switcher" aria-haspopup="dialog" aria-expanded={pop?.kind === "run"}>
           <span className={cx("live-dot", !live && "off")} title={live ? (conn === "connected" ? "Live" : "Reconnecting…") : run?.status ?? ""} />
           <b>{run?.name ?? "Loading…"}</b>
@@ -236,9 +283,10 @@ function TopBar() {
       <button type="button" className="btn primary" onClick={() => h.setWizardOpen(true)} data-testid="new-run">
         <Ic name="Plus" size="sm" /> <span className="btn-lbl">New run</span>
       </button>
-      {pop?.kind === "run" ? <RunPopover anchor={pop.el} onClose={() => setPop(null)} /> : null}
-      {pop?.kind === "cap" ? <CapPopover anchor={pop.el} onClose={() => setPop(null)} /> : null}
     </header>
+    {pop?.kind === "run" ? <RunPopover anchor={pop.el} onClose={() => setPop(null)} /> : null}
+    {pop?.kind === "cap" ? <CapPopover anchor={pop.el} onClose={() => setPop(null)} /> : null}
+    </>
   );
 }
 
@@ -559,6 +607,34 @@ function Hero() {
         >
           <Ic name="Plus" size="sm" /> New run
         </button>
+        <button
+          type="button"
+          className="btn"
+          onClick={() => {
+            seedWizardBrief(null);
+            seedWizardMode("agent");
+            h.setWizardOpen(true);
+          }}
+        >
+          <Ic name="MessageSquare" size="sm" /> Plan with an agent
+        </button>
+        {h.runs?.length ? (
+          <div className="recent">
+            <div className="lbl" style={{ marginBottom: 4 }}>
+              Or open a run
+            </div>
+            {h.runs.slice(0, 8).map((r) => (
+              <button key={r.id} type="button" className="kidrow" onClick={() => h.setRunId(r.id)}>
+                <span className={cx("live-dot", !(r.status === "running" || r.status === "paused") && "off")} />
+                <span className="n trunc">{r.name}</span>
+                <span className="muted" style={{ fontSize: 11.5 }}>
+                  {plural(r.apps, "app")} · {r.status}
+                  {r.needs ? ` · ${r.needs} need you` : ""} · {agoOf(r.createdAt)}
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div className="col" style={{ gap: 10, width: "100%" }}>
           {EXAMPLES.map((ex) => (
             <button

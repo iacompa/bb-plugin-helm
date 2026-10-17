@@ -53,6 +53,11 @@ let seedBrief: string | null = null;
 export function seedWizardBrief(text: string | null) {
   seedBrief = text;
 }
+let seedMode: "brief" | "agent" = "brief";
+/** Open the next wizard in "Plan with an agent" mode (the start page's second button). */
+export function seedWizardMode(m: "brief" | "agent") {
+  seedMode = m;
+}
 
 export function WizardModal() {
   const h = useHelm();
@@ -83,7 +88,11 @@ function WizardInner() {
   const [problems, setProblems] = useState<string[]>([]);
   const body = useRef<HTMLDivElement>(null);
   // step 1 has two ways in: write a brief, or plan it in a conversation with the helm-planner agent
-  const [mode, setMode] = useState<"brief" | "agent">("brief");
+  const [mode, setMode] = useState<"brief" | "agent">(() => {
+    const m = seedMode;
+    seedMode = "brief";
+    return m;
+  });
   const [chat, setChat] = useState<PlanChatState>(null);
   const [appsRoot, setAppsRoot] = useState("");
 

@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { Catalog, DirectiveInfo, DirectiveType, InspTab, ReceiptState, RunListItem, SnapApp, SnapNode, View } from "./types.ts";
 import { useCatalog, useHelmRpc, useRunData, useRuns, type HelmRpc } from "./data.ts";
 import type { BatchEffects, RunState } from "./store.ts";
+import { resolveSession } from "./store.ts";
 
 export interface PulseEvent {
   key: number;
@@ -28,7 +29,14 @@ export interface HelmCtx {
   runsError: string | null;
   refreshRuns: () => void;
   runId: string | null;
+  /** Show a run; it also opens a session tab for it. */
   setRunId: (id: string | null) => void;
+  /** Runs open as session tabs, in tab order (remembered in this browser). */
+  tabs: string[];
+  /** Close a session tab; the run itself keeps going. */
+  closeTab: (id: string) => void;
+  /** A fresh session: the start page, with no run selected. */
+  newSession: () => void;
   data: RunState | null;
   rev: number;
   loading: boolean;
@@ -85,6 +93,17 @@ export function useHelm(): HelmCtx {
 }
 
 const LS_RUN = "helm:lastRun";
+const LS_TABS = "helm:tabs";
+function readTabs(): string[] | null {
+  const raw = lsGet(LS_TABS);
+  if (raw === null) return null;
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, 20) : [];
+  } catch {
+    return [];
+  }
+}
 function lsGet(k: string): string | null {
   try {
     return globalThis.localStorage?.getItem(k) ?? null;
@@ -128,14 +147,30 @@ export function HelmProvider({ children, rootRef }: { children: ReactNode; rootR
   );
   const { state: data, rev, loading, error, refetch } = useRunData(rpc, runId, onEffects);
 
-  // pick a run: the remembered one if it still exists, else the newest
+  // session tabs: every run you opened stays one click away until you close its tab
+  const [tabs, setTabsState] = useState<string[]>(() => readTabs() ?? (lsGet(LS_RUN) ? [lsGet(LS_RUN)!] : []));
+  const firstTabs = useRef(readTabs() === null);
+  const setTabs = useCallback((f: (t: string[]) => string[]) => {
+    setTabsState((t) => {
+      const next = f(t);
+      lsSet(LS_TABS, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  // pick a run once the runs list is known (see resolveSession); a deliberate fresh session stays blank
+  const firstLoad = useRef(true);
   useEffect(() => {
     if (!runs) return;
-    if (runId && runs.some((r) => r.id === runId)) return;
-    const next = runs[0]?.id ?? null;
-    setRunIdState(next);
-    lsSet(LS_RUN, next);
-  }, [runs, runId]);
+    const r = resolveSession(runs.map((x) => x.id), runId, tabs, { firstLoad: firstLoad.current, firstVisit: firstTabs.current });
+    firstLoad.current = false;
+    firstTabs.current = false;
+    if (r.tabs.join() !== tabs.join()) setTabs(() => r.tabs);
+    if (r.runId !== runId) {
+      setRunIdState(r.runId);
+      lsSet(LS_RUN, r.runId);
+    }
+  }, [runs, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [view, setView] = useState<View>("graph");
   const [sel, setSel] = useState<string | null>(null);
@@ -155,10 +190,21 @@ export function HelmProvider({ children, rootRef }: { children: ReactNode; rootR
   const setRunId = useCallback((id: string | null) => {
     setRunIdState(id);
     lsSet(LS_RUN, id);
+    if (id) setTabs((t) => (t.includes(id) ? t : [...t, id]));
     setSel(null);
     setDrill(null);
     setTab("overview");
-  }, []);
+  }, [setTabs]);
+  const newSession = useCallback(() => setRunId(null), [setRunId]);
+  const closeTab = useCallback(
+    (id: string) => {
+      const i = tabs.indexOf(id);
+      const rest = tabs.filter((x) => x !== id);
+      setTabs(() => rest);
+      if (id === runId) setRunId(rest[Math.min(Math.max(i, 0), rest.length - 1)] ?? null);
+    },
+    [tabs, runId, setTabs, setRunId],
+  );
 
   const select = useCallback((id: string | null, opts: { tab?: InspTab; dtype?: DirectiveType; keepClosed?: boolean } = {}) => {
     setSel(id);
@@ -199,6 +245,9 @@ export function HelmProvider({ children, rootRef }: { children: ReactNode; rootR
       refreshRuns,
       runId,
       setRunId,
+      tabs,
+      closeTab,
+      newSession,
       data,
       rev,
       loading,
@@ -235,7 +284,7 @@ export function HelmProvider({ children, rootRef }: { children: ReactNode; rootR
       node,
       app,
     }),
-    [rpc, rootRef, runs, runsError, refreshRuns, runId, setRunId, data, rev, loading, error, refetch, catalog, catalogError, loadCatalog, view, sel, select, tab, draftType, inspOpen, inspWide, drill, focusNode, focusReq, observatory, studio, wizardOpen, pulse, firePulse, flashes, node, app],
+    [rpc, rootRef, runs, runsError, refreshRuns, runId, setRunId, tabs, closeTab, newSession, data, rev, loading, error, refetch, catalog, catalogError, loadCatalog, view, sel, select, tab, draftType, inspOpen, inspWide, drill, focusNode, focusReq, observatory, studio, wizardOpen, pulse, firePulse, flashes, node, app],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -118,7 +118,7 @@ export interface Snapshot {
   outboxFailed: OutboxFailed[];
 }
 
-export type RunListItem = RunInfo & { spend: number; apps: number };
+export type RunListItem = RunInfo & { spend: number; apps: number; needs?: number };
 
 export interface NodeDetail {
   node: SnapNode;
