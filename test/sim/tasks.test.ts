@@ -103,3 +103,32 @@ test("every skill an agent can be given ships with the plugin, with matching fro
     assert.ok(text.length < 40_000, `${n} is ${text.length} chars`);
   }
 });
+
+test("refresh restarts live agents on the new version: supervisors first, told who needs a task; old platform scopes widen", async () => {
+  const { refreshRun } = await import("../../src/server/engine/refresh.ts");
+  const h = await createHarness();
+  const two = { apps: [{ name: "Alpha", tagline: "a", platforms: ["ios"] }, { name: "Beta", tagline: "b", platforms: ["mac"] }], groups: [], assumptions: [], questions: [] };
+  const { runId } = h.engine.createRun({ name: "R", brief: "x", portfolio: two as never, slots: CHEAP, limits: { concurrency: 48 } });
+  assert.deepEqual((await h.engine.startRun(runId)).problems, []);
+  const ios = h.repo.listNodes(runId).find((n) => n.role === "platform")!;
+  await until(h, runId, ios.id);
+  // a run spawned before the upgrade: the old platform scope
+  h.repo.updateNode(runId, ios.id, { scopeGlobs: [`apps/${ios.platform}/**`] });
+  const sent: Array<{ threadId: string; text: string }> = [];
+  const orig = h.sim.sendMessage.bind(h.sim);
+  h.sim.sendMessage = async (a) => (sent.push({ threadId: a.threadId, text: a.text }), orig(a));
+
+  const r = refreshRun(h.engine, runId);
+  assert.ok(r.restarted.includes("orch") && r.restarted.includes(ios.id) || r.skipped.some((x) => x.startsWith(ios.id)));
+  assert.equal(r.scopes, 1);
+  assert.deepEqual(h.repo.getNode(runId, ios.id)!.scopeGlobs, [`apps/${ios.platform}/**`, `reports/${ios.platform}/**`]);
+  assert.ok(r.restarted.indexOf("orch") < r.restarted.findIndex((id) => id !== "orch"), "supervisors first");
+  await h.clock.advance(2 * 60_000);
+  const lead = h.engine.leadOf(runId, ios.appId!)!;
+  const toLead = sent.find((m) => m.threadId === lead.threadId && m.text.includes("Helm was upgraded"));
+  assert.ok(toLead, "the lead was told");
+  assert.match(toLead!.text, /helm_set_task/);
+  assert.match(toLead!.text, new RegExp(`${ios.id.replace(/\./g, "\\.")} \\(`), "it names the builders without a task");
+  if (r.restarted.includes(ios.id)) assert.ok(sent.some((m) => m.threadId === h.repo.getNode(runId, ios.id)!.threadId && /helm-ios is new/.test(m.text)));
+  assert.throws(() => refreshRun(h.engine, "run_nope"));
+});

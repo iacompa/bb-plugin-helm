@@ -201,3 +201,4 @@ The open decisions from the brief (§17.2) took their defaults. Where reality on
       - A running agent is told and its brief file is rewritten.
       - Writing for an agent outside your org is refused. Helm warns when a squad member is spawned without a task.
     - **Managers see only their own apps.** A manager's brief lists no other managers as peers and gains a "Your scope" fence naming its apps. Its digest was already limited to its own leads, and it has no `helm_world`. Anything that crosses groups goes to the Orchestrator.
+    - **`bb helm refresh`.** BB applies a plugin's tools, skills and instructions only when a session is next started or resumed. Refresh rewrites every brief, widens untouched platform scopes, stops each running agent's turn and resumes it with a message (waiting agents get the message only), supervisors first. Each supervisor is told which agents under it still have no task.

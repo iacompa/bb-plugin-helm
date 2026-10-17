@@ -1,6 +1,7 @@
 // The service layer: one set of functions behind the CLI, the RPC and the UI,
 // so a directive sent from any surface is the same code path (§9 rules).
 
+import { refreshRun } from "./engine/refresh.ts";
 import type { Autonomy, DirectiveInfo, ModelRef, NodeInfo, PermissionMode, Portfolio, RunInfo, SlotId, SlotMap, Tier } from "../shared/types.ts";
 import { PERMISSION_KEYS, type SettingsWriter } from "./settings.ts";
 import { SLOT_IDS, SEED_PRESETS, modelName, validateRef } from "./domain/models.ts";
@@ -163,6 +164,11 @@ export class HelmService {
     if (input.approvePrompts) values.approvePrompts = input.approvePrompts;
     if (Object.keys(values).length) await this.writeSettings(values);
     return this.permissions();
+  }
+
+  /** Restart a running run's live agents so they load the installed Helm version (skills, tools, prompt). */
+  refresh(runId: string) {
+    return refreshRun(this.engine, runId);
   }
 
   async setLimits(runId: string, input: { concurrency?: number; budgetCap?: number; autonomy?: Autonomy; permission?: { providerId: string; mode: PermissionMode } }) {

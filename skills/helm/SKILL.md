@@ -178,6 +178,9 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
   on `helm_spawn_squad`): it becomes part of the agent's system prompt and brief. To change
   what one agent works on, ask its supervisor, or `bb helm tell` the agent directly. Managers see
   only their own apps; cross-group work goes through the Orchestrator.
+- **After a Helm upgrade, mid-run** → agents keep the old skills, tools and prompt until
+  their session restarts. `bb helm refresh --yes` rewrites briefs and restarts each live
+  agent on the new version (supervisors first; work in worktrees stays).
 - **Permission prompts**: by default an agent's prompts go to its supervisor, who answers
   with `helm_approve`. Only escalations (credentials, spending, private data, access), the
   Orchestrator's own prompts, and prompts unanswered for 15 minutes reach the user. Setting:

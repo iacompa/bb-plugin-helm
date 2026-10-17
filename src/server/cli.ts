@@ -354,6 +354,17 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             return out(i.options.json, { run: r }, line(r));
           }),
       }),
+      refresh: cliCommand({
+        summary: "Bring a running run up to the installed Helm version: rewrite briefs and restart live agents so they load the new skills, tools and prompts",
+        options: { run: RUN, yes: { type: "boolean", description: "Confirm" }, json: JSON_OPT },
+        run: (i) =>
+          guard(async () => {
+            const run = runOf(i.options.run);
+            if (!i.options.yes) throw new PluginCliError(`This stops each running agent of ${run.name} at its current step and resumes it on the installed Helm version (committed and uncommitted work stays in its worktree). Supervisors go first and are told which agents still need a task.`, { code: "confirmation_required", hint: "Re-run with --yes." });
+            const r = svc.refresh(run.id);
+            return out(i.options.json, r, `${run.name}: ${r.restarted.length} agents restarting on the new version · ${r.briefs} briefs rewritten${r.scopes ? ` · ${r.scopes} platform scopes widened to reports/<platform>/**` : ""}${r.skipped.length ? ` · not restarted (pick it up when they next start): ${r.skipped.slice(0, 12).join(", ")}` : ""}.`);
+          }),
+      }),
       end: cliCommand({
         summary: "End a run now: cancel it (or discard a plan), stopping and archiving every agent it spawned",
         options: { run: RUN, yes: { type: "boolean", description: "Confirm" }, json: JSON_OPT },
