@@ -161,7 +161,7 @@ export class RealBB implements BbPort {
   async catalog(args: { hostId: string | null }): Promise<RawCatalog> {
     const hostId = args.hostId ?? (await this.primaryHostId());
     const providers = await this.sdk.providers.list(hostId ? { hostId } : {});
-    const out: RawCatalog = { providers: providers.map((p) => ({ id: p.id, label: p.displayName, available: p.available })), models: [], error: null };
+    const out: RawCatalog = { providers: providers.map((p) => ({ id: p.id, label: p.displayName, available: p.available, permissionModes: p.capabilities?.permissionModes ?? null })), models: [], error: null };
     for (const p of providers.filter((x) => x.available)) {
       const res = await this.sdk.providers.models(hostId ? { hostId, providerId: p.id } : { providerId: p.id });
       if (res.modelLoadError && !out.error) out.error = { providerId: res.modelLoadError.providerId, code: res.modelLoadError.code, detail: res.modelLoadError.detail };

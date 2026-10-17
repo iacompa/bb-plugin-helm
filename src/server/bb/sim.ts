@@ -228,6 +228,8 @@ export class SimBB implements BbPort {
   // ───────── threads ─────────
   async spawnThread(spec: SpawnSpec): Promise<ThreadRef> {
     this.maybeFail("spawnThread");
+    const modes = this.catalogData.providers.find((p) => p.id === spec.model.providerId)?.permissionModes;
+    if (modes?.length && !modes.includes(spec.permissionMode)) throw new Error(`HTTP 400: Provider ${spec.model.providerId} only supports ${modes.join(", ")} permission mode.`);
     const project = this.projects.get(spec.projectId);
     if (!project) throw new Error(`HTTP 404: project ${spec.projectId}`);
     // reusing an environment keeps its id, like BB

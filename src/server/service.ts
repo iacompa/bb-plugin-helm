@@ -1,7 +1,7 @@
 // The service layer: one set of functions behind the CLI, the RPC and the UI,
 // so a directive sent from any surface is the same code path (§9 rules).
 
-import type { Autonomy, DirectiveInfo, ModelRef, NodeInfo, Portfolio, RunInfo, SlotId, SlotMap } from "../shared/types.ts";
+import type { Autonomy, DirectiveInfo, ModelRef, NodeInfo, PermissionMode, Portfolio, RunInfo, SlotId, SlotMap } from "../shared/types.ts";
 import { SLOT_IDS, SEED_PRESETS, modelName, validateRef } from "./domain/models.ts";
 import { ORCH_ID } from "./domain/topology.ts";
 import { createDirective, previewDirective, resolveNeed, type DirectiveInput, type NeedResolution } from "./engine/direct.ts";
@@ -143,9 +143,22 @@ export class HelmService {
    * and the budget cap. Raising the cap above the spend lifts a budget pause. Recorded as an event
    * and told to the Orchestrator as one FYI line.
    */
-  async setLimits(runId: string, input: { concurrency?: number; budgetCap?: number; autonomy?: Autonomy }) {
-    const run = this.engine.run(runId);
+  async setLimits(runId: string, input: { concurrency?: number; budgetCap?: number; autonomy?: Autonomy; permission?: { providerId: string; mode: PermissionMode } }) {
+    let run = this.engine.run(runId);
     if (run.status === "done" || run.status === "cancelled") throw new HelmError(`The run is ${run.status}; its limits can no longer change.`, "bad_state");
+    if (input.permission) {
+      const { providerId, mode } = input.permission;
+      const modes = (await this.engine.catalog(this.repo.runHost(runId))).providers.find((p) => p.id === providerId)?.permissionModes;
+      if (modes?.length && !modes.includes(mode)) throw new HelmError(`${providerId} supports only ${modes.join(", ")}.`, "invalid_value");
+      this.engine.setProviderPermission(runId, providerId, mode, "The human chose");
+      for (const need of this.repo.listNeeds(runId, "open"))
+        if ((need.data as { permissionFor?: string } | null)?.permissionFor === providerId) this.repo.resolveNeed(runId, need.id, { action: "answer", text: mode });
+      run = this.engine.run(runId);
+      if (input.concurrency === undefined && input.budgetCap === undefined && input.autonomy === undefined) {
+        if (run.status === "running") await this.engine.pump(runId);
+        return run;
+      }
+    }
     const changes: string[] = [];
     const limits = { ...run.limits };
     const patch: { concurrency?: number; budgetCap?: number; spawnsPaused?: boolean; limits?: typeof limits } = {};

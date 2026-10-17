@@ -122,7 +122,19 @@ export interface HelmLimits {
    * human. Runs made before this setting existed read as "ask".
    */
   autonomy?: Autonomy;
+  /**
+   * The human's choice of permission mode for a provider that cannot run the configured one
+   * (e.g. a provider with only "accept-edits" and "full" when Helm's setting is "auto").
+   */
+  providerPermission?: Record<string, PermissionMode>;
 }
+
+export type PermissionMode = "accept-edits" | "auto" | "full";
+export const PERMISSION_LABEL: Record<PermissionMode, string> = {
+  "accept-edits": "Accept edits (asks you before commands)",
+  auto: "Auto (BB's classifier decides)",
+  full: "Full access (no permission checks)",
+};
 
 export type Autonomy = "high" | "ask";
 /** What may still reach the human when autonomy is high. */
@@ -438,6 +450,6 @@ export interface CatalogModel {
 export interface Catalog {
   hostId: string | null;
   fetchedAt: number;
-  providers: Array<{ id: string; label: string; available: boolean; error: string | null }>;
+  providers: Array<{ id: string; label: string; available: boolean; error: string | null; permissionModes?: PermissionMode[] | null }>;
   models: CatalogModel[];
 }

@@ -168,3 +168,8 @@ The open decisions from the brief (§17.2) took their defaults. Where reality on
     - Slots with scope `all` ("Every agent in these roles, now", now the default mid-run) also move per-agent overrides and failed agents, and retry the failed ones. The Model Studio adds **Use for every role** and **Use instead of <provider> everywhere**. The CLI adds `bb helm slots --slot role=… | --replace <provider> --with provider/model:level [--future]`.
 
     `test/sim/model-switch.test.ts` covers this.
+
+36. **A provider's permission modes (found while fixing 35).** BB refused every Grok spawn with "Provider acp-grok only supports accept-edits, full permission mode", because Helm spawns in `auto` by default. So no agent could ever run on Grok. Providers list their modes (`capabilities.permissionModes`), and the catalog now carries them.
+    - When a provider cannot run the tier's configured mode and the run has no choice for it (`limits.providerPermission`), the agent waits in `needs`. One decision card per provider and run asks the human which supported mode to use.
+    - Helm never picks for the human. Dropping to `accept-edits` sends every command to Needs you. Raising to `full` grants more access than the human configured. This is an access decision (HUMAN_ONLY), so autonomy never answers it.
+    - The answer, or `bb helm limits --permission acp-grok=full`, is stored on the run and releases the held agents at once.

@@ -5,7 +5,8 @@
 import type { ModelRef } from "../../shared/types.ts";
 import type { HostOps } from "../../shared/host-contract.ts";
 
-export type PermissionMode = "accept-edits" | "auto" | "full";
+export type { PermissionMode } from "../../shared/types.ts";
+import type { PermissionMode } from "../../shared/types.ts";
 export type SendMode = "steer" | "queue";
 
 /** Where a spawned thread works. */
@@ -87,7 +88,8 @@ export type InteractionAnswer =
   | { kind: "value"; value: unknown };
 
 export interface RawCatalog {
-  providers: Array<{ id: string; label: string; available: boolean }>;
+  /** permissionModes: the modes the provider can run a thread in (null when BB does not say). */
+  providers: Array<{ id: string; label: string; available: boolean; permissionModes?: PermissionMode[] | null }>;
   models: Array<{
     providerId: string;
     id: string;

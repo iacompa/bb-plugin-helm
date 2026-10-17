@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHarness, CHEAP, type Harness } from "../helpers/harness.ts";
-import { createDirective } from "../../src/server/engine/direct.ts";
+import { createDirective, resolveNeed } from "../../src/server/engine/direct.ts";
+import { SIM_CATALOG } from "../../src/server/bb/sim.ts";
+import { PERMISSION_LABEL } from "../../src/shared/types.ts";
 import { handleEvent } from "../../src/server/engine/events.ts";
 import { completeRun } from "../../src/server/engine/gates.ts";
 
@@ -112,4 +114,30 @@ test("an agent whose record already names the new provider, but whose thread is 
   await createDirective(h.engine, runId, { type: "model", target: spec.id, modelTo: CODEX });
   const fresh = await untilThread(h, runId, spec.id, old);
   assert.equal(thread(h, fresh).providerId, "codex");
+});
+
+test("a provider that cannot run Helm's permission mode holds its agents and asks the human once; the answer releases them", async () => {
+  const h = await createHarness();
+  const sim = h.sim as unknown as { catalogData: typeof SIM_CATALOG };
+  sim.catalogData = {
+    ...SIM_CATALOG,
+    providers: [...SIM_CATALOG.providers, { id: "acp-grok", label: "Grok", available: true, permissionModes: ["accept-edits", "full"] }],
+    models: [...SIM_CATALOG.models, { providerId: "acp-grok", id: "grok-4.7", displayName: "Grok 4.7", description: "", isDefault: true, defaultReasoning: "high", reasoning: ["low", "high"], serviceTiers: [] }],
+  };
+  const GROK = { providerId: "acp-grok", modelId: "grok-4.7", reasoning: "high" };
+  const { runId } = h.engine.createRun({ name: "Perm", brief: "x", portfolio: two as never, slots: { ...CHEAP, code: GROK }, limits: { concurrency: 48 } });
+  assert.deepEqual((await h.engine.startRun(runId)).problems, []);
+  const codes = h.repo.listNodes(runId).filter((n) => n.role === "code");
+  await h.clock.runUntil(h.clock.now() + 6 * H, { stopWhen: () => codes.every((c) => h.repo.getNode(runId, c.id)!.status === "needs") });
+  for (const c of codes) assert.equal(h.repo.getNode(runId, c.id)!.status, "needs", `${c.id} waits for the choice`);
+  const asks = h.repo.listNeeds(runId, "open").filter((x) => (x.data as { permissionFor?: string } | null)?.permissionFor === "acp-grok");
+  assert.equal(asks.length, 1, "one question per provider, not one per agent");
+  assert.deepEqual(asks[0].options, [PERMISSION_LABEL["accept-edits"], PERMISSION_LABEL.full]);
+
+  await resolveNeed(h.engine, runId, asks[0].id, { action: "answer", text: PERMISSION_LABEL.full }, { signoff: async () => {}, sendback: async () => {} });
+  assert.equal(h.repo.getRun(runId)!.limits.providerPermission?.["acp-grok"], "full");
+  for (const c of codes) {
+    const t = await untilThread(h, runId, c.id);
+    assert.equal(thread(h, t).providerId, "acp-grok");
+  }
 });

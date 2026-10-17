@@ -340,14 +340,17 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
           concurrency: { type: "integer", min: 1, max: 48, description: "Agents allowed to run at once in this run" },
           budget: { type: "integer", min: 1, max: 1000000, description: "Budget cap in relative units (raising it above the spend lifts a budget pause)" },
           autonomy: { type: "enum", values: ["high", "ask"], description: "high: the Orchestrator decides everything except credentials, spending, private data and access; ask: every question, wave and plan change asks you" },
+          permission: { type: "string", description: "provider=accept-edits|auto|full: the mode for a provider that cannot run Helm's configured one (e.g. acp-grok=full)" },
           json: JSON_OPT,
         },
         run: (i) =>
           guard(async () => {
             const run = runOf(i.options.run);
-            const line = (x: typeof run) => `${x.name}: at most ${x.concurrency} agents at once · budget cap ${Math.round(x.budgetCap)} u · autonomy ${x.limits.autonomy ?? "ask"}.`;
-            if (i.options.concurrency === undefined && i.options.budget === undefined && i.options.autonomy === undefined) return out(i.options.json, { run }, `${line(run)} Change with --concurrency N, --budget N or --autonomy high|ask.`);
-            const r = await svc.setLimits(run.id, { concurrency: i.options.concurrency, budgetCap: i.options.budget, autonomy: i.options.autonomy as "high" | "ask" | undefined });
+            const line = (x: typeof run) => `${x.name}: at most ${x.concurrency} agents at once · budget cap ${Math.round(x.budgetCap)} u · autonomy ${x.limits.autonomy ?? "ask"}${Object.keys(x.limits.providerPermission ?? {}).length ? ` · permission ${Object.entries(x.limits.providerPermission!).map(([p, m]) => `${p}=${m}`).join(", ")}` : ""}.`;
+            if (i.options.concurrency === undefined && i.options.budget === undefined && i.options.autonomy === undefined && !i.options.permission) return out(i.options.json, { run }, `${line(run)} Change with --concurrency N, --budget N, --autonomy high|ask or --permission provider=mode.`);
+            const pm = i.options.permission?.match(/^([\w.-]+)=(accept-edits|auto|full)$/);
+            if (i.options.permission && !pm) throw new PluginCliError("Write it as provider=accept-edits|auto|full, e.g. acp-grok=full.", { code: "invalid_value" });
+            const r = await svc.setLimits(run.id, { concurrency: i.options.concurrency, budgetCap: i.options.budget, autonomy: i.options.autonomy as "high" | "ask" | undefined, permission: pm ? { providerId: pm[1], mode: pm[2] as "accept-edits" | "auto" | "full" } : undefined });
             return out(i.options.json, { run: r }, line(r));
           }),
       }),

@@ -2,7 +2,7 @@
 // applied and fanned out to every recipient in ONE transaction, so the
 // Orchestrator's world state can never be stale about what the human changed.
 
-import type { Cascade, DirectiveInfo, DirectiveType, ModelRef, NodeInfo, SlotId, SlotMap } from "../../shared/types.ts";
+import type { Cascade, DirectiveInfo, DirectiveType, ModelRef, NodeInfo, PermissionMode, SlotId, SlotMap } from "../../shared/types.ts";
 import { HelmError, type Engine } from "./engine.ts";
 import { AGENT_ACTIONS, agentNoticeText, agentSummary, bottomUp, buildAgentRecipients, buildRecipients, deliveryModeFor, directiveSummary, noticeFor, resolveCascade, steerProblem, touches, type AgentAction, type NoticeDirective } from "../domain/directives.ts";
 import { modelName, validateRef } from "../domain/models.ts";
@@ -447,6 +447,14 @@ export async function resolveNeed(e: Engine, runId: string, needId: string, res:
           });
           await e.pump(runId);
         }
+        break;
+      }
+      const perm = need.data as { permissionFor?: string; choices?: Record<string, PermissionMode> } | null;
+      if (perm?.permissionFor) {
+        const mode = res.action === "answer" ? perm.choices?.[text] : undefined;
+        if (!mode) throw new HelmError(`Choose one of: ${Object.keys(perm.choices ?? {}).join("; ")}.`, "invalid_value");
+        e.setProviderPermission(runId, perm.permissionFor, mode, res.actor === "system" ? "Helm" : "The human chose");
+        await e.pump(runId);
         break;
       }
       if (res.action === "answer" && !text) throw new HelmError("An answer needs text.", "invalid_value");

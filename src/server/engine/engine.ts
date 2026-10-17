@@ -15,12 +15,13 @@ import type {
   NeedKind,
   NodeInfo,
   NodeStatus,
+  PermissionMode,
   Portfolio,
   RunInfo,
   SlotMap,
   Stage,
 } from "../../shared/types.ts";
-import { LIMIT_DEFAULTS } from "../../shared/types.ts";
+import { LIMIT_DEFAULTS, PERMISSION_LABEL } from "../../shared/types.ts";
 import { OutboxWorker, type HandlerResult } from "./outbox.ts";
 import { DEFAULT_SETTINGS, expandHome, newRunId, silentLogger, type HelmSettings, type Logger } from "./context.ts";
 import { parseBrief } from "../domain/brief.ts";
@@ -356,7 +357,7 @@ export class Engine {
     const cat: Catalog = {
       hostId,
       fetchedAt: this.now(),
-      providers: raw.providers.map((p) => ({ id: p.id, label: p.label || PROVIDER_LABEL[p.id] || p.id, available: p.available, error: raw.error?.providerId === p.id ? `${raw.error.code}${raw.error.detail ? `: ${raw.error.detail}` : ""}` : null })),
+      providers: raw.providers.map((p) => ({ id: p.id, label: p.label || PROVIDER_LABEL[p.id] || p.id, available: p.available, error: raw.error?.providerId === p.id ? `${raw.error.code}${raw.error.detail ? `: ${raw.error.detail}` : ""}` : null, permissionModes: p.permissionModes ?? null })),
       models: [],
     };
     for (const m of raw.models) {
@@ -707,6 +708,28 @@ export class Engine {
     this.repo.event(runId, n.id, "respawn", `${why}: thread ${old} stops and a new thread takes over in the same workspace`);
   }
 
+  /** The permission mode to spawn in: Helm's setting for the tier, or the human's choice when the provider cannot run it; null = ask. */
+  permissionFor(run: RunInfo, n: NodeInfo, cat: Catalog, providerId: string): PermissionMode | null {
+    const want = this.settings.permissionMode[n.tier] ?? "auto";
+    const modes = cat.providers.find((p) => p.id === providerId)?.permissionModes;
+    if (!modes?.length || modes.includes(want)) return want;
+    const chosen = run.limits.providerPermission?.[providerId];
+    return chosen && modes.includes(chosen) ? chosen : null;
+  }
+
+  /** Record the human's permission mode for a provider and release the agents held for it. */
+  setProviderPermission(runId: string, providerId: string, mode: PermissionMode, why: string): void {
+    const run = this.run(runId);
+    this.repo.tx(() => {
+      this.repo.updateRun(runId, { limits: { ...run.limits, providerPermission: { ...(run.limits.providerPermission ?? {}), [providerId]: mode } } });
+      for (const n of this.repo.listNodes(runId))
+        if (n.status === "needs" && n.model?.providerId === providerId && !n.threadId && !this.repo.openNeedsFor(runId, n.id).length)
+          this.repo.updateNode(runId, n.id, { status: "queued", prevStatus: null, firstInLine: true, warning: null });
+      this.repo.event(runId, ORCH_ID, "limits", `${why}: agents on ${providerId} run in ${mode} mode`);
+    });
+    this.emit(runId, "run.updated", { id: runId, limits: true });
+  }
+
   /** Threads Helm replaced in this run; they are archived when the run ends. */
   retiredThreads(runId: string): string[] {
     try {
@@ -968,6 +991,28 @@ export class Engine {
       });
       return { done: true, result: { skipped: problem.message } };
     }
+    const permissionMode = this.permissionFor(run, n, cat, model.providerId);
+    if (!permissionMode) {
+      // the provider cannot run the configured mode: hold the agent and ask the human once per provider
+      const p = cat.providers.find((x) => x.id === model.providerId)!;
+      const choices = Object.fromEntries((p.permissionModes ?? []).map((m) => [PERMISSION_LABEL[m], m]));
+      this.repo.tx(() => {
+        this.repo.updateNode(run.id, n.id, { status: "needs", prevStatus: "queued", warning: `waiting for a permission mode for ${p.label}` });
+        this.raiseNeed(run.id, {
+          kind: "decision",
+          nodeId: null,
+          appId: null,
+          title: `${p.label} can't run agents in ${PERMISSION_LABEL[this.settings.permissionMode[n.tier] ?? "auto"].split(" (")[0]} mode — choose one`,
+          body: `${p.label} supports only: ${Object.keys(choices).join("; ")}. Agents on ${p.label} wait until you choose. Accept edits sends each command an agent runs to you for approval. Full access lets them run commands without checks. You can also move these roles to another model in the Model Studio.`,
+          evidence: "",
+          options: Object.keys(choices),
+          dedupeKey: `perm:${run.id}:${p.id}`,
+          data: { permissionFor: p.id, choices },
+        });
+      });
+      this.emit(run.id, "node.updated", this.repo.getNode(run.id, n.id));
+      return { done: true, result: { skipped: `no permission mode for ${p.id}` } };
+    }
     // one key per generation: a replacement thread never matches its predecessor (V17)
     const gen = Number(row.payload.gen ?? 1);
     const key = `${run.id}:${n.parentId ?? "root"}:${n.id}${gen > 1 ? `#${gen}` : ""}`;
@@ -987,7 +1032,7 @@ export class Engine {
         title: n.role === "orch" ? `Helm · ${run.name}` : this.label(n),
         prompt,
         model,
-        permissionMode: this.settings.permissionMode[n.tier] ?? "auto",
+        permissionMode,
         visibility: visible ? "visible" : "hidden",
         lifecycleOwnerThreadId: owner,
         meta: { v: 1, runId: run.id, nodeId: n.id, tier: n.tier, role: n.role, key },

@@ -143,7 +143,7 @@ bb helm signoff <app>                       # Ready → Done; squad archived bot
 bb helm sendback <app> --message-file why.md   # Ready → Build; gates reset, the lead is told why
 bb helm complete [--run <id>]               # stop and archive every remaining agent; repos stay
 bb helm end --run <id> --yes                # end a run now (cancel), or discard a draft plan
-bb helm limits [--run <id>] [--concurrency N] [--budget N]   # show or change a run's limits now
+bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provider=mode]   # show or change a run's limits now
 ```
 
 - `signoff` is the human's acceptance of the app as judged — including anything listed as
@@ -168,6 +168,10 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N]   # show or change a 
   `bb helm ledger --limit 5` to confirm the receipt reaches `ack`.
 - **"Make all gates use model X"** → `bb helm models` to confirm the id, then
   `bb helm slots --slot review=… --slot slop=…` (or a `--slot` at plan time).
+- **A card asks which permission mode a provider should use** (e.g. Grok supports only
+  accept-edits or full) → that is the user's access decision: explain both (accept-edits
+  sends every command to them; full runs commands unchecked) and ask. Then
+  `bb helm limits --permission <provider>=<mode>`.
 - **"We're out of usage on Codex, move everything to X"** → `bb helm models` to confirm X's
   id, then `bb helm slots --replace codex --with <provider>/<model>:<level>`. Then
   `bb helm needs` to check that the failed cards closed.
