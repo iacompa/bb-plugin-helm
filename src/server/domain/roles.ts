@@ -96,7 +96,7 @@ export const ROLES: Record<Role, RoleDef> = {
     label: "Platform builder",
     mission:
       "Make the app real on one platform: project configuration, permissions and manifests, lifecycle, navigation, system integration, packaging, wiring UI to Core.",
-    scope: ["apps/<platform>/**"],
+    scope: ["apps/<platform>/**", "reports/<platform>/**"],
     inputs: ["SPEC.md", "CONTRACT.md", "ARCHITECTURE.md"],
     outputs: ["the platform app project", "permissions and manifests", "packaging"],
     doneMeans: ["the platform app builds, runs the main flow and passes that platform's checks"],
@@ -217,6 +217,7 @@ export const TOOLS_BY_TIER: Record<Tier, string[]> = {
     "helm_message",
     "helm_direct",
     "helm_approve",
+    "helm_set_task",
     "helm_world",
     "helm_propose_plan",
     "helm_propose_wave",
@@ -231,6 +232,7 @@ export const TOOLS_BY_TIER: Record<Tier, string[]> = {
     "helm_message",
     "helm_direct",
     "helm_approve",
+    "helm_set_task",
     "helm_set_priority",
     "helm_digest",
   ],
@@ -242,6 +244,7 @@ export const TOOLS_BY_TIER: Record<Tier, string[]> = {
     "helm_message",
     "helm_direct",
     "helm_approve",
+    "helm_set_task",
     "helm_spawn_squad",
     "helm_publish_contract",
     "helm_stage",
@@ -270,4 +273,23 @@ export function toolsForNode(tier: Tier, alsoLead: boolean): string[] {
   const set = new Set(TOOLS_BY_TIER[tier]);
   if (alsoLead) for (const t of TOOLS_BY_TIER.lead) set.add(t);
   return [...set];
+}
+
+const PLATFORM_SKILL: Record<Platform, string> = { mac: "helm-macos", win: "helm-windows", ios: "helm-ios", and: "helm-android" };
+const CRAFT_SKILL: Partial<Record<Role, string>> = { ui: "helm-ui", code: "helm-code", security: "helm-security", test: "helm-test", research: "helm-research", docs: "helm-docs" };
+
+/** The craft skill a builder loads next to its protocol skill (helm-specialist): how to do its kind of work well. */
+export function craftSkill(role: Role, platform: Platform | null): string | null {
+  if (role === "platform") return platform ? PLATFORM_SKILL[platform] : null;
+  return CRAFT_SKILL[role] ?? null;
+}
+
+/** Every skill an agent loads: its protocol skill, its craft skill, and for a solo lead (who builds the app itself) its platforms' skills. */
+export function skillsFor(n: { role: Role; platform: Platform | null; alsoLead: boolean }, app: { shape: string; platforms: Platform[] } | null): string[] {
+  const out = [ROLES[n.role].skill];
+  const craft = craftSkill(n.role, n.platform);
+  if (craft) out.push(craft);
+  if (n.alsoLead) out.push("helm-lead");
+  if ((n.role === "lead" || n.alsoLead) && app?.shape === "solo") for (const p of app.platforms.slice(0, 2)) out.push(PLATFORM_SKILL[p]);
+  return [...new Set(out)];
 }

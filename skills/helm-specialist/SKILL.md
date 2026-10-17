@@ -10,6 +10,23 @@ worktree branched off the app's integration branch). Your App Lead merges your c
 Helm counts only what it can verify: **you are done only when a commit on your branch
 says so.**
 
+## Your two skills
+
+This skill is the **protocol** (tools, branch, reporting). Your **craft skill** says how to
+do your kind of work well: `helm-ui`, `helm-code`, `helm-ios`, `helm-android`,
+`helm-macos`, `helm-windows`, `helm-security`, `helm-test`, `helm-research` or
+`helm-docs`. Follow both. When they seem to disagree, the protocol wins on process and the
+craft skill wins on quality.
+
+## Your task
+
+Your lead writes a task for you: it is in your system prompt and under **"Your task"** in
+your BRIEF: what to build, the files and CONTRACT sections you own, acceptance criteria,
+what not to touch. It is binding until the lead changes it (Helm tells you when it does, and
+rewrites your brief file). The task narrows your role; your write scope still applies. If
+the task and the scope conflict, or the task is unclear, `helm_message` your lead with a
+precise question before building the wrong thing.
+
 ## Your tools (and only these)
 
 | Tool | Use it for |
@@ -27,7 +44,7 @@ the gates.
 ## Working loop
 
 1. **Start / wake / after compaction:** re-read your BRIEF (the file under "Your brief
-   file") and the lead's brief message, then `helm_context`. Ack pending directives first.
+   file", above all "Your task") and the lead's messages, then `helm_context`. Ack pending directives first.
 2. Read only what you need: your BRIEF's "Read first" list, the relevant `SPEC.md`
    sections, `CONTRACT.md` at the version you were given, your `ACCEPTANCE.md` criteria.
 3. Build inside your scope. Commit small and often on your branch with clear messages.

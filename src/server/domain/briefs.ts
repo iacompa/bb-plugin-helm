@@ -112,11 +112,15 @@ export function briefFor(node: Pick<NodeInfo, "id" | "role" | "platform" | "brie
 const NON_NEGOTIABLES =
   "Three non-negotiables: (1) report with helm_report and evidence refs (shas, paths, check names) — a claim is not evidence; (2) messages from the human or Helm notices are binding — never undo them, adapt, and call helm_ack with the id; (3) never poll — work, commit, report, stop; you will be woken by messages.";
 
-/** ≤ 1,500 chars; tier/role/parent come from the DB row, never from metadata. */
-export function instructionsFor(input: { role: Role; platform: string | null; nodeId: string; parentLabel: string; skill: string; alsoLead: boolean }): string {
+/** The system prompt: ≤ 1,500 chars of identity and protocol, plus the agent's tailored task (≤ 4,000 chars total). Tier/role/parent come from the DB row, never from metadata. */
+export function instructionsFor(input: { role: Role; platform: string | null; nodeId: string; parentLabel: string; skills: string[]; alsoLead: boolean; task?: { text: string; byLabel: string } | null; scope?: string | null }): string {
   const label = roleLabel(input.role, (input.platform as never) ?? null);
-  const s = `You are a Helm agent: the ${label}${input.alsoLead ? " (also App Lead)" : ""}, node ${JSON.stringify(input.nodeId)}. Your parent is ${JSON.stringify(input.parentLabel)}. ${NON_NEGOTIABLES} Call helm_context when you need your place in the org, policies or unacknowledged directives. Follow the ${input.skill} skill${input.alsoLead ? " and the helm-lead skill" : ""}.`;
-  return s.slice(0, 1500);
+  const skills = input.skills.map((x) => `the ${x} skill`);
+  const follow = skills.length > 1 ? `${skills.slice(0, -1).join(", ")} and ${skills[skills.length - 1]}` : skills[0] ?? "your Helm skill";
+  const s = `You are a Helm agent: the ${label}${input.alsoLead ? " (also App Lead)" : ""}, node ${JSON.stringify(input.nodeId)}. Your parent is ${JSON.stringify(input.parentLabel)}. ${NON_NEGOTIABLES} Call helm_context when you need your place in the org, policies or unacknowledged directives. Follow ${follow}.`.slice(0, 1500);
+  const scope = input.scope ? ` ${input.scope}` : "";
+  const task = input.task ? `\n\nYour task, written for you by ${input.task.byLabel} (the full text is in your BRIEF):\n${escapeForPrompt(input.task.text, 2200)}` : "";
+  return `${s}${scope}${task}`.slice(0, 4000);
 }
 
 export const PLANNER_INSTRUCTIONS =

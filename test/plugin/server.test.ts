@@ -40,11 +40,11 @@ function host() {
   return { ...h, dir };
 }
 
-test("the plugin factory registers 21 tools, the CLI, RPC, the dispatch hook, the engine service and the watchdog", async () => {
+test("the plugin factory registers 22 tools, the CLI, RPC, the dispatch hook, the engine service and the watchdog", async () => {
   const h = host();
   await plugin(h.bb);
   const reg = h.harness.inspection.registrations;
-  assert.equal(reg.agentTools.length, 21);
+  assert.equal(reg.agentTools.length, 22);
   // every method of the RPC contract has a handler, and nothing else is registered
   assert.deepEqual([...reg.rpcMethods].sort(), Object.keys(RPC).sort());
   assert.ok(reg.services.some((x) => JSON.stringify(x).includes("engine")), JSON.stringify(reg.services));
@@ -82,7 +82,7 @@ test("bb helm doctor reports host, catalog, database, tools and hook without spa
   assert.match(r.stdout, /✓ host.entry/);
   assert.match(r.stdout, /✓ catalog/);
   assert.match(r.stdout, /✓ database/);
-  assert.match(r.stdout, /✓ agent.tools\s+21/);
+  assert.match(r.stdout, /✓ agent.tools\s+22/);
   assert.equal(r.exitCode, 0, r.stdout);
   assert.equal(h.harness.inspection.sdk.callsTo("threads.spawn").length, 0);
   await h.harness.lifecycle.dispose();

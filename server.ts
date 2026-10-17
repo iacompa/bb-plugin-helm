@@ -11,7 +11,8 @@ import { runDoctor } from "./src/server/bb/doctor.ts";
 import { Engine } from "./src/server/engine/engine.ts";
 import { installEventHandler, reconcile } from "./src/server/engine/events.ts";
 import { callTool, TOOL_DEFS } from "./src/server/agent/tools.ts";
-import { PLANNER_TOOLS, ROLES, toolsForNode } from "./src/server/domain/roles.ts";
+import { PLANNER_TOOLS, skillsFor, toolsForNode } from "./src/server/domain/roles.ts";
+import { getTask } from "./src/server/engine/tasks.ts";
 import { instructionsFor, PLANNER_INSTRUCTIONS } from "./src/server/domain/briefs.ts";
 import { Planner } from "./src/server/engine/planner.ts";
 import { readMeta } from "./src/server/bb/port.ts";
@@ -104,13 +105,15 @@ export default async function plugin(bb: BbPluginApi) {
     if (!node && (watcherRun(engine, ctx.thread.id) || (wm?.role === "watch" && wm.nodeId === "watch" && (!ctx.origin?.pluginId || ctx.origin.pluginId === bb.pluginId))))
       return { tools: ["helm_watch"], skills: [], instructions: WATCHER_INSTRUCTIONS };
     if (!node) return { tools: [], skills: ["helm", "helm-planner"] };
-    const role = ROLES[node.role];
     const parent = node.parentId ? repo.getNode(node.runId, node.parentId) : null;
-    const skills = [role.skill, ...(node.alsoLead ? ["helm-lead"] : [])];
+    const app = node.appId ? repo.getApp(node.runId, node.appId) : null;
+    const skills = skillsFor(node, app);
+    const task = getTask(engine, node.runId, node.id);
+    const author = task ? repo.getNode(node.runId, task.by) : null;
     return {
       tools: toolsForNode(node.tier, node.alsoLead),
       skills,
-      instructions: instructionsFor({ role: node.role, platform: node.platform, nodeId: node.id, parentLabel: parent ? engine.label(parent) : "the human", skill: role.skill, alsoLead: node.alsoLead }),
+      instructions: instructionsFor({ role: node.role, platform: node.platform, nodeId: node.id, parentLabel: parent ? engine.label(parent) : "the human", skills, alsoLead: node.alsoLead, task: task ? { text: task.text, byLabel: author ? engine.label(author) : "your supervisor" } : null, scope: engine.scopeLine(node) }),
     };
   });
 

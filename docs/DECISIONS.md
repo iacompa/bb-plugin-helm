@@ -192,3 +192,12 @@ The open decisions from the brief (§17.2) took their defaults. Where reality on
       - escalate (to the nearest supervisor that is alive: lead, then manager, then Orchestrator);
       - human (a stalled card).
     - Each agent is looked at once per stall window. No suspects means no tokens.
+
+39. **Craft skills, tailored tasks and manager isolation (user request).** "Make a skill for each … each one could have their own system prompt that's light but tailored for the task … each manager is just managing their own apps."
+    - Every builder loads two skills: `helm-specialist` (protocol) plus a craft skill for its kind of work: `helm-ui`, `helm-code`, `helm-ios`, `helm-android`, `helm-macos`, `helm-windows`, `helm-security`, `helm-test`, `helm-research` or `helm-docs`. A solo lead (who builds the app itself) also loads its platforms' skills, at most two. The leadership, Reviewer and Slop Hunter skills were rewritten with researched craft, and their protocol was kept.
+    - Budgets: each skill is under about 10,000 tokens. The Orchestrator's skill is the largest, then the lead's and the manager's. The Slop Hunter's is the smallest gate skill.
+    - **Tasks.** `helm_set_task {nodeId, task}` (Orchestrator, managers and leads, for any agent under them) and an optional `task` on each `helm_spawn_squad` item. A task is at most 6,000 characters and is stored in `meta` (`task:<run>:<node>`).
+      - It goes into the agent's system prompt (identity and protocol ≤1,500 characters, plus the task, ≤4,000 in total) and its BRIEF under "Your task (from <author>)".
+      - A running agent is told and its brief file is rewritten.
+      - Writing for an agent outside your org is refused. Helm warns when a squad member is spawned without a task.
+    - **Managers see only their own apps.** A manager's brief lists no other managers as peers and gains a "Your scope" fence naming its apps. Its digest was already limited to its own leads, and it has no `helm_world`. Anything that crosses groups goes to the Orchestrator.

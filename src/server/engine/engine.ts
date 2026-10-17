@@ -28,7 +28,8 @@ import { parseBrief } from "../domain/brief.ts";
 import { ORCH_ID, planTopology, slugify, type TopologyPlan } from "../domain/topology.ts";
 import { ROLES, roleLabel, scopeFor, tierOfRole } from "../domain/roles.ts";
 import { forecast, normalizeModel, PROVIDER_LABEL, requiredSlots, resolveModel, validateRef, modelName, unsetSlots, familyWarnings } from "../domain/models.ts";
-import { briefFor, initialPortfolioMd, managerNotesMd, type BriefContext } from "../domain/briefs.ts";
+import { briefFor, escapeForPrompt, initialPortfolioMd, managerNotesMd, type BriefContext } from "../domain/briefs.ts";
+import { getTask, TASK_MAX } from "./tasks.ts";
 import { firstWave, wavesEstimate, admit, type Eligible, nextWave } from "../domain/scheduler.ts";
 import { RUN_CHECK_SH, CHECKS_JSON_SKELETON, GITIGNORE } from "../domain/checks.ts";
 import { stagePct } from "../domain/stages.ts";
@@ -213,6 +214,14 @@ export class Engine {
 
   managerName(runId: string, id: string): string {
     return this.plan(runId).managers.find((m) => m.id === id)?.name ?? id;
+  }
+
+  /** A manager's fence: the apps it manages, and nothing of other managers'. Null for everyone else. */
+  scopeLine(n: Pick<NodeInfo, "runId" | "id" | "tier">): string | null {
+    if (n.tier !== "manager") return null;
+    const m = this.plan(n.runId).managers.find((x) => x.id === n.id);
+    const names = (m?.appIds ?? []).map((id) => this.repo.getApp(n.runId, id)?.name).filter(Boolean);
+    return `You manage only these apps: ${names.join(", ") || "none yet"}. Other managers' apps are not yours: do not read their notes, branches or reports and do not direct their leads. Anything that crosses groups goes to the Orchestrator.`;
   }
 
   /** "Lumen · UI builder", "Wellness manager", "Orchestrator". */
@@ -761,7 +770,8 @@ export class Engine {
     const parent = n.parentId ? byId.get(n.parentId) : null;
     const app = n.appId ? this.repo.getApp(run.id, n.appId) : null;
     const lead = n.appId ? this.leadOf(run.id, n.appId) : null;
-    const peers = nodes.filter((x) => x.parentId === n.parentId && x.id !== n.id && x.parentId !== null && (n.tier === "manager" || n.tier === "lead" ? true : x.appId === n.appId)).map((x) => this.label(x));
+    // a manager sees only its own apps: other managers are not listed (they confuse more than they help)
+    const peers = n.tier === "manager" ? [] : nodes.filter((x) => x.parentId === n.parentId && x.id !== n.id && x.parentId !== null && (n.tier === "lead" ? x.tier === "lead" : x.appId === n.appId)).map((x) => this.label(x));
     const children = nodes.filter((x) => x.parentId === n.id).map((x) => this.label(x));
     const policies = this.policiesFor(run.id, n.id);
     const changes = this.repo.directivesBeforeSpawn(run.id, n.id).map((d) => ({ id: d.id, text: d.recipients.find((r) => r.nodeId === n.id)?.notice ?? d.summary }));
@@ -788,6 +798,13 @@ export class Engine {
       lines.push(
         `## Gate protocol\nBefore judging, run \`git fetch . 2>/dev/null; git checkout --detach <commit>\` for the commit Helm names, so your HEAD is exactly that commit. You are read-only on source: write only under \`reports/**\`. Re-run every declared check through the wrapper (${wrapper} <name> -- <command…>)${app?.adopted ? `; the checks are ${this.declaredChecksText(run.id, app.id)}` : " — they are in `.helm/checks.json`"}, then answer with exactly one \`helm_verdict\` call.`,
       );
+    const scope = this.scopeLine(n);
+    if (scope) lines.push(`## Your scope\n${scope}`);
+    const task = getTask(this, run.id, n.id);
+    if (task) {
+      const by = this.repo.getNode(run.id, task.by);
+      lines.push(`## Your task (from ${by ? this.label(by) : "your supervisor"}, binding until they change it)\n${escapeForPrompt(task.text, TASK_MAX)}`);
+    }
     const edits = this.repo.nodeBrief(run.id, n.id);
     if (edits) lines.push(`## Brief edits by the human (binding)\n${edits}`);
     lines.push(`## Your brief file\n\`${this.briefPath(run, n.id)}\` — re-read it when told your brief changed.`);

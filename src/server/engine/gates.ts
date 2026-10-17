@@ -3,6 +3,7 @@
 // checks must carry the wrapper trailer for the integration HEAD, and gate
 // findings must quote real lines. Agents' claims never move a stage.
 
+import { getTask, storeTask } from "./tasks.ts";
 import type { AppInfo, CheckInfo, DirectiveInfo, EvidenceRef, FindingInfo, NodeInfo, Stage } from "../../shared/types.ts";
 import type { Engine } from "./engine.ts";
 import type { ScanOutput } from "../../shared/host-contract.ts";
@@ -182,7 +183,7 @@ function coreContractPublished(e: Engine, runId: string, app: AppInfo): boolean 
   return !!core && e.repo.reportsFor(runId, core.id, 50).some((r) => r.verified && r.evidence.length > 0);
 }
 
-export async function spawnSquad(e: Engine, lead: NodeInfo, spawn: Array<{ role: string; platform?: string | null }>): Promise<string> {
+export async function spawnSquad(e: Engine, lead: NodeInfo, spawn: Array<{ role: string; platform?: string | null; task?: string | null }>): Promise<string> {
   const app = appOf(e, lead);
   if (!app) return "No app for this lead.";
   if (!["build", "fix"].includes(app.stage)) return `The squad spawns in Build (the app is in ${stageLabel(app.stage)}). Move to Build with helm_stage first.`;
@@ -196,14 +197,21 @@ export async function spawnSquad(e: Engine, lead: NodeInfo, spawn: Array<{ role:
     const nd = squad.find((x) => x.id === id);
     if (!nd) refused.push(`${s.role}${s.platform ? `/${s.platform}` : ""}: not in this app's ${app.shape} squad`);
     else if (nd.status !== "planned") refused.push(`${roleLabel(nd.role, nd.platform)}: already ${nd.status}`);
-    else wanted.push(nd);
+    else {
+      // the lead's tailored task goes into the member's system prompt and brief
+      const err = s.task?.trim() ? storeTask(e, lead, nd, s.task) : null;
+      if (err) refused.push(`${roleLabel(nd.role, nd.platform)}: ${err}`);
+      else wanted.push(nd);
+    }
   }
+  const untasked = wanted.filter((nd) => !getTask(e, lead.runId, nd.id)).map((nd) => roleLabel(nd.role, nd.platform));
   for (const nd of wanted) e.repo.setMeta(`squad:${lead.runId}:${nd.id}`, "requested");
   const res = await admitSquadMembers(e, lead.runId, app, wanted);
   const parts = [];
   if (res.started.length) parts.push(`accepted: ${res.started.join(", ")} (queued for capacity)`);
   if (res.deferred.length) parts.push(`deferred: ${res.deferred.join("; ")}`);
   if (refused.length) parts.push(`refused: ${refused.join("; ")}`);
+  if (untasked.length) parts.push(`no task given for ${untasked.join(", ")} — they work from the role brief alone; helm_set_task gives each a tailored task`);
   return parts.join(" · ") || "Nothing to spawn.";
 }
 

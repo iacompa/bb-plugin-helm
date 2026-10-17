@@ -172,6 +172,12 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
   Helm sends agents that look stuck to the Watcher. It nudges, restarts, or escalates them to
   the nearest active supervisor; only what nobody can fix reaches the user. Add one mid-run
   with `bb helm slots --slot watcher=<provider>/<model>:low`.
+- **Skills and tasks**: every builder loads its protocol skill plus a craft skill (helm-ui,
+  helm-code, helm-ios, helm-android, helm-macos, helm-windows, helm-security, helm-test,
+  helm-research, helm-docs). Supervisors write each agent's task (`helm_set_task`, or `task`
+  on `helm_spawn_squad`): it becomes part of the agent's system prompt and brief. To change
+  what one agent works on, ask its supervisor, or `bb helm tell` the agent directly. Managers see
+  only their own apps; cross-group work goes through the Orchestrator.
 - **Permission prompts**: by default an agent's prompts go to its supervisor, who answers
   with `helm_approve`. Only escalations (credentials, spending, private data, access), the
   Orchestrator's own prompts, and prompts unanswered for 15 minutes reach the user. Setting:

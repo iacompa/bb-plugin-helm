@@ -3,6 +3,7 @@
 // tier, identity, parent and app come from the database, never from metadata
 // or arguments (§8.2, V12).
 
+import { setTask } from "../engine/tasks.ts";
 import { applyVerdicts, watcherRun, type WatchVerdict } from "../engine/watch.ts";
 import { answerPrompt } from "../engine/prompts.ts";
 import { raiseInteractionNeed } from "../engine/events.ts";
@@ -77,6 +78,12 @@ export const TOOL_DEFS: ToolDef[] = [
     presentation: { label: { pending: "Checking agents", completed: "Checked agents" }, icon: { glyph: "Eye" } },
   },
   {
+    name: "helm_set_task",
+    description: "Write or replace the task of an agent under you (Orchestrator → managers, leads; manager → its leads; lead → its squad and gates). The task becomes part of its system prompt and brief: goal, the files and contract sections it owns, acceptance criteria, constraints, what not to touch. ≤6,000 chars; aim for 150–600 words. A running agent is told at its next step.",
+    parameters: z.object({ nodeId: z.string().min(1).max(120), task: z.string().min(1).max(6000) }).strict(),
+    presentation: { label: { pending: "Writing a task", completed: "Wrote a task" }, icon: { glyph: "ListTodo" } },
+  },
+  {
     name: "helm_approve",
     description: "Answer a permission prompt from one of your delegates (sent to you as 'Permission request … prompt <id>'). allow: ordinary work for its task. deny: destructive, outside its worktree, or unclear. escalate: credentials or secrets, spending real money, private data, or access only the human can grant.",
     parameters: z.object({ promptId: z.string().min(1).max(120), decision: z.enum(["allow", "deny", "escalate"]), reason: z.string().min(1).max(400) }).strict(),
@@ -94,10 +101,10 @@ export const TOOL_DEFS: ToolDef[] = [
   { name: "helm_digest", description: "Rolled-up state of the apps under you, plus FYI lines you have not read.", parameters: z.object({}).strict(), presentation: { label: { pending: "Reading digest", completed: "Read digest" }, icon: { glyph: "AlignLeft" } } },
   {
     name: "helm_spawn_squad",
-    description: "Ask Helm to start squad members of your app's plan (role ui|code|platform|security|test, platform for platform builders). Helm checks shape, lead span and caps; returns accepted / deferred with reasons. Use `release` (with a reason) for members your SPEC no longer needs: Helm stops them and does not wait for them at Integrate.",
+    description: "Ask Helm to start squad members of your app's plan (role ui|code|platform|security|test, platform for platform builders). Helm checks shape, lead span and caps; returns accepted / deferred with reasons. Give each member a `task`: a short system prompt written for exactly its job (what to build, the files and contract sections it owns, acceptance criteria, what not to touch) — it starts with it. Use `release` (with a reason) for members your SPEC no longer needs: Helm stops them and does not wait for them at Integrate.",
     parameters: z
       .object({
-        spawn: z.array(z.object({ role: z.enum(["ui", "code", "platform", "security", "test", "research", "docs"]), platform: z.enum(["mac", "win", "ios", "and"]).nullish() })).max(12).default([]),
+        spawn: z.array(z.object({ role: z.enum(["ui", "code", "platform", "security", "test", "research", "docs"]), platform: z.enum(["mac", "win", "ios", "and"]).nullish(), task: z.string().max(6000).nullish() })).max(12).default([]),
         release: z.array(z.object({ role: z.enum(["ui", "code", "platform", "security", "test", "research", "docs"]), platform: z.enum(["mac", "win", "ios", "and"]).nullish(), reason: z.string().min(1).max(300) })).max(12).default([]),
       })
       .strict(),
@@ -129,6 +136,7 @@ export const TOOL_NAMES = TOOL_DEFS.map((t) => t.name);
 const TIER_NAME: Record<string, string> = {
   helm_world: "the Orchestrator",
   helm_approve: "the Orchestrator, Managers and App Leads",
+  helm_set_task: "the Orchestrator, Managers and App Leads",
   helm_direct: "the Orchestrator, Managers and App Leads",
   helm_propose_plan: "the Orchestrator",
   helm_propose_wave: "the Orchestrator",
@@ -236,7 +244,7 @@ async function dispatch(e: Engine, node: NodeInfo, name: string, p: Record<strin
       return digest(e, node);
     case "helm_spawn_squad":
     {
-      const spawn = (p.spawn ?? []) as Array<{ role: string; platform?: string | null }>;
+      const spawn = (p.spawn ?? []) as Array<{ role: string; platform?: string | null; task?: string | null }>;
       const release = (p.release ?? []) as Array<{ role: string; platform?: string | null; reason: string }>;
       const out = [release.length ? releaseSquadMembers(e, node, release) : "", spawn.length ? await spawnSquad(e, node, spawn) : ""];
       return out.filter(Boolean).join("\n") || "Name at least one member to spawn or release.";
@@ -247,6 +255,8 @@ async function dispatch(e: Engine, node: NodeInfo, name: string, p: Record<strin
       return stageRequest(e, node, p.to as never, (p.evidence as never) ?? []);
     case "helm_assign_fix":
       return assignFix(e, node, String(p.findingId), String(p.nodeId));
+    case "helm_set_task":
+      return setTask(e, node, String(p.nodeId), String(p.task));
     case "helm_approve":
       return answerPrompt(e, node, String(p.promptId), p.decision as "allow" | "deny" | "escalate", String(p.reason), (n, i, note) => raiseInteractionNeed(e, n, i, note));
     case "helm_record_check":
