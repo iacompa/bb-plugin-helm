@@ -518,6 +518,13 @@
 .helm .nbody { padding: 4px 14px 10px 59px; display: flex; flex-direction: column; gap: 8px; color: var(--h-fg-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .helm .nfoot { display: flex; gap: 8px; align-items: center; padding: 10px 14px 12px 59px; flex-wrap: wrap; }
 .helm .ncard.resolved { opacity: .62; box-shadow: none; }
+.helm .look { display: flex; flex-direction: column; gap: 8px; white-space: normal; border: 1px solid var(--h-line); border-radius: 10px; padding: 10px 12px; background: var(--h-surface-2); font-size: 12.5px; }
+.helm .look-h { color: var(--h-fg-3); font-size: 11.5px; }
+.helm .look-row { display: flex; flex-direction: column; gap: 3px; padding-top: 6px; border-top: 1px solid var(--h-line); }
+.helm .look-row:first-of-type { border-top: 0; padding-top: 0; }
+.helm .look-row.named b { color: var(--h-warn-ink); }
+.helm .look-path { font-size: 11px; color: var(--h-fg-3); overflow-wrap: anywhere; }
+.helm .look summary { cursor: pointer; color: var(--h-fg-2); }
 .helm .empty { padding: 36px 20px; text-align: center; color: var(--h-fg-3); border: 1px dashed var(--h-line-strong); border-radius: 14px; }
 
 /* ───────────── overlays (rendered inside .helm) ───────────── */
@@ -685,6 +692,14 @@
 .helm .scr-stage { flex: 1; min-height: 0; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 20px; background: var(--h-bg); }
 .helm .scr-shot { position: relative; display: inline-block; line-height: 0; }
 .helm .scr-shot img { display: block; max-width: 100%; max-height: min(640px, calc(100vh - 260px)); border-radius: 6px; user-select: none; }
+/* device frames: a phone app is seen as a phone, never stretched to a computer screen */
+.helm .scr-dev { display: inline-block; line-height: 0; max-width: 100%; }
+.helm .scr-dev.phone, .helm .scr-dev.tablet { padding: 10px; background: #0b0b0d; border: 1px solid var(--h-line); box-shadow: 0 10px 30px rgb(0 0 0 / 0.35); }
+.helm .scr-dev.phone { border-radius: 46px; }
+.helm .scr-dev.tablet { border-radius: 28px; padding: 14px; }
+.helm .scr-dev.phone .scr-shot img { max-height: min(760px, calc(100vh - 280px)); max-width: min(100%, 380px); width: auto; border-radius: 36px; }
+.helm .scr-dev.tablet .scr-shot img { max-height: min(760px, calc(100vh - 290px)); border-radius: 16px; }
+.helm .scr-dev.phone .scr-hot { border-radius: 10px; }
 .helm .scr-hot { position: absolute; padding: 0; border: 0; background: transparent; border-radius: 6px; cursor: pointer; }
 .helm .scr-hot:hover, .helm .scr-hot:focus-visible, .helm .scr-shot.show .scr-hot { outline: 2px solid var(--h-accent); outline-offset: -1px; background: color-mix(in srgb, var(--h-accent) 14%, transparent); }
 .helm .scr-hot:disabled { cursor: not-allowed; outline-color: var(--h-fg-4); }

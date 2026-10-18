@@ -1,6 +1,7 @@
 // RPC handlers (§10.2): thin shells over the service layer. Every mutation
 // returns the updated entity; the engine emits the realtime patches.
 
+import { needLook } from "./look.ts";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { ensureGitAgent, ensurePlanner } from "./engine/custom.ts";
 import { RPC } from "../shared/protocol.ts";
@@ -97,6 +98,7 @@ export function registerRpc(bb: BbPluginApi, svc: HelmService): void {
     directive_create: ({ runId, directive }) => svc.directive(runId, directive as never),
     ledger_list: ({ runId, limit }) => ({ directives: svc.repo.listDirectives(runId, limit ?? 300) }),
     needs_list: ({ runId, state }) => ({ needs: svc.repo.listNeeds(runId, state) }),
+    needs_look: ({ runId, needId }) => needLook(svc.engine, runId, needId),
     needs_resolve: ({ runId, needId, ...res }) => svc.resolve(runId, needId, res as never),
     models_catalog: async (input) => {
       const cat = await primaryCatalog(!!input?.refresh);

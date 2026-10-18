@@ -1,6 +1,7 @@
-// The Screens view: click through an app's screens like a tiny browser. Nothing runs and there
-// is no device frame. Each page is a screenshot the builders committed, and tappable areas from
-// the screen map (reports/screens/screens.json) jump to the page they lead to.
+// The Screens view: click through an app's screens like a tiny browser. Nothing runs. Each page
+// is a screenshot the builders committed, shown in a phone or tablet frame when it is one, and
+// tappable areas from the screen map (reports/screens/screens.json) jump to the page they lead
+// to. The server keeps out what is not the app's UI (evidence, debug shots, other platforms).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHelm } from "./ctx.tsx";
@@ -14,6 +15,7 @@ interface Variant {
   size: string | null;
   theme: string | null;
   state: string | null;
+  form: "phone" | "tablet" | "wide" | null;
 }
 interface Link {
   to: string;
@@ -35,6 +37,8 @@ interface ScreenMap {
   screens: Screen[];
   source: "map" | "files";
   problems: string[];
+  device: "phone" | "desktop" | "web" | "any";
+  hidden: { count: number; reasons: string[] };
 }
 interface AppRow {
   id: string;
@@ -89,8 +93,8 @@ function ScreensInner() {
   );
 
   useEffect(() => {
-    void load(null);
-  }, [load]);
+    void load(h.screensApp);
+  }, [load, h.screensApp]);
 
   const map = res?.map ?? null;
   const screens = map?.screens ?? [];
@@ -171,6 +175,8 @@ function ScreensInner() {
   });
 
   const src = variant ? images.current.get(variant.path) : undefined;
+  // a phone app's pages sit in a phone; a capture that knows its shape says so itself
+  const frame = variant?.form === "phone" || variant?.form === "tablet" ? variant.form : !variant?.form && map?.device === "phone" ? "phone" : null;
   const appName = res?.apps.find((a) => a.id === appId)?.name ?? "";
 
   return (
@@ -186,7 +192,7 @@ function ScreensInner() {
           </select>
         ) : null}
         <span className="muted" style={{ fontSize: 12 }}>
-          Each app's screens as pages. Click a highlighted area or a page on the left. Nothing runs here.
+          Each app's own screens as pages, as they look on its device. Click a highlighted area or a page on the left. Nothing runs here.
         </span>
       </ModalHead>
       {!runId ? (
@@ -247,8 +253,14 @@ function ScreensInner() {
                 <Ic name="Image" size="lg" />
                 <b>No screens for {appName || "this app"} yet</b>
                 <span className="muted">
-                  The UI and platform builders commit screenshots under <code>reports/ui/</code> and <code>reports/&lt;platform&gt;/</code> while they build, and a screen map at <code>reports/screens/screens.json</code> that links the pages. They appear here; press Scan again after a builder reports.
+                  The UI and platform builders commit screenshots of every page under <code>reports/ui/</code> and <code>reports/&lt;platform&gt;/</code>
+                  {map?.device === "phone" ? <>, captured on a phone simulator or emulator</> : null}, and a screen map at <code>reports/screens/screens.json</code> that links the pages. They appear here; press Scan again after a builder reports.
                 </span>
+                {map?.hidden.count ? (
+                  <span className="muted">
+                    {map.hidden.count} other capture{map.hidden.count === 1 ? " was" : "s were"} found and left out: {map.hidden.reasons.join("; ")}.
+                  </span>
+                ) : null}
               </div>
             ) : !variant ? (
               <div className="scr-empty">
@@ -272,6 +284,7 @@ function ScreensInner() {
                 <span className="muted">This screenshot could not be read (it may have moved). Press Scan again.</span>
               </div>
             ) : (
+              <div className={cx("scr-dev", frame)}>
               <div className={cx("scr-shot", showAreas && "show")}>
                 <img src={src} alt={`${appName} · ${screen?.name ?? ""}`} draggable={false} />
                 {screen?.links.map((l, i) => {
@@ -290,9 +303,10 @@ function ScreensInner() {
                   );
                 })}
               </div>
+              </div>
             )}
           </div>
-          {screen?.note || variant?.state || map?.problems.length ? (
+          {screen?.note || variant?.state || map?.problems.length || (map?.hidden.count && screens.length) ? (
             <div className="scr-foot">
               {screen?.note ? <span>{screen.note}</span> : null}
               {variant?.state ? <span className="pill">{variant.state}</span> : null}
@@ -303,6 +317,11 @@ function ScreensInner() {
                 </span>
               ) : null}
               {map?.source === "files" && screens.length ? <span className="muted">No screen map yet: pages come from the screenshots, without links.</span> : null}
+              {map?.hidden.count && screens.length ? (
+                <span className="muted" title={map.hidden.reasons.join("\n")}>
+                  {map.hidden.count} capture{map.hidden.count === 1 ? "" : "s"} left out (not pages of {appName || "this app"})
+                </span>
+              ) : null}
             </div>
           ) : null}
         </section>

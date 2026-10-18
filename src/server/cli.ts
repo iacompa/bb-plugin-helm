@@ -482,7 +482,8 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             const map = await svc.screens.list(run.id, app.id, !!i.options.refresh);
             const lines = map.screens.map((s) => `${s.id === map.start ? "▸" : " "} ${s.name} (${s.id}): ${s.variants.length} image${s.variants.length === 1 ? "" : "s"}${s.links.length ? ` · links to ${[...new Set(s.links.map((l) => l.to))].join(", ")}` : ""}`);
             const head = map.screens.length ? `${app.name}: ${map.screens.length} screens (${map.source === "map" ? "from the screen map" : "from screenshots; no screen map yet"})` : `${app.name} has no screenshots yet. The UI and platform builders commit them under reports/ as they build.`;
-            return out(i.options.json, map, [head, ...lines, ...map.problems.map((p) => `! ${p}`)].join("\n"));
+            const left = map.hidden.count ? [`Left out (not ${app.name}'s pages): ${map.hidden.reasons.join("; ")}.`] : [];
+            return out(i.options.json, map, [head, ...lines, ...left, ...map.problems.map((p) => `! ${p}`)].join("\n"));
           }),
       }),
       refresh: cliCommand({

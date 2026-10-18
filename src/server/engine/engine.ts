@@ -93,6 +93,7 @@ export function gitRulesText(appBranch: string | null): string {
     `Every app has exactly two branches, its main branch and its work branch${appBranch ? ` (here \`${appBranch}\`)` : " (`<app>-work`)"}, and two worktrees, the human's checkout and one shared work worktree. All work happens on the work branch, in the work worktree.`,
     "Never create a branch, a worktree or a clone, and never switch branches. Never merge into main and never push: only the Git agent does, when the human signs the work off or the Orchestrator or the app's lead asks it to.",
     "The Git agent's instructions on branches, worktrees, merges and pushes are binding on you: they outrank earlier instructions on git. Do what it asks, or reply to it with exactly what would be lost.",
+    "Questions about which branch, worktree, checkout or commit to work on go to the Git agent (helm_message to \"git\"), never to the human: it decides under these rules. Ask the human only for what git cannot settle (approving work for main, a destination, credentials).",
   ].join(" ");
 }
 

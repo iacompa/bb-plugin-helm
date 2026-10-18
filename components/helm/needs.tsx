@@ -1,6 +1,6 @@
 // Needs you (§11.7): one inbox for everything waiting on the human, with
 // context, evidence and actions that map to needs_resolve.
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { useHelm } from "./ctx.tsx";
@@ -165,6 +165,7 @@ function NeedCard({
   const tv = toneVar(meta.tone);
   const opts = need.options ?? [];
   const nd = (need.data ?? {}) as { completeRun?: boolean; findingIds?: string[]; commit?: string; ciPlatforms?: string[] };
+  const [look, setLook] = useState(false);
 
   const B = ({ label, cls, icon, onClick, title }: { label: string; cls?: string; icon?: string; onClick: () => void; title?: string }) => (
     <button type="button" className={cx("btn sm", cls)} disabled={busy} onClick={onClick} title={title}>
@@ -345,10 +346,21 @@ function NeedCard({
           </div>
         ) : null}
         {need.evidence ? <pre className="evi">{need.evidence}</pre> : null}
+        {look ? <LookPanel runId={need.runId} needId={need.id} /> : null}
       </div>
       <div className="nfoot">
         {actions}
         <span className="grow" />
+        {app ? (
+          <button type="button" className={cx("btn sm ghost", look && "on")} aria-pressed={look} onClick={() => setLook((x) => !x)} title="See what this is about before you answer: the app's checkout and worktrees (branch, commit, uncommitted files) and the commits it names, read from git now">
+            <Ic name="Search" size="sm" /> Look
+          </button>
+        ) : null}
+        {app ? (
+          <button type="button" className="btn sm ghost" onClick={() => h.openScreens(app.id)} title={`${app.name}'s screens, page by page`}>
+            <Ic name="Image" size="sm" /> Screens
+          </button>
+        ) : null}
         {node?.threadId ? (
           <button type="button" className="btn sm ghost" onClick={() => nav.toThread(node.threadId!, { split: true })}>
             <Ic name="ExternalLink" size="sm" /> Open thread in BB
@@ -550,5 +562,108 @@ function CapModal({ need, cap, onClose, onRaise }: { need: NeedInfo; cap: number
         </button>
       </div>
     </Modal>
+  );
+}
+
+interface LookPlace {
+  role: "checkout" | "work" | "extra";
+  path: string;
+  branch: string | null;
+  head: string | null;
+  missing: boolean;
+  dirty: string[];
+  dirtyCount: number;
+  agents: string[];
+  named: boolean;
+}
+interface LookCommit {
+  ref: string;
+  sha: string | null;
+  subject: string | null;
+  ts: number | null;
+  onWork: boolean | null;
+  onMain: boolean | null;
+}
+interface NeedLook {
+  app: { id: string; name: string } | null;
+  repo: string | null;
+  workBranch: string | null;
+  mainBranch: string;
+  places: LookPlace[];
+  commits: LookCommit[];
+  error: string | null;
+}
+
+const ROLE: Record<LookPlace["role"], string> = { checkout: "Your checkout", work: "Work worktree (all agents)", extra: "Other worktree" };
+
+/** What a decision is about, read from git when opened: so the human can check before answering. */
+function LookPanel({ runId, needId }: { runId: string; needId: string }) {
+  const h = useHelm();
+  const [res, setRes] = useState<NeedLook | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void (h.rpc.call("needs_look", { runId, needId }) as Promise<NeedLook>)
+      .then((r) => live && setRes(r))
+      .catch((e) => live && setErr(errMsg(e)));
+    return () => {
+      live = false;
+    };
+  }, [h.rpc, runId, needId]);
+  if (err) return <div className="look muted">Could not read it: {err}</div>;
+  if (!res) return <div className="look muted">Reading git…</div>;
+  if (!res.repo) return <div className="look muted">{res.app ? `${res.app.name} has no repository yet.` : "This is not about one app's repository."}</div>;
+  const yes = (v: boolean | null, what: string) => (v === null ? null : <span className={cx("pill", v ? "ok" : "")}>{v ? `on ${what}` : `not on ${what}`}</span>);
+  return (
+    <div className="look" aria-label="What this is about">
+      <div className="look-h">
+        Read from git now · branches: <code>{res.mainBranch}</code> and <code>{res.workBranch ?? "no work branch yet"}</code>
+      </div>
+      {res.places.map((p) => (
+        <div key={p.path} className={cx("look-row", p.named && "named")}>
+          <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+            <b>{ROLE[p.role]}</b>
+            {p.named ? <span className="pill warn">named here</span> : null}
+            {p.missing ? <span className="pill crit">missing on disk</span> : null}
+            <span className="mono faint">{p.branch ?? "detached"} @ {p.head?.slice(0, 9) ?? "?"}</span>
+            {p.agents.length ? <span className="faint">· {p.agents.join(", ")}</span> : null}
+          </div>
+          <div className="mono look-path" title={p.path}>
+            {p.path}
+          </div>
+          {p.dirtyCount ? (
+            <details>
+              <summary>
+                {p.dirtyCount} uncommitted file{p.dirtyCount === 1 ? "" : "s"}
+              </summary>
+              <pre className="evi">{p.dirty.length ? p.dirty.join("\n") + (p.dirtyCount > p.dirty.length ? "\n…" : "") : "(listed only for the checkout, the work worktree and folders named here)"}</pre>
+            </details>
+          ) : (
+            <span className="faint">clean</span>
+          )}
+        </div>
+      ))}
+      {res.commits.length ? (
+        <div className="look-row">
+          <b>Commits named here</b>
+          {res.commits.map((c) => (
+            <div key={c.ref} className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+              <code>{c.ref}</code>
+              {c.sha ? (
+                <>
+                  <span>{c.subject ?? ""}</span>
+                  {c.ts ? <span className="faint">{agoOf(c.ts * (c.ts < 1e12 ? 1000 : 1))}</span> : null}
+                  {yes(c.onWork, res.workBranch ?? "the work branch")}
+                  {yes(c.onMain, res.mainBranch)}
+                </>
+              ) : (
+                <span className="faint">not in this repository</span>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {res.error ? <div className="faint">{res.error}</div> : null}
+    </div>
   );
 }

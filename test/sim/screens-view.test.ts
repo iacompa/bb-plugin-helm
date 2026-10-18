@@ -27,3 +27,33 @@ test("an app's screens come from its builders' worktrees; only listed images can
   assert.equal((await svc.screens.image(runId, ui.appId!, `${wt}/src/secret.png`)).dataUrl, null, "a path the scan did not return is refused");
   assert.deepEqual(svc.screens.apps(runId).map((a) => a.id).length, 2);
 });
+
+test("an agent whose worktree is another repository (a host app, another project) adds nothing to the app's screens", async () => {
+  const h = await createHarness();
+  const p = parseBrief(SAMPLE_BRIEF).portfolio;
+  const { runId } = h.engine.createRun({ name: "S", brief: "x", portfolio: { ...p, apps: p.apps.slice(0, 2).map((a) => ({ ...a, group: null })) }, slots: CHEAP, limits: { concurrency: 32 } });
+  await h.engine.startRun(runId);
+  const ui = h.repo.listNodes(runId).find((n) => n.role === "ui")!;
+  await h.clock.runUntil(h.clock.now() + 6 * 3600_000, { stopWhen: () => !!h.repo.getNode(runId, ui.id)?.threadId });
+  const wt = (await nodeWorktree(h.engine, h.repo.getNode(runId, ui.id)!))!;
+  h.sim.git.write(wt, "reports/ui/home--default--phone--light.png", "PNGDATA-home");
+  // another repository, the way a builder's BB worktree can be the host DAW's project
+  const other = "/home/sim/Projects/daw";
+  await h.engine.host(runId).ensureRepo({ path: other, files: [{ path: "README.md", content: "daw" }], message: "init" });
+  h.sim.git.write(other, "reports/ui/mixer--default--phone--light.png", "PNGDATA-daw");
+  const lead = h.repo.listNodes(runId).find((n) => n.appId === ui.appId && n.tier === "lead")!;
+  const real = h.engine.port.threadState.bind(h.engine.port);
+  h.engine.port.threadState = (async (id: string) => {
+    const st = await real(id);
+    return id === lead.threadId && st ? { ...st, path: other } : st;
+  }) as typeof h.engine.port.threadState;
+  const env = h.engine.port.environment.bind(h.engine.port);
+  const leadEnv = h.repo.nodeEnvironment(runId, lead.id);
+  h.engine.port.environment = (async (id: string) => {
+    const e = await env(id);
+    return id === leadEnv && e ? { ...e, path: other } : e;
+  }) as typeof h.engine.port.environment;
+  assert.equal(await nodeWorktree(h.engine, h.repo.getNode(runId, lead.id)!), other);
+  const map = await new HelmService(h.engine).screens.list(runId, ui.appId!, true);
+  assert.deepEqual(map.screens.map((s) => s.id), ["home"], JSON.stringify(map.screens.map((s) => s.variants.map((v) => v.path))));
+});

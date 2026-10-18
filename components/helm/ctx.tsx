@@ -75,7 +75,9 @@ export interface HelmCtx {
   openStudio: (o?: StudioOpts) => void;
   closeStudio: () => void;
   screensOpen: boolean;
-  openScreens: () => void;
+  /** The app Screens opens on (null: the first). */
+  screensApp: string | null;
+  openScreens: (appId?: string | null) => void;
   closeScreens: () => void;
   wizardOpen: boolean;
   setWizardOpen: (v: boolean) => void;
@@ -178,6 +180,7 @@ export function HelmProvider({ children, rootRef }: { children: ReactNode; rootR
   const [observatory, setObservatory] = useState(false);
   const [studio, setStudio] = useState<StudioOpts | null>(null);
   const [screensOpen, setScreensOpen] = useState(false);
+  const [screensApp, setScreensApp] = useState<string | null>(null);
   // the wizard stays open (with its draft) when you leave the panel and come back
   const [wizardOpen, setWizardOpen] = useStored("helm:wizardOpen", false);
 
@@ -273,7 +276,11 @@ export function HelmProvider({ children, rootRef }: { children: ReactNode; rootR
       openStudio: (o: StudioOpts = {}) => setStudio(o),
       closeStudio: () => setStudio(null),
       screensOpen,
-      openScreens: () => setScreensOpen(true),
+      screensApp,
+      openScreens: (appId?: string | null) => {
+        setScreensApp(appId ?? null);
+        setScreensOpen(true);
+      },
       closeScreens: () => setScreensOpen(false),
       wizardOpen,
       setWizardOpen,
@@ -283,7 +290,7 @@ export function HelmProvider({ children, rootRef }: { children: ReactNode; rootR
       node,
       app,
     }),
-    [rpc, rootRef, runs, runsError, refreshRuns, runId, setRunId, tabs, closeTab, newSession, data, rev, loading, error, refetch, catalog, catalogError, loadCatalog, view, sel, select, tab, draftType, inspOpen, inspWide, inspW, drill, focusNode, focusReq, observatory, studio, screensOpen, wizardOpen, pulse, firePulse, flashes, node, app],
+    [rpc, rootRef, runs, runsError, refreshRuns, runId, setRunId, tabs, closeTab, newSession, data, rev, loading, error, refetch, catalog, catalogError, loadCatalog, view, sel, select, tab, draftType, inspOpen, inspWide, inspW, drill, focusNode, focusReq, observatory, studio, screensOpen, screensApp, wizardOpen, pulse, firePulse, flashes, node, app],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

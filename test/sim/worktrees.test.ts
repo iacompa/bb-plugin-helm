@@ -241,3 +241,25 @@ test("the Git agent consolidates by itself when woken, and the other app is unto
   assert.equal((await appWorktrees(h.engine, runId, { appId: "alpha" }))[0].worktrees.length, 2);
   assert.equal((await appWorktrees(h.engine, runId, { appId: "beta" }))[0].extra, 0);
 });
+
+test("Look shows what a decision is about: the checkout, the work worktree with its uncommitted files, and the commits it names", async () => {
+  const { h, runId } = await run();
+  const { needLook, commitRefs } = await import("../../src/server/look.ts");
+  const repo = h.repo.getApp(runId, "alpha")!.repoPath!;
+  const tip = h.sim.git.resolve(repo, "alpha-work")!;
+  const work = h.engine.workTree(runId, "alpha")!;
+  h.sim.git.wts.get(work)!.work.set("src/half.swift", "// wip");
+  const lead = h.repo.listNodes(runId).find((n) => n.appId === "alpha" && n.tier === "lead")!;
+  h.engine.raiseNeed(runId, { kind: "decision", nodeId: lead.id, appId: "alpha", title: `Rebind to ${tip.slice(0, 9)}?`, body: `The work worktree at ${work} has local edits; deadbeef1 is unknown.`, evidence: "", options: ["Yes", "No"], dedupeKey: "look-test" });
+  const need = h.repo.listNeeds(runId, "open").find((n) => n.title.startsWith("Rebind"))!;
+  const look = await needLook(h.engine, runId, need.id);
+  assert.equal(look.workBranch, "alpha-work");
+  assert.deepEqual(look.places.map((p) => p.role), ["work", "checkout"], "the folder the decision names comes first");
+  assert.ok(look.places[0].named);
+  assert.ok(look.places[0].dirty.includes("src/half.swift"), JSON.stringify(look.places[0]));
+  const c = look.commits.find((x) => x.ref === tip.slice(0, 9))!;
+  assert.equal(c.sha, tip);
+  assert.equal(c.onWork, true);
+  assert.equal(look.commits.find((x) => x.ref === "deadbeef1")!.sha, null);
+  assert.deepEqual(commitRefs("c767f2e and 9e8924389a, not 1234567 or abcdefg"), ["c767f2e", "9e8924389a"]);
+});

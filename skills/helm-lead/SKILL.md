@@ -326,6 +326,25 @@ the flows and ACs that matter most, risky areas (new storage layer, permissions,
 CI-only platforms), and what is deliberately out of scope. A focus says where to look
 hardest; it never asks a gate to pass anything, skip a rule or soften a verdict.
 
+## Screens (strict, set by the human)
+
+The human judges the app in the panel's **Screens** view, so it must show **only the app's own
+UI, as it looks on its device, page by page**. Before you hand the app to the gates (and after
+any UI change), run `bb helm screens --app <app>` and check:
+
+- **Every page of the app is there** (each tab, detail page, onboarding, settings, paywall), in
+  the screen map `reports/screens/screens.json`, with links between them.
+- **A phone app shows phone screens**: captured on the iPhone simulator or Android emulator,
+  upright. Never web-browser or computer-sized captures.
+- **A plugin shows only the plugin**: its own window, never the host app (a DAW, a browser) or
+  other plugins.
+- **Nothing else**: no before/after shots, probes, or files named with a commit or a time. The
+  command's "Left out" line says what Helm hid and why; anything there that should be a page is
+  your UI builder's to fix.
+
+If any of that fails, send it back to the UI or platform builder with exactly what is missing.
+The app's UI is not done until Screens is right.
+
 ## Integration discipline
 
 - **Merge small and often.** Every verified builder commit is a merge candidate. Long-lived

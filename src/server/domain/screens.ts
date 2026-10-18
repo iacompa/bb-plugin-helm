@@ -1,7 +1,10 @@
 // The Screens view: the human clicks through an app's screens like a tiny browser. Nothing
 // runs; the pages are the screenshots the builders commit (reports/ui, reports/<platform>/…),
-// and the links between them come from an optional screen map the UI builder writes at
-// reports/screens/screens.json. Without a map, every captured screen is still a page.
+// and the links between them come from the screen map the UI builder writes at
+// reports/screens/screens.json. Strict about what counts as a page (the human's rule: "just
+// showing the UI"): with a map, only its pages; never evidence or debug captures (before/after,
+// probes, names with a commit or a time); never captures for a platform the app does not target;
+// and for a phone app, never a capture shaped like a computer screen.
 
 import { z } from "zod";
 
@@ -11,6 +14,20 @@ export interface ScanFile {
   root: string;
   rel: string;
   mtime: number;
+  /** Pixel size, when the host could read the image's header. */
+  w?: number | null;
+  h?: number | null;
+}
+
+/** The shape of one capture: a phone or tablet held upright, or anything wider. */
+export type Form = "phone" | "tablet" | "wide";
+/** How the viewer frames the app's pages. */
+export type Device = "phone" | "desktop" | "web" | "any";
+
+/** What the app is, so only its own kind of screen is shown. */
+export interface ScreenTarget {
+  name: string;
+  platforms: string[];
 }
 
 export interface ScreenVariant {
@@ -22,6 +39,9 @@ export interface ScreenVariant {
   theme: string | null;
   state: string | null;
   mtime: number;
+  w: number | null;
+  h: number | null;
+  form: Form | null;
 }
 
 export interface ScreenLink {
@@ -47,6 +67,10 @@ export interface ScreenMap {
   /** "map": the builders' screen map drove the pages and links; "files": pages from screenshots only. */
   source: "map" | "files";
   problems: string[];
+  /** How to frame the pages: a phone for an iOS or Android app. */
+  device: Device;
+  /** Captures that were found and are not pages, with why (counts per reason). */
+  hidden: { count: number; reasons: string[] };
 }
 
 const unit = z.number().min(0).max(1);
@@ -101,7 +125,7 @@ export function isScreenFile(rel: string): boolean {
 export function parseScreenFile(f: ScanFile): { id: string; variant: ScreenVariant } | null {
   const rel = f.rel.replace(/\\/g, "/");
   if (!isScreenFile(rel)) return null;
-  const platform = rel.match(/(?:^|\/)reports\/(ui|ios|and|mac|win|web|unreal|game)\//)?.[1] ?? null;
+  const platform = rel.match(/(?:^|\/)reports\/ui\/(ios|and|mac|win|web)\//)?.[1] ?? rel.match(/(?:^|\/)reports\/(ui|ios|and|mac|win|web|unreal|game)\//)?.[1] ?? null;
   const base = rel.split("/").pop()!.replace(IMAGE_FILE, "");
   let parts: string[];
   let screen: string;
@@ -129,7 +153,55 @@ export function parseScreenFile(f: ScanFile): { id: string; variant: ScreenVaria
     else if (SIZES.test(l)) size = l;
     else state = state ? `${state} ${l}` : l;
   }
-  return { id, variant: { path: joinPath(f.root, rel), rel, platform, size, theme, state, mtime: f.mtime } };
+  const w = f.w ?? null;
+  const h = f.h ?? null;
+  return { id, variant: { path: joinPath(f.root, rel), rel, platform, size, theme, state, mtime: f.mtime, w, h, form: formOf(w, h, size) } };
+}
+
+/** A capture's shape from its pixels (upright phone ≥ 1.55 tall per wide), else from its size word. */
+export function formOf(w: number | null, h: number | null, size: string | null): Form | null {
+  if (w && h) {
+    const r = h / w;
+    return r >= 1.55 ? "phone" : r >= 1.15 ? "tablet" : "wide";
+  }
+  if (!size) return null;
+  if (/^(phone|mobile|compact|small|watch|3\d\d(w|px)?)$/i.test(size)) return "phone";
+  if (/^(tablet|regular|medium)$/i.test(size)) return "tablet";
+  if (/^(desktop|large|expanded|tv|(1[0-9]|[2-9]\d)\d\d(w|px)?)$/i.test(size)) return "wide";
+  return null;
+}
+
+const MOBILE = new Set(["ios", "and"]);
+const NAMES: Record<string, string> = { ios: "iOS", and: "Android", mac: "macOS", win: "Windows", web: "the web" };
+
+/** How the viewer frames an app: a phone when every platform it targets is a phone OS. */
+export function deviceFor(platforms: string[]): Device {
+  if (platforms.length && platforms.every((p) => MOBILE.has(p))) return "phone";
+  if (platforms.length && platforms.every((p) => p === "web")) return "web";
+  if (platforms.length && platforms.every((p) => p === "mac" || p === "win")) return "desktop";
+  return "any";
+}
+
+/** Folders of agents' proof, not the app's pages. */
+const EVIDENCE_DIR = /(^|\/)(evidence|reviews?|slop|audit|security|compliance|tests?|checks|debug|probes?|repro|diffs?|baselines?|failures?|tmp|temp|old|archive|before|after)\//i;
+/** File names of debug captures: before/after shots, probes, or a commit or a time in the name. */
+const DEBUG_WORD = /^(before|after|probe|stuck|debug|repro|worktree|reload|persisted|unresolved|crash|failed?|failure|diff|wip|tmp|temp|old|test|broken|bug)$/i;
+const DEBUG_TOKEN = /^(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}$|^\d{3,4}z$|^\d{8}(t\d{4,6}z?)?$|^\d{10,13}$/i;
+
+export function debugCapture(rel: string): boolean {
+  const r = rel.replace(/\\/g, "/");
+  if (EVIDENCE_DIR.test(r.split("/").slice(0, -1).join("/") + "/")) return true;
+  const base = r.split("/").pop()!.replace(IMAGE_FILE, "");
+  if (/\d{4}-\d{2}-\d{2}/.test(base)) return true;
+  return base.split(/[-_. ]+|--/).some((t) => DEBUG_WORD.test(t) || DEBUG_TOKEN.test(t));
+}
+
+/** Why a capture is not one of the app's pages, or null when it is. */
+export function notAPage(v: ScreenVariant, target: ScreenTarget | null): string | null {
+  if (!target?.platforms.length) return null;
+  if (v.platform && NAMES[v.platform] && !target.platforms.includes(v.platform)) return `captures for ${NAMES[v.platform]}, which ${target.name} does not target`;
+  if (deviceFor(target.platforms) === "phone" && v.form === "wide") return `captures shaped like a computer screen; ${target.name} is a phone app`;
+  return null;
 }
 
 function joinPath(root: string, rel: string): string {
@@ -143,10 +215,13 @@ function rankVariant(v: ScreenVariant): number {
 
 /**
  * Build the pages of an app from the screenshots found under its folders and the screen map
- * (if any). The same relative file in several worktrees counts once: the newest wins.
+ * (if any). The same relative file in several worktrees counts once: the newest wins. With a
+ * `target`, captures that are not the app's own kind of screen are hidden (and counted).
  */
-export function buildScreenMap(files: ScanFile[], manifests: Array<{ root: string; text: string; mtime: number }>): ScreenMap {
+export function buildScreenMap(files: ScanFile[], manifests: Array<{ root: string; text: string; mtime: number }>, target: ScreenTarget | null = null): ScreenMap {
   const problems: string[] = [];
+  const hidden = new Map<string, number>();
+  const hide = (why: string) => hidden.set(why, (hidden.get(why) ?? 0) + 1);
   const newest = new Map<string, ScanFile>();
   for (const f of files) {
     const prev = newest.get(f.rel);
@@ -154,22 +229,20 @@ export function buildScreenMap(files: ScanFile[], manifests: Array<{ root: strin
   }
   const byId = new Map<string, Screen>();
   const byRel = new Map<string, ScreenVariant>();
+  const fromFiles = new Map<string, ScreenVariant[]>();
   for (const f of newest.values()) {
     const p = parseScreenFile(f);
     if (!p) continue;
     byRel.set(p.variant.rel, p.variant);
-    let s = byId.get(p.id);
-    if (!s) byId.set(p.id, (s = { id: p.id, name: title(p.id), note: null, variants: [], links: [] }));
-    s.variants.push(p.variant);
+    const list = fromFiles.get(p.id) ?? [];
+    list.push(p.variant);
+    fromFiles.set(p.id, list);
   }
 
   // the newest screen map wins
   const m = [...manifests].sort((a, b) => b.mtime - a.mtime)[0];
-  let order: string[] = [];
-  let start: string | null = null;
-  let source: ScreenMap["source"] = "files";
+  let parsed: z.infer<typeof ManifestZ> | null = null;
   if (m) {
-    let parsed: z.infer<typeof ManifestZ> | null = null;
     try {
       const r = ManifestZ.safeParse(JSON.parse(m.text));
       if (r.success) parsed = r.data;
@@ -177,41 +250,68 @@ export function buildScreenMap(files: ScanFile[], manifests: Array<{ root: strin
     } catch (err) {
       problems.push(`${SCREEN_MAP_PATH} is not valid JSON (${err instanceof Error ? err.message.slice(0, 120) : "parse error"}).`);
     }
-    if (parsed) {
-      source = "map";
-      for (const ms of parsed.screens) {
-        const id = screenId(ms.id) || ms.id;
-        let s = byId.get(id);
-        if (!s) byId.set(id, (s = { id, name: title(id), note: null, variants: [], links: [] }));
-        if (ms.name) s.name = ms.name;
-        if (ms.note) s.note = ms.note;
-        for (const img of [...(ms.image ? [ms.image] : []), ...(ms.images ?? [])]) {
-          const rel = img.replace(/\\/g, "/").replace(/^\.\//, "");
-          if (rel.startsWith("/") || rel.split("/").includes("..") || !IMAGE_FILE.test(rel)) {
-            problems.push(`${id}: image "${img}" must be a relative image path inside the repository.`);
-            continue;
-          }
-          if (s.variants.some((v) => v.rel === rel)) continue;
-          const known = byRel.get(rel) ?? { path: joinPath(m.root, rel), rel, platform: null, size: null, theme: null, state: null, mtime: m.mtime };
-          s.variants.unshift(known);
-        }
-        s.links = (ms.links ?? []).map((l) => ({ to: screenId(l.to) || l.to, x: l.x, y: l.y, w: Math.min(l.w, 1 - l.x), h: Math.min(l.h, 1 - l.y), label: l.label ?? null }));
-        if (!order.includes(id)) order.push(id);
-      }
-      for (const s of byId.values()) for (const l of s.links) if (!byId.has(l.to)) problems.push(`${s.id}: link to unknown screen "${l.to}".`);
-      start = parsed.start && byId.has(screenId(parsed.start)) ? screenId(parsed.start) : null;
-    }
   }
 
-  const rest = [...byId.keys()].filter((id) => !order.includes(id));
-  const rank = (id: string) => {
-    const i = START_NAMES.indexOf(id);
-    return i < 0 ? START_NAMES.length : i;
+  const keep = (v: ScreenVariant, listed: boolean): boolean => {
+    const why = notAPage(v, target) ?? (!listed && debugCapture(v.rel) ? "evidence or debug captures (before/after, probes, a commit or a time in the name), not pages" : null);
+    if (why) hide(why);
+    return !why;
   };
-  rest.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
-  order = [...order, ...rest];
+
+  let order: string[] = [];
+  let start: string | null = null;
+  let source: ScreenMap["source"] = "files";
+  if (parsed && m) {
+    // with a map, its pages are the only pages; captures of other screens are not shown
+    source = "map";
+    const listed = new Set<string>();
+    for (const ms of parsed.screens) {
+      const id = screenId(ms.id) || ms.id;
+      let s = byId.get(id);
+      if (!s) byId.set(id, (s = { id, name: title(id), note: null, variants: [], links: [] }));
+      if (ms.name) s.name = ms.name;
+      if (ms.note) s.note = ms.note;
+      for (const img of [...(ms.image ? [ms.image] : []), ...(ms.images ?? [])]) {
+        const rel = img.replace(/\\/g, "/").replace(/^\.\//, "");
+        if (rel.startsWith("/") || rel.split("/").includes("..") || !IMAGE_FILE.test(rel)) {
+          problems.push(`${id}: image "${img}" must be a relative image path inside the repository.`);
+          continue;
+        }
+        if (s.variants.some((v) => v.rel === rel) || listed.has(rel)) continue;
+        listed.add(rel);
+        const known = byRel.get(rel) ?? { path: joinPath(m.root, rel), rel, platform: null, size: null, theme: null, state: null, mtime: m.mtime, w: null, h: null, form: null };
+        if (keep(known, true)) s.variants.push(known);
+      }
+      for (const v of fromFiles.get(id) ?? []) if (!s.variants.some((x) => x.rel === v.rel) && keep(v, false)) s.variants.push(v);
+      fromFiles.delete(id);
+      s.links = (ms.links ?? []).map((l) => ({ to: screenId(l.to) || l.to, x: l.x, y: l.y, w: Math.min(l.w, 1 - l.x), h: Math.min(l.h, 1 - l.y), label: l.label ?? null }));
+      if (!order.includes(id)) order.push(id);
+    }
+    for (const list of fromFiles.values()) for (const v of list) if (!listed.has(v.rel) && keep(v, false)) hide("captures of screens that are not in the screen map");
+    for (const s of byId.values()) for (const l of s.links) if (!byId.has(l.to)) problems.push(`${s.id}: link to unknown screen "${l.to}".`);
+    start = parsed.start && byId.has(screenId(parsed.start)) ? screenId(parsed.start) : null;
+  } else {
+    for (const [id, list] of fromFiles) {
+      const vs = list.filter((v) => keep(v, false));
+      if (vs.length) byId.set(id, { id, name: title(id), note: null, variants: vs, links: [] });
+    }
+    const rank = (id: string) => {
+      const i = START_NAMES.indexOf(id);
+      return i < 0 ? START_NAMES.length : i;
+    };
+    order = [...byId.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  }
+
   const screens = order.map((id) => byId.get(id)!).filter((s) => s.variants.length || s.links.length);
   for (const s of screens) s.variants.sort((a, b) => rankVariant(a) - rankVariant(b) || b.mtime - a.mtime || a.rel.localeCompare(b.rel));
   if (!start) start = screens.find((s) => s.variants.length)?.id ?? null;
-  return { start, screens, source, problems: problems.slice(0, 20) };
+  const count = [...hidden.values()].reduce((a, b) => a + b, 0);
+  return {
+    start,
+    screens,
+    source,
+    problems: problems.slice(0, 20),
+    device: deviceFor(target?.platforms ?? []),
+    hidden: { count, reasons: [...hidden].sort((a, b) => b[1] - a[1]).map(([why, n]) => `${n} ${why}`) },
+  };
 }

@@ -1,5 +1,5 @@
 // The Screens view, server side: where an app's screenshots can be (its repository and the
-// worktrees of its lead and builders), the pages built from them, and one image at a time.
+// worktrees of that repository), the pages built from them, and one image at a time.
 // Only paths the scan returned can be read.
 
 import type { Engine } from "./engine/engine.ts";
@@ -22,15 +22,28 @@ export class ScreensView {
       .map((a) => ({ id: a.id, name: a.name, kind: a.kind, platforms: a.platforms, stage: a.stage }));
   }
 
+  /**
+   * Where the app's screenshots can be: its repository and the worktrees of that same repository
+   * (the work worktree, its agents'). An agent whose BB worktree is some other repository (a host
+   * app, another project) is left out: its images are not this app's screens.
+   */
   private async roots(runId: string, appId: string): Promise<string[]> {
     const app = this.e.repo.getApp(runId, appId);
     if (!app) throw new HelmError(`No app ${appId} in this run.`, "not_found");
-    const paths = new Set<string>();
-    if (app.repoPath) paths.add(app.repoPath);
+    if (!app.repoPath) return [];
+    const norm = (p: string) => p.replace(/[\\/]+$/, "");
+    const paths = new Set<string>([norm(app.repoPath)]);
+    const own = await this.e
+      .host(runId)
+      .worktrees({ repo: app.repoPath })
+      .then((r) => new Set(r.worktrees.filter((w) => !w.missing).map((w) => norm(w.path))))
+      .catch(() => null);
+    const work = this.e.workTree(runId, appId);
+    if (work && (!own || own.has(norm(work)))) paths.add(norm(work));
     const nodes = this.e.repo.listNodes(runId).filter((n) => n.appId === appId && n.threadId && (n.tier === "lead" || n.tier === "specialist" || n.tier === "custom" || n.alsoLead));
     for (const n of nodes.slice(0, 20)) {
       const wt = await nodeWorktree(this.e, n).catch(() => null);
-      if (wt) paths.add(wt);
+      if (wt && own?.has(norm(wt))) paths.add(norm(wt));
     }
     return [...paths];
   }
@@ -42,7 +55,8 @@ export class ScreensView {
     if (hit && !fresh && this.e.now() - hit.at < TTL) return hit.map;
     const roots = await this.roots(runId, appId);
     const { files, maps } = roots.length ? await this.e.host(runId).screensScan({ roots }) : { files: [], maps: [] };
-    const map = buildScreenMap(files, maps);
+    const app = this.e.repo.getApp(runId, appId)!;
+    const map = buildScreenMap(files, maps, { name: app.name, platforms: app.platforms });
     this.cache.set(key, { at: this.e.now(), map, paths: new Set(map.screens.flatMap((s) => s.variants.map((v) => v.path))) });
     return map;
   }

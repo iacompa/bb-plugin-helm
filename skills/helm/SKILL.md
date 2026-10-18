@@ -248,11 +248,14 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
   only their own apps; cross-group work goes through the Orchestrator.
 - **"Show me the app" / screens** → the panel's **Screens** button, or `bb helm screens --app <name>`
   to list the pages. Screens shows each app as pages you click through like a tiny browser:
-  the screenshots the builders committed (`reports/ui/`, `reports/<platform>/…`), no device
-  frame, nothing running. Tappable areas come from the UI builder's screen map
-  (`reports/screens/screens.json`); without one every captured screen is still a page.
-  Size, theme and platform pickers appear when there are several captures. If an app shows no
-  screens, its UI builder has not captured any yet: tell the lead with `bb helm tell`.
+  the screenshots the builders committed (`reports/ui/`, `reports/<platform>/…`), in a phone
+  frame for an iOS or Android app, nothing running. Tappable areas come from the UI builder's
+  screen map (`reports/screens/screens.json`); with a map its pages are the only pages. Only
+  the app's own UI is shown: images from the app's repository and its worktrees only (never
+  another repository an agent works in), no evidence or debug captures (before/after, probes,
+  a commit or time in the name), no captures for platforms the app does not target, and for a
+  phone app nothing shaped like a computer screen. The CLI's "Left out" line says what was
+  hidden and why. If an app shows no screens, or the wrong ones, tell the lead with `bb helm tell`.
 - **After a Helm upgrade, mid-run** → agents keep the old skills, tools and prompt until
   their session restarts. `bb helm refresh --yes` rewrites briefs and restarts each live
   agent on the new version (supervisors first; work in worktrees stays).

@@ -224,7 +224,7 @@ Restraint is part of the craft. Before finishing, remove one decorative element,
 Screenshots are how reviewers and the user judge your work without running it. Make them complete and easy to scan.
 
 **Capture matrix, for each key screen:**
-- Three sizes: compact (for example 390x844), medium (for example 820x1180 or 768 wide), and expanded (for example 1440x900, or a large tablet in landscape for mobile-only apps).
+- Three sizes: compact (for example 390x844), medium (for example 820x1180 or 768 wide), and expanded (for example 1440x900). For an **iOS or Android app**, all three are upright devices: a small phone, a large phone and a tablet held upright. Never a landscape or computer-sized capture: Helm hides those for a phone app.
 - Both themes: light and dark.
 - That is six images per screen. Then add state captures (loading, empty, error, offline, permission-denied) at compact size in at least one theme, plus one capture at the largest accessibility text size.
 
@@ -239,10 +239,15 @@ reports/ui/shift-list--default--compact--light--a11y-xxxl.png
 ```
 
 - Capture from the running app, simulator, or emulator, or from automated snapshot tests (swift-snapshot-testing, Paparazzi or Roborazzi, Playwright), never from mockups. Automated capture is preferred because it doubles as a regression test.
+- **Capture the app on its own device, showing only its UI (strict, set by the human):**
+  - **iOS:** the iPhone simulator (`xcrun simctl io booted screenshot reports/ui/<name>.png`). **Android:** the emulator (`adb exec-out screencap -p > reports/ui/<name>.png`). A phone app is never captured as a web build in a desktop browser. If a web preview is the only way to run it, use a phone viewport (390x844) and still save it as a phone capture.
+  - **A plugin or extension** (audio plugin, browser extension, editor plugin): only the plugin's own window or panel, cropped to it (the standalone build, or `screencapture -l <window id>` on macOS). Never the host app (the DAW, the browser, the editor) around it, and never other plugins.
+  - **A website:** the page itself at each size, without the browser's own toolbars.
+  - **Nothing else under `reports/ui/` or `reports/<platform>/`.** Before/after comparisons, probes, repro shots and anything named with a commit, a date or a time are evidence: put them under `reports/<your gate or task>/evidence/`. Helm keeps them out of Screens either way.
 - Use realistic fixture data in every capture. A screenshot full of placeholder text does not count as evidence.
 - Add a short `reports/ui/INDEX.md` listing each screen, its captures, and any known gaps. Never hide gaps.
 
-**Screen map (what the human clicks through).** The Helm panel's **Screens** view shows each app as pages: your screenshots, no device frame, nothing running. Write `reports/screens/screens.json` so its pages link like the real app:
+**Screen map (what the human clicks through).** The Helm panel's **Screens** view shows each app as pages: your screenshots, in a phone frame for a phone app, nothing running. With a screen map, **its pages are the only pages**: a capture whose screen is not in the map is left out. Write `reports/screens/screens.json` so its pages link like the real app:
 
 ```json
 {
@@ -259,7 +264,8 @@ reports/ui/shift-list--default--compact--light--a11y-xxxl.png
 
 - One entry per screen; `id` matches the `<screen>` part of its file names, so every size, theme and state is offered automatically. `image` is the compact light capture, relative to the repository root.
 - `links` are the tappable areas in that image: `x`, `y`, `w`, `h` are fractions (0 to 1) of the image's width and height, measured from the top-left. Add one for each button, tab, row or back control that opens another screen. Every `to` must be another screen's `id`.
-- Include every screen the app has (onboarding, settings, empty states that are their own page), and update the map whenever you add a screen or move a control. Commit it with the screenshots.
+- Include **every page the app has** (onboarding, each tab, detail pages, settings, paywall, empty states that are their own page), and update the map whenever you add a screen or move a control. Commit it with the screenshots.
+- Then open it the way the human will: `bb helm screens --app <app>` lists the pages and says what was left out and why. Fix anything left out that should be a page.
 - Look at every screenshot yourself before reporting. Check for clipped text, misalignment, contrast problems in dark mode, and overlapping elements at compact size. Screenshots you have not looked at are not evidence.
 
 ---

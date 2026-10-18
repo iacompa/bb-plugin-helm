@@ -127,10 +127,10 @@ export const HOST_CONTRACT = defineRpcContract({
     output: z.object({ found: z.record(z.string(), z.string().nullable()) }),
   },
   // ── Screens view (the human clicks through an app's committed screenshots) ──
-  /** Screenshots under each folder's reports/, screens/ or screenshots/ folders, and each folder's reports/screens/screens.json. */
+  /** Screenshots under each folder's reports/, screens/ or screenshots/ folders (with their pixel size), and each folder's reports/screens/screens.json. */
   screensScan: {
     input: z.object({ roots: z.array(z.string().min(1).max(1000)).max(40) }),
-    output: z.object({ files: z.array(z.object({ root: z.string(), rel: z.string(), mtime: z.number() })), maps: z.array(z.object({ root: z.string(), text: z.string(), mtime: z.number() })) }),
+    output: z.object({ files: z.array(z.object({ root: z.string(), rel: z.string(), mtime: z.number(), w: z.number().nullable().optional(), h: z.number().nullable().optional() })), maps: z.array(z.object({ root: z.string(), text: z.string(), mtime: z.number() })) }),
   },
   /** An image file as base64, png/jpg/gif/webp only. */
   screenImage: {

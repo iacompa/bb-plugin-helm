@@ -1,9 +1,10 @@
 // The Screens view's pages: screenshots become pages, the screen map adds names and links.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildScreenMap, isScreenFile, parseScreenFile } from "../../src/server/domain/screens.ts";
+import { buildScreenMap, debugCapture, deviceFor, formOf, isScreenFile, parseScreenFile } from "../../src/server/domain/screens.ts";
+import { imageSize } from "../../src/host/screens.ts";
 
-const f = (rel: string, mtime = 1, root = "/r") => ({ root, rel, mtime });
+const f = (rel: string, mtime = 1, root = "/r", w: number | null = null, h: number | null = null) => ({ root, rel, mtime, w, h });
 
 test("screenshot names become screens and variants", () => {
   const ui = parseScreenFile(f("reports/ui/settings--empty--tablet--dark.png"))!;
@@ -39,7 +40,8 @@ test("the screen map names pages, orders them, and links tappable areas to other
   const m = buildScreenMap([f("reports/ui/today--default--phone--light.png"), f("reports/ui/settings--default--phone--light.png"), f("reports/ui/history--default--phone--light.png")], [{ root: "/r", text: map, mtime: 2 }]);
   assert.equal(m.source, "map");
   assert.equal(m.start, "today");
-  assert.deepEqual(m.screens.map((s) => s.id), ["today", "settings", "history"], "map order first; a page with nothing to show is left out");
+  assert.deepEqual(m.screens.map((s) => s.id), ["today", "settings"], "only the map's pages, in its order; a page with nothing to show is left out");
+  assert.deepEqual(m.hidden, { count: 1, reasons: ["1 captures of screens that are not in the screen map"] });
   const today = m.screens[0];
   assert.deepEqual(today.links[0], { to: "settings", x: 0.85, y: 0.03, w: 0.15000000000000002, h: 0.07, label: "Gear" }, "areas are clipped to the image");
   assert.ok(m.problems.some((p) => /link to unknown screen "nowhere"/.test(p)));
@@ -57,4 +59,75 @@ test("the same screenshot in several worktrees counts once: the newest", () => {
   const m = buildScreenMap([f("reports/ui/home--default--phone--light.png", 1, "/repo"), f("reports/ui/home--default--phone--light.png", 9, "/wt/ui")], []);
   assert.equal(m.screens[0].variants.length, 1);
   assert.equal(m.screens[0].variants[0].path, "/wt/ui/reports/ui/home--default--phone--light.png");
+});
+
+test("evidence and debug captures are never pages: before/after shots, probes, a commit or a time in the name", () => {
+  for (const rel of [
+    "docs/evidence/device-ui-c/screenshots/amp-modeler-after.png",
+    "reports/ui/web/browser-view-photos-8ae75717-0013z.png",
+    "reports/ui/guitar-pedal-before.png",
+    "reports/ui/web-probe-reload-persisted-es.png",
+    "reports/ui/web-stuck-wasm-unresolved.png",
+    "screenshots/daw-review-2026-09-30-layout.png",
+    "reports/ui/debug/home.png",
+  ])
+    assert.ok(debugCapture(rel), rel);
+  for (const rel of ["reports/ui/home--default--phone--light.png", "reports/ios/screens/01-settings.png", "reports/ui/room-detail--empty--phone--dark.png", "reports/ui/add-photos.png"]) assert.ok(!debugCapture(rel), rel);
+  const m = buildScreenMap([f("reports/ui/home--default--phone--light.png"), f("docs/evidence/x/screenshots/amp-after.png"), f("reports/ui/t1-photos-web-76daa495.png")], []);
+  assert.deepEqual(m.screens.map((s) => s.id), ["home"]);
+  assert.equal(m.hidden.count, 2);
+  assert.match(m.hidden.reasons[0], /^2 evidence or debug captures/);
+});
+
+test("a phone app shows only phone-shaped captures for its own platforms, framed as a phone", () => {
+  const espacia = { name: "Espacia", platforms: ["ios", "and"] };
+  const m = buildScreenMap(
+    [
+      f("reports/ui/web/rooms.png", 1, "/r", 1440, 900),
+      f("reports/ui/rooms--default--phone--light.png", 1, "/r", 1179, 2556),
+      f("reports/ui/room-detail--default--phone--light.png", 1, "/r", 2560, 1440),
+      f("reports/ios/screens/settings.png", 1, "/r", 1179, 2556),
+      f("reports/ui/ipad-home.png", 1, "/r", 1640, 2360),
+    ],
+    [],
+    espacia,
+  );
+  assert.equal(m.device, "phone");
+  assert.deepEqual(m.screens.map((s) => s.id).sort(), ["ipad-home", "rooms", "settings"]);
+  assert.equal(m.screens.find((s) => s.id === "rooms")!.variants[0].form, "phone");
+  assert.equal(m.screens.find((s) => s.id === "ipad-home")!.variants[0].form, "tablet");
+  assert.deepEqual(m.hidden.reasons.sort(), ["1 captures for the web, which Espacia does not target", "1 captures shaped like a computer screen; Espacia is a phone app"]);
+  // a desktop app keeps its wide captures
+  const desk = buildScreenMap([f("reports/ui/editor.png", 1, "/r", 1200, 800)], [], { name: "Ignite Link", platforms: ["mac", "win"] });
+  assert.equal(desk.device, "desktop");
+  assert.equal(desk.screens.length, 1);
+  // the map cannot sneak a computer-shaped capture into a phone app either
+  const map = JSON.stringify({ screens: [{ id: "home", image: "reports/ui/home-wide.png" }] });
+  const mm = buildScreenMap([f("reports/ui/home-wide.png", 1, "/r", 1920, 1080)], [{ root: "/r", text: map, mtime: 1 }], espacia);
+  assert.equal(mm.screens.length, 0);
+  assert.equal(mm.hidden.count, 1);
+});
+
+test("shapes and devices", () => {
+  assert.equal(formOf(1179, 2556, null), "phone");
+  assert.equal(formOf(1640, 2360, null), "tablet");
+  assert.equal(formOf(1440, 900, null), "wide");
+  assert.equal(formOf(null, null, "phone"), "phone");
+  assert.equal(formOf(null, null, "1440"), "wide");
+  assert.equal(formOf(null, null, null), null);
+  assert.equal(deviceFor(["ios"]), "phone");
+  assert.equal(deviceFor(["ios", "web"]), "any");
+  assert.equal(deviceFor(["web"]), "web");
+  assert.equal(deviceFor(["mac", "win"]), "desktop");
+});
+
+test("the host reads pixel sizes from image headers", () => {
+  const png = Buffer.alloc(32);
+  png.writeUInt32BE(0x89504e47, 0);
+  png.writeUInt32BE(1179, 16);
+  png.writeUInt32BE(2556, 20);
+  assert.deepEqual(imageSize(png), { w: 1179, h: 2556 });
+  const jpg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0, 0, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x03, 0x84, 0x05, 0xa0, 0, 0, 0, 0, 0]);
+  assert.deepEqual(imageSize(jpg), { w: 1440, h: 900 });
+  assert.equal(imageSize(Buffer.from("not an image at all")), null);
 });

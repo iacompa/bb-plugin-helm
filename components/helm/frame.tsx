@@ -307,7 +307,7 @@ function TopBar() {
           </span>
         </>
       ) : null}
-      <button type="button" className="btn" onClick={() => h.openScreens()} disabled={!run} title="Screens: click through each app's screens, page by page (no device, nothing runs)" aria-label="Screens" aria-pressed={h.screensOpen} data-testid="screens">
+      <button type="button" className="btn" onClick={() => h.openScreens()} disabled={!run} title="Screens: click through each app's own screens, page by page, as they look on its device (nothing runs)" aria-label="Screens" aria-pressed={h.screensOpen} data-testid="screens">
         <Ic name="Smartphone" size="sm" />
         <span className="btn-lbl"> Screens</span>
       </button>

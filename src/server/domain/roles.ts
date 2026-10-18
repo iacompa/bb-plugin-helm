@@ -75,7 +75,7 @@ export const ROLES: Record<Role, RoleDef> = {
     scope: ["apps/*/ui/**", "packages/design-system/**", "reports/ui/**"],
     inputs: ["SPEC.md (UI sections)", "CONTRACT.md (view models)", "ACCEPTANCE.md (UI criteria)"],
     outputs: ["design tokens", "components", "screens with loading, empty, error, offline and permission-denied states", "screenshots of each key screen at three sizes in reports/ui/"],
-    doneMeans: ["every screen in SPEC has all states, both themes and accessibility", "screenshots committed as evidence"],
+    doneMeans: ["every screen in SPEC has all states, both themes and accessibility", "screenshots committed as evidence", "every page of the app in reports/screens/screens.json, captured on the app's own device (phone simulator or emulator for a phone app; only the plugin's own window for a plugin), showing only its UI: no debug, before/after or other apps' captures"],
     skill: "helm-specialist",
   },
   code: {
