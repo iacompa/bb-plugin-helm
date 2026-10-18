@@ -219,7 +219,8 @@ export function GraphView({ active }: { active: boolean }) {
   }, [skey, drill, ui, ghostKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // nodes and groups the user dragged, per run and view, kept in this browser
-  const posKey = runId ? `helm:pos:${runId}:${drill ?? "all"}` : null;
+  // "pos2": positions moved on the top-down layout (offsets from the old sideways one no longer fit)
+  const posKey = runId ? `helm:pos2:${runId}:${drill ?? "all"}` : null;
   const [offs, setOffs] = useState<Offsets>({});
   useEffect(() => setOffs(readOffsets(posKey)), [posKey]);
   const saveOffs = useCallback(
@@ -683,7 +684,14 @@ export function GraphView({ active }: { active: boolean }) {
               {l.text}
             </div>
           ))}
-          <svg className="edges" width={layout.bounds.w + 40} height={layout.bounds.h + 40} aria-hidden="true">
+          <svg
+            className="edges"
+            style={{ left: layout.bounds.x0 ?? 0, top: layout.bounds.y0 ?? 0 }}
+            width={layout.bounds.w - (layout.bounds.x0 ?? 0) + 40}
+            height={layout.bounds.h - (layout.bounds.y0 ?? 0) + 40}
+            viewBox={`${layout.bounds.x0 ?? 0} ${layout.bounds.y0 ?? 0} ${layout.bounds.w - (layout.bounds.x0 ?? 0) + 40} ${layout.bounds.h - (layout.bounds.y0 ?? 0) + 40}`}
+            aria-hidden="true"
+          >
             <defs>
               <marker id="helm-arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                 <path d="M1 1 9 5 1 9" fill="none" style={{ stroke: "var(--h-fg-4)" }} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -694,7 +702,7 @@ export function GraphView({ active }: { active: boolean }) {
               const rb = rectOf(layout, e.to);
               if (!ra || !rb) return null;
               if (!visible.has(e.from) && !visible.has(e.to) && !e.to.startsWith("frame:") && e.to !== "sf" && e.to !== "gf") return null;
-              return <path key={`${e.from}|${e.to}`} className={edgeClass(e)} d={pathD(ra, rb, e.kind === "v" ? "v" : "h")} />;
+              return <path key={`${e.from}|${e.to}`} className={edgeClass(e)} d={pathD(ra, rb, e.kind === "v" ? "v" : "auto")} />;
             })}
             {layout.deco.map((d, i) => (
               <path key={`deco${i}`} className="deco" d={`M${d.x} ${d.y1} L${d.x} ${d.y2}`} markerEnd="url(#helm-arr)" />
@@ -761,7 +769,7 @@ export function GraphView({ active }: { active: boolean }) {
             if (r.mode === "chip") return <ChipCard key={id} {...common} n={n} catalog={catalog} title={n.role === "orch" ? n.label : `${data.managers.find((m) => m.id === id)?.name ?? n.label} manager`} />;
             const app = n.appId ? data.apps[n.appId] : null;
             const kids = n.role === "lead" || (n.alsoLead && drill) ? (data.children[id] ?? []).map((c) => data.nodes[c]).filter((c) => c && c.appId === (app?.id ?? c.appId)) : [];
-            return <AgentCard key={id} {...common} n={n} app={app} catalog={catalog} needs={der.needsByNode[id] ?? 0} kids={kids} lead={n.role === "lead" || (!!drill && id === leadOf(data, drill)?.id)} />;
+            return <AgentCard key={id} {...common} n={n} app={app} catalog={catalog} needs={der.needsByNode[id] ?? 0} kids={kids} lead={n.role === "lead" || (!!drill && id === leadOf(data, drill)?.id)} onWorktrees={n.role === "git" ? h.openWorktrees : undefined} />;
           })}
           {Object.entries(lit).map(([vid, text]) => {
             const r = rectOf(layout, vid);
@@ -1056,7 +1064,7 @@ function Badges({ touched, needs }: { touched: number; needs: number }) {
 const AppCard = memo(function AppCard(p: CardCommon & { app: SnapApp; status: string; members: SnapNode[]; needs: number; expanded: boolean; onToggle: (id: string) => void }) {
   const touched = p.members.filter((m) => m.touched).length;
   return (
-    <div {...cardProps(p, cx("app", `s-${p.status}`, touched > 0 && "touched-ring"), `${p.app.name} app, ${stageLabel(p.app.stage)}, ${statusLabel(p.status)}`)}>
+    <div {...cardProps(p, cx("app", "imp-lead", `s-${p.status}`, touched > 0 && "touched-ring"), `${p.app.name} app, ${stageLabel(p.app.stage)}, ${statusLabel(p.status)}`)}>
       <Badges touched={touched} needs={p.needs} />
       <div className="a-top">
         <b className="a-name">{p.app.name}</b>
@@ -1085,7 +1093,7 @@ const TierCard = memo(function TierCard(
 ) {
   const isM = p.r.mode === "mgr";
   return (
-    <div {...cardProps(p, cx("tier", `s-${p.n.status}`, p.n.touched && "touched-ring"), `${isM ? "Manager" : p.n.label} ${p.sub}, ${statusLabel(p.n.status)}`)}>
+    <div {...cardProps(p, cx("tier", isM ? "imp-mgr" : "imp-orch", `s-${p.n.status}`, p.n.touched && "touched-ring"), `${isM ? "Manager" : p.n.label} ${p.sub}, ${statusLabel(p.n.status)}`)}>
       <Badges touched={p.n.touched ? 1 : 0} needs={p.needs} />
       <div className="n-head">
         <RoleTile node={p.n} />
@@ -1119,7 +1127,7 @@ const TierCard = memo(function TierCard(
 
 const ChipCard = memo(function ChipCard(p: CardCommon & { n: SnapNode; catalog: Catalog | null; title: string }) {
   return (
-    <div {...cardProps(p, cx("tier", `s-${p.n.status}`), `${p.title}, ${statusLabel(p.n.status)}`)} style={{ left: p.r.x, top: p.r.y, width: p.r.w, height: p.r.h, flexDirection: "row", alignItems: "center", gap: 9, padding: "0 12px 0 14px" }}>
+    <div {...cardProps(p, cx("tier", p.n.role === "orch" ? "imp-orch" : "imp-mgr", `s-${p.n.status}`), `${p.title}, ${statusLabel(p.n.status)}`)} style={{ left: p.r.x, top: p.r.y, width: p.r.w, height: p.r.h, flexDirection: "row", alignItems: "center", gap: 9, padding: "0 12px 0 14px" }}>
       <Badges touched={p.n.touched ? 1 : 0} needs={0} />
       <RoleTile node={p.n} />
       <div className="n-title">
@@ -1131,12 +1139,12 @@ const ChipCard = memo(function ChipCard(p: CardCommon & { n: SnapNode; catalog: 
   );
 });
 
-const AgentCard = memo(function AgentCard(p: CardCommon & { n: SnapNode; app: SnapApp | null; catalog: Catalog | null; needs: number; kids: SnapNode[]; lead: boolean }) {
+const AgentCard = memo(function AgentCard(p: CardCommon & { n: SnapNode; app: SnapApp | null; catalog: Catalog | null; needs: number; kids: SnapNode[]; lead: boolean; onWorktrees?: () => void }) {
   const n = p.n;
   const title = n.role === "orch" ? n.label : agentTitle(n);
   const sub = n.role === "orch" ? (p.app ? `also leads ${p.app.name}` : "Orchestrator") : `${p.app?.name ?? ""}${n.priority === "high" ? " · high priority" : n.priority === "low" ? " · low priority" : ""}`;
   return (
-    <div {...cardProps(p, cx("agent", `s-${n.status}`, n.tier === "gate" && "gate", n.touched && "touched-ring"), `${title}${p.app ? `, ${p.app.name}` : ""}, ${statusLabel(n.status)}`)}>
+    <div {...cardProps(p, cx("agent", n.role === "orch" ? "imp-orch" : p.lead && "imp-lead", `s-${n.status}`, n.tier === "gate" && "gate", n.touched && "touched-ring"), `${title}${p.app ? `, ${p.app.name}` : ""}, ${statusLabel(n.status)}`)}>
       <Badges touched={n.touched ? 1 : 0} needs={p.needs} />
       <div className="n-head">
         <RoleTile node={n} />
@@ -1147,7 +1155,23 @@ const AgentCard = memo(function AgentCard(p: CardCommon & { n: SnapNode; app: Sn
         <StatusPill status={n.status} />
       </div>
       <ModelChip model={n.model} catalog={p.catalog} planned={n.status === "planned"} />
-      <div className="now">{nowFallback(n)}</div>
+      {p.onWorktrees ? (
+        <button
+          type="button"
+          className="wt-chip"
+          data-act="worktrees"
+          title="Every app's worktrees and branches: what is running, what is being edited, and how much space each takes"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            p.onWorktrees?.();
+          }}
+        >
+          <Ic name="GitBranch" size="sm" /> Worktrees
+        </button>
+      ) : (
+        <div className="now">{nowFallback(n)}</div>
+      )}
       {p.lead && p.kids.length ? (
         <div className="dots" style={{ marginTop: 2 }}>
           {p.kids.map((c) => (

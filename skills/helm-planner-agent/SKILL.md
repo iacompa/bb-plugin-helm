@@ -83,7 +83,8 @@ in a workspace with a write scope, and is woken by events or messages, never by 
   - An **app lead** for one project. Under a lead it works in that project's shared work worktree,
     on the integration branch. Otherwise it works in the Studio folder.
   - Never design an agent for git housekeeping or pushing: the run already has a **Git agent**
-    (`git`) beside you that keeps every project to two worktrees and sends work where the human says.
+    (`git`) beside you that keeps every project's branches and worktrees in order, watches their disk
+    space and sends work where the human says.
 - **mission**: the most important part. It becomes the agent's system prompt. Write it in this shape:
   ```
   Purpose: <one sentence: why this agent exists>

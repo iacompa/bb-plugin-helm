@@ -259,12 +259,17 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
 - **After a Helm upgrade, mid-run** → agents keep the old skills, tools and prompt until
   their session restarts. `bb helm refresh --yes` rewrites briefs and restarts each live
   agent on the new version (supervisors first; work in worktrees stays).
-- **Disk space / too many worktrees** → every project has exactly two worktrees: the user's
-  checkout and one shared work worktree at `<repository folder>/.helm-work/<repository>`, on the
-  same disk. `bb helm worktrees` lists them per app (`--app <name>` for one). Apps from older
-  runs may still have one BB worktree per agent on the internal drive; `bb helm worktrees
-  --consolidate <app> --yes` brings one back to two (refused while any of them holds uncommitted or
-  unmerged work). Put `appsRoot` on an external disk to keep new projects off the Mac.
+- **Disk space / too many worktrees** → every project has the user's checkout and one shared work
+  worktree at `<repository folder>/.helm-work/<repository>`, on the same disk, plus only the lanes
+  the Git agent adds for parallel work, at most the **Worktrees per project** setting
+  (`worktreesPerApp`, 2 to 32, default 10). The **Worktrees** button on the Git agent's card shows
+  every app's worktrees and branches, what each is doing (running, being edited, idle) and the
+  space each takes, the app's total and each disk's free space. `bb helm worktrees` lists them per
+  app (`--app <name>` for one). Apps from older runs may still have one BB worktree per agent on the
+  internal drive; `bb helm worktrees --consolidate <app> --yes` moves one onto the shared worktree
+  (refused while any of them holds uncommitted or unmerged work). The Git agent is told when a disk
+  runs low (under 15 GB or 10% free) and frees space without losing work. Put `appsRoot` on an
+  external disk to keep new projects off the Mac.
 - **Branches** → every project has two: main and its work branch `<app>-work`, where all its
   agents commit. Agents never create branches, worktrees or clones, never merge into main and never
   push. Only the Git agent merges the work branch into main: when the user signs the project off

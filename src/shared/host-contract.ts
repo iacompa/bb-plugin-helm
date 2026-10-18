@@ -67,6 +67,14 @@ export const HOST_CONTRACT = defineRpcContract({
       branches: z.array(z.string()).optional(),
     }),
   },
+  /** The Worktrees view: each folder's size on disk (with `measure`), its disk's free and total space, and each repository's shared git storage. */
+  diskUsage: {
+    input: z.object({ paths: z.array(z.string().min(1).max(1000)).max(80), repos: z.array(z.string().min(1).max(1000)).max(40).optional(), measure: z.boolean().optional() }),
+    output: z.object({
+      sizes: z.array(z.object({ path: z.string(), bytes: z.number().nullable(), dev: z.number().nullable(), free: z.number().nullable(), total: z.number().nullable() })),
+      repos: z.array(z.object({ repo: z.string(), gitDir: z.string().nullable(), bytes: z.number().nullable() })),
+    }),
+  },
   revParse: {
     input: z.object({ repo: z.string().min(1), ref: z.string().min(1).max(300) }),
     output: z.object({ sha: z.string().nullable() }),

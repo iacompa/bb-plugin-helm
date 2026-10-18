@@ -1,7 +1,7 @@
 // Graph layout, semantic zoom and viewport culling for the Helm app (pure).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { D, fitTransform, intersects, lodFor, portfolioLayout, squadLayout, visibleIdOf, visibleIds, withOffsets, zoomAbout, type PortfolioInput } from "../../components/helm/layout.ts";
+import { D, fitTransform, intersects, lodFor, pathD, portfolioLayout, squadLayout, visibleIdOf, visibleIds, withOffsets, zoomAbout, type PortfolioInput } from "../../components/helm/layout.ts";
 import { appMoveRule, taskMoveRule, colOfStatus, fmtUnits, fmtTokens, allowedTypes } from "../../components/helm/format.ts";
 
 /** A portfolio the size of the spec's big case: 20 apps × 8 agents under 5 managers. */
@@ -61,7 +61,9 @@ test("squad layout: chain above the lead, specialists and gates in frames", () =
   assert.equal(L.rects.m0.mode, "chip");
   assert.ok(L.rects.orch.y < L.rects.m0.y && L.rects.m0.y < L.rects["a.lead"].y);
   assert.ok(L.frames.sf && L.frames.gf);
-  assert.deepEqual(L.edges.filter((e) => e.kind === "v").map((e) => `${e.from}>${e.to}`), ["m0>a.lead", "orch>m0"]);
+  assert.deepEqual(L.edges.filter((e) => e.kind === "v").map((e) => `${e.from}>${e.to}`).sort(), ["m0>a.lead", "orch>m0"]);
+  assert.ok(L.rects["a.lead"].y + L.rects["a.lead"].h <= L.frames.sf.y, "builders below the lead");
+  assert.ok(L.frames.sf.y + L.frames.sf.h <= L.frames.gf.y, "gates below the builders");
   // C1: the orchestrator leads, no chain
   const c1 = squadLayout({ chain: [], leadId: "orch", specialists: ["t.ui"], gates: ["t.review"] });
   assert.equal(c1.rects.orch.mode, "agent");
@@ -134,7 +136,7 @@ test("formatting never shows dollars and tokens are raw counts", () => {
   assert.ok(allowedTypes({ tier: "gate", status: "running", threadId: "t" }).includes("waive"));
 });
 
-test("nodes moved by hand: a card moves, an expanded app's squad moves with its frame, group boxes stretch, nothing goes below 0", () => {
+test("nodes moved by hand: a card moves, an expanded app's squad moves with its frame, group boxes stretch, anything may go above or left of the origin", () => {
   const L = portfolioLayout(bigInput({ expanded: new Set(["app0"]) }));
   assert.equal(withOffsets(L, {}), L, "no offsets: the same layout");
   const inBox = (r: { x: number; y: number; w: number; h: number }, c: { x: number; y: number; w: number; h: number }) => r.x >= c.x && r.y >= c.y && r.x + r.w <= c.x + c.w && r.y + r.h <= c.y + c.h;
@@ -149,20 +151,71 @@ test("nodes moved by hand: a card moves, an expanded app's squad moves with its 
   assert.ok(inBox(M.frames["frame:app0"], M.clusters.find((c) => c.id === group.id)!), "its group box stretched to hold it");
   const card = withOffsets(L, { app1: { dx: -30, dy: 50 } });
   assert.deepEqual([card.rects.app1.x - L.rects.app1.x, card.rects.app1.y - L.rects.app1.y], [-30, 50]);
-  const far = withOffsets(L, { orch: { dx: -99999, dy: -99999 } });
-  assert.deepEqual([far.rects.orch.x, far.rects.orch.y], [0, 0]);
+  const far = withOffsets(L, { orch: { dx: -5000, dy: -300 } });
+  assert.deepEqual([far.rects.orch.x - L.rects.orch.x, far.rects.orch.y - L.rects.orch.y], [-5000, -300], "free in both directions");
+  assert.ok(far.bounds.x0! <= far.rects.orch.x && far.bounds.y0! <= far.rects.orch.y, "the drawing starts where the moved card is");
+  const near = withOffsets(L, { orch: { dx: -L.rects.orch.x - 400, dy: -200 } });
+  assert.ok(near.rects.orch.x < 0 && near.rects.orch.y < 0, "above and left of the origin");
+  const fit = fitTransform(near.bounds, 1400, 900);
+  assert.ok(fit.px + near.rects.orch.x * fit.zoom >= 0 && fit.py + near.rects.orch.y * fit.zoom >= 0, "fit shows it");
   assert.ok(M.bounds.w >= L.bounds.w);
 });
 
-test("the Planner sits beside the Orchestrator, unconnected; custom agents with no app below it, linked to their supervisor", () => {
-  const L = portfolioLayout(bigInput({ side: [{ id: "planner", parentId: null }, { id: "c1", parentId: "m1" }, { id: "c2", parentId: "orch" }] }));
+test("the Planner and the Git agent sit beside the Orchestrator on its row, unconnected; custom agents with no app beside them, linked to their supervisor", () => {
+  const L = portfolioLayout(bigInput({ side: [{ id: "planner", parentId: null }, { id: "git", parentId: null }, { id: "c1", parentId: "m1" }, { id: "c2", parentId: "orch" }] }));
   const o = L.rects.orch;
   const p = L.rects.planner;
-  assert.ok(p && p.x === o.x && p.y >= o.y + o.h, "same column, just below the Orchestrator");
-  assert.ok(p.y - (o.y + o.h) < 60, "close to it, not up top");
-  assert.equal(L.edges.some((e) => e.from === "planner" || e.to === "planner"), false, "no line to the Planner");
+  const g = L.rects.git;
+  const mid = (r: { y: number; h: number }) => r.y + r.h / 2;
+  for (const r of [p, g]) assert.equal(mid(r), mid(o), "same row as the Orchestrator");
+  assert.ok(p.x + p.w <= o.x, "the Planner on its left");
+  assert.ok(g.x >= o.x + o.w, "the Git agent on its right");
+  assert.equal(L.edges.some((e) => e.from === "planner" || e.to === "planner" || e.to === "git"), false, "no line to the Planner or the Git agent");
   assert.ok(L.edges.some((e) => e.from === "m1" && e.to === "c1"));
-  assert.equal(L.edges.some((e) => e.to === "c2"), false, "the Orchestrator's own column needs no line");
+  assert.equal(L.edges.some((e) => e.to === "c2"), false, "the Orchestrator's own agents need no line");
   const all = Object.entries(L.rects);
-  for (const id of ["planner", "c1", "c2"]) for (const [other, r] of all) if (other !== id) assert.equal(intersects(L.rects[id], r), false, `${id} overlaps ${other}`);
+  for (const id of ["planner", "git", "c1", "c2"]) for (const [other, r] of all) if (other !== id) assert.equal(intersects(L.rects[id], r), false, `${id} overlaps ${other}`);
+  assert.ok(Object.values(L.rects).every((r) => r.x >= 0 && r.y >= 0), "nothing starts left of the origin");
+});
+
+test("top-down: the Orchestrator's row, then the managers, then the apps, then an expanded app's agents in a square under its lead", () => {
+  const L = portfolioLayout(bigInput({ expanded: new Set(["app5"]), side: [{ id: "planner", parentId: null }, { id: "git", parentId: null }] }));
+  const bottom = (r: { y: number; h: number }) => r.y + r.h;
+  const o = L.rects.orch;
+  for (let m = 0; m < 5; m++) {
+    const mg = L.rects[`m${m}`];
+    assert.ok(bottom(o) < mg.y, `m${m} below the Orchestrator`);
+    assert.equal(mg.y, L.rects.m0.y, "managers share a row");
+  }
+  for (const id of ["app0", "app1", "app4", "app9", "app19"]) assert.ok(bottom(L.rects.m0) < L.rects[id].y, `${id} below the managers`);
+  // the apps of a manager sit under it
+  const m1 = L.rects.m1;
+  const box = L.clusters.find((c) => c.id === "cl-m1")!;
+  for (const id of ["app4", "frame:app5", "app6", "app7"]) {
+    const r = L.rects[id] ?? L.frames[id];
+    assert.ok(r.x >= box.x && r.x + r.w <= box.x + box.w, `${id} under its manager`);
+  }
+  assert.ok(m1.x >= box.x && m1.x + m1.w <= box.x + box.w);
+  // the expanded app: lead on top, the other seven in a 3-column square below
+  const lead = L.rects["app5.lead"];
+  const others = bigInput().members.app5.slice(1).map((id) => L.rects[id]);
+  for (const r of others) assert.ok(r.y >= bottom(lead), "below its lead");
+  assert.equal(new Set(others.map((r) => r.x)).size, 3, "three columns");
+  assert.equal(new Set(others.map((r) => r.y)).size, 3, "three rows");
+  // the Orchestrator is centred over the managers
+  const ms = [0, 1, 2, 3, 4].map((m) => L.rects[`m${m}`]);
+  const span = (ms[0].x + ms[4].x + ms[4].w) / 2;
+  assert.ok(Math.abs(o.x + o.w / 2 - span) < 2, "centred");
+});
+
+test("dragging the Orchestrator left and right moves it, and edges stay drawable", () => {
+  const L = portfolioLayout(bigInput({ side: [{ id: "planner", parentId: null }, { id: "git", parentId: null }] }));
+  for (const dx of [-400, 400]) {
+    const M = withOffsets(L, { orch: { dx, dy: 0 } });
+    assert.equal(M.rects.orch.x, L.rects.orch.x + dx);
+    assert.match(pathD(M.rects.orch, M.rects.m0), /^M[-\d.]+ [-\d.]+ C/);
+  }
+  // a single-app run with no managers puts the app straight under the Orchestrator
+  const c1 = portfolioLayout({ orchId: "orch", managers: [], directAppIds: ["tally"], appNames: { tally: "Tally" }, collapsed: new Set(), expanded: new Set(), members: { tally: ["tally.lead"] } });
+  assert.ok(c1.rects.tally.y > c1.rects.orch.y + c1.rects.orch.h);
 });

@@ -42,6 +42,8 @@ function hash(s: string): string {
 export class FakeGit {
   repos = new Map<string, FRepo>();
   wts = new Map<string, FWorktree>();
+  /** Free bytes on the simulated disk (tests lower it to see the low-space alert). */
+  diskFree = 200e9;
   loose = new Map<string, string>();
   /** Plain (non-git) folders tests place on the simulated disk: path → has files. */
   dirs = new Map<string, boolean>();
@@ -339,6 +341,15 @@ export class FakeGit {
         }
         return { files, maps };
       },
+      // sizes: a worktree's files count their content length; every folder is on one 500 GB disk
+      diskUsage: async ({ paths, repos, measure }: { paths: string[]; repos?: string[]; measure?: boolean }) => ({
+        sizes: paths.map((path) => {
+          const w = this.wts.get(path);
+          const bytes = w && measure !== false ? [...w.work.values()].reduce((n, c) => n + c.length, 0) + 4096 : null;
+          return { path, bytes, dev: 1, free: this.diskFree, total: 500e9 };
+        }),
+        repos: (repos ?? []).map((repo) => ({ repo, gitDir: this.repoFor(repo) ? `${this.repoFor(repo)!.root}/.git` : null, bytes: this.repoFor(repo) && measure !== false ? 1_000_000 : null })),
+      }),
       screenImage: async ({ path }: { path: string }) => {
         const w = this.wtFor(path);
         const content = w ? w.wt.work.get(w.rel) : undefined;

@@ -88,9 +88,9 @@ export const WORK_DIR = ".helm-work";
 export const workBranchName = (appId: string) => `${appId}-work`;
 
 /** The human's strict git policy, in every agent's brief (the Git agent enforces it). */
-export function gitRulesText(appBranch: string | null): string {
+export function gitRulesText(appBranch: string | null, cap = 10): string {
   return [
-    `Every app has exactly two branches, its main branch and its work branch${appBranch ? ` (here \`${appBranch}\`)` : " (`<app>-work`)"}, and two worktrees, the human's checkout and one shared work worktree. All work happens on the work branch, in the work worktree.`,
+    `Every app has exactly two branches, its main branch and its work branch${appBranch ? ` (here \`${appBranch}\`)` : " (`<app>-work`)"}. Its worktrees are the human's checkout, one shared work worktree where all work happens on the work branch, and only the parallel lanes the Git agent adds when the app's lead or the Orchestrator asks for them (at most ${cap} worktrees per project, the human's setting).`,
     "Never create a branch, a worktree or a clone, and never switch branches. Never merge into main and never push: only the Git agent does, when the human signs the work off or the Orchestrator or the app's lead asks it to.",
     "The Git agent's instructions on branches, worktrees, merges and pushes are binding on you: they outrank earlier instructions on git. Do what it asks, or reply to it with exactly what would be lost.",
     "Questions about which branch, worktree, checkout or commit to work on go to the Git agent (helm_message to \"git\"), never to the human: it decides under these rules. Ask the human only for what git cannot settle (approving work for main, a destination, credentials).",
@@ -331,7 +331,7 @@ export class Engine {
   leadWorkText(run: RunInfo, app: AppInfo): string {
     const work = this.workTree(run.id, app.id);
     if (!work) return "Your own worktree branch is the app's **integration branch**.";
-    return `You and your whole squad work in one shared work worktree, \`${work}\`, on the app's **integration branch** \`${this.repo.appExtra(run.id, app.id).integrationBranch}\`: the app has exactly two worktrees, the human's checkout and this one. Builders commit there directly, so you integrate by reviewing their commits and fixing the seams, not by merging branches. ${SHARED_WORKTREE_RULES}`;
+    return `You and your whole squad work in one shared work worktree, \`${work}\`, on the app's **integration branch** \`${this.repo.appExtra(run.id, app.id).integrationBranch}\`: the human's checkout stays theirs, and any other worktree is a lane only the Git agent adds. Builders commit there directly, so you integrate by reviewing their commits and fixing the seams, not by merging branches. ${SHARED_WORKTREE_RULES}`;
   }
 
   /**
@@ -976,7 +976,7 @@ export class Engine {
     if (n.role === "git") {
       const orch = byId.get(ORCH_ID);
       lines.push(`## Your place\nYou sit beside ${orch ? this.label(orch) : "the Orchestrator"} and the Planner, outside the chain of command: nobody reports to you, and you answer to the human, who talks to you in this thread. You can see every app of the run. Anyone may ask you about git with \`helm_message\`; only the human can send you somewhere new.`);
-      lines.push(`## The rule you keep\nEvery app has exactly **two worktrees**: the human's checkout (its repository folder) and one shared work worktree beside it on the same disk (\`<repository's folder>/.helm-work/<repository>\`), where all of the app's agents work on its integration branch. Helm creates the work worktree itself. Call \`helm_worktrees\` to see every app's worktrees, where they are and whether they are clean. More than two is a problem to fix: \`helm_consolidate\` moves an app onto one shared worktree once every extra worktree's work is committed and on the integration branch.`);
+      lines.push(`## The rule you keep\nEvery app has two branches (main and its work branch) and its worktrees are: the human's checkout (its repository folder), one shared work worktree beside it on the same disk (\`<repository's folder>/.helm-work/<repository>\`), where all of the app's agents work on its work branch, and only the lanes you add for parallel work, at most **${Math.max(2, Math.min(32, this.settings.worktreesPerApp ?? 10))} worktrees per project** (the human's setting "Worktrees per project"). Helm creates the work worktree itself. Call \`helm_worktrees\` to see every app's worktrees, where they are, whether they are clean, and (\`sizes: true\`) how much space each takes and how much is free on each disk; the human sees the same in the Worktrees view on your card. An app that still uses one worktree per agent, or is over the limit, is a problem to fix: \`helm_consolidate\` moves an app onto one shared worktree once every extra worktree's work is committed and on the work branch. Keep the disks healthy: when space runs low, remove merged and idle lanes and extra worktrees first.`);
       lines.push(`## Sending work\nWhen the human signs a project off, Helm tells you; then you ${this.settings.gitOnSignoff === "merge-push" ? "merge its Helm branch into its main branch and push main and the branch to its remote" : this.settings.gitOnSignoff === "push" ? "push its Helm branch to its remote" : "report where its work is, and send nothing"}. Beyond that, do exactly what the human tells you in this thread: push to GitHub or another remote, or copy or push to a folder on this Mac or an external disk. Other agents' requests to send work somewhere the human did not name need the human's yes (\`helm_need\`, about: access). Never force-push, delete a remote branch or rewrite history without the human's explicit yes. Never handle credentials: if a push needs a login, tell the human the exact command.`);
       lines.push(`## Your notes\nKeep \`${studio}/GIT-NOTES.md\`: for each app, its repository, work worktree, integration branch, remote, and the last commit you pushed or merged and where. Read it when you start.`);
       lines.push(`## Apps now\n${this.repo.listApps(run.id).filter((a) => a.stage !== "cancelled").slice(0, 40).map((a) => `- ${a.name} (${a.id}): ${a.repoPath ?? "no repository yet"}${this.workTree(run.id, a.id) ? ` · work worktree ${this.workTree(run.id, a.id)}` : ""} · branch ${this.repo.appExtra(run.id, a.id).integrationBranch ?? "not yet"} · ${a.stage}`).join("\n") || "- none yet"}`);
@@ -994,7 +994,7 @@ export class Engine {
       if (run.autoAdvance === "ask" && !this.autonomous(run)) lines.push("## Waves\nWhen apps wait in Intake and capacity frees up, Helm asks the human to approve the next wave. Use `helm_propose_wave` if you want to suggest a different set.");
     }
     if (this.autonomous(run)) lines.push(`## Autonomy\n${autonomyText(n.role === "orch")}`);
-    if (n.tier !== "git") lines.push(`## Git rules (strict, set by the human)\n${gitRulesText(app ? this.repo.appExtra(run.id, app.id).integrationBranch : null)}`);
+    if (n.tier !== "git") lines.push(`## Git rules (strict, set by the human)\n${gitRulesText(app ? this.repo.appExtra(run.id, app.id).integrationBranch : null, Math.max(2, Math.min(32, this.settings.worktreesPerApp ?? 10)))}`);
     const remit = n.tier === "orchestrator" ? "the run" : n.tier === "manager" ? `your group (${this.repo.listApps(run.id).filter((a) => a.managerNodeId === n.id).map((a) => a.name).slice(0, 8).join(", ") || "its apps"})` : app?.name ?? "your app";
     const authority = authorityText(this.isLeadNode(n) && n.tier !== "orchestrator" ? "lead" : n.tier, remit);
     if (authority) lines.push(`## Your authority\n${authority}`);

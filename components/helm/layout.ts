@@ -30,7 +30,8 @@ export interface Layout {
   clusters: Cluster[];
   labels: Array<{ x: number; y: number; text: string }>;
   deco: Array<{ x: number; y1: number; y2: number; text: string }>;
-  bounds: { w: number; h: number };
+  /** The drawing spans x0..w and y0..h (x0 and y0 are 0 unless a node was dragged above or left of the origin). */
+  bounds: { w: number; h: number; x0?: number; y0?: number };
 }
 
 export const D = {
@@ -71,22 +72,31 @@ export interface PortfolioInput {
 
 const plural = (n: number, a: string) => `${n} ${n === 1 ? a : `${a}s`}`;
 
-/** Lay out apps in a two-column grid; an expanded app takes a full row as a frame of mini cards. */
-function appGrid(
-  appIds: string[],
-  input: PortfolioInput,
-  x0: number,
-): { h: number; w: number; place: (top: number, out: Layout, parent: string, hue?: string | null) => void } {
+/** Vertical gap between the rows of the top-down layout (Orchestrator, managers, apps). */
+const VG = 64;
+
+/** Columns for an app's agents under its lead: as close to a square as fits. */
+export const squareCols = (n: number) => Math.max(2, Math.min(4, Math.ceil(Math.sqrt(n))));
+
+/**
+ * Lay out apps in a grid of up to two columns, rows centred in the grid's width. An expanded app
+ * takes a full row as a frame: its lead on top, the other agents in a square grid below.
+ */
+function appGrid(appIds: string[], input: PortfolioInput): { h: number; w: number; place: (x0: number, top: number, out: Layout, parent: string, hue?: string | null) => void } {
   const cellW = D.app.w + 10;
-  const fullW = D.cols * cellW - 10;
-  type Row = { kind: "cards"; ids: string[] } | { kind: "frame"; id: string; rows: number };
+  type Row = { kind: "cards"; ids: string[] } | { kind: "frame"; id: string; cols: number; rows: number; w: number; h: number };
   const rows: Row[] = [];
   let cur: string[] = [];
   for (const id of appIds) {
     if (input.expanded.has(id)) {
       if (cur.length) rows.push({ kind: "cards", ids: cur });
       cur = [];
-      rows.push({ kind: "frame", id, rows: Math.max(1, Math.ceil((input.members[id]?.length ?? 0) / 2)) });
+      const others = Math.max(0, (input.members[id]?.length ?? 0) - 1);
+      const cols = squareCols(others);
+      const r = Math.ceil(others / cols);
+      const w = Math.max(D.cols * cellW - 10, D.pad * 2 + cols * D.mini.w + (cols - 1) * D.ng);
+      const h = D.head + D.pad * 2 + D.mini.h + (r ? D.ng * 3 + r * D.mini.h + (r - 1) * D.ng : 0);
+      rows.push({ kind: "frame", id, cols, rows: r, w, h });
     } else {
       cur.push(id);
       if (cur.length === D.cols) {
@@ -96,29 +106,32 @@ function appGrid(
     }
   }
   if (cur.length) rows.push({ kind: "cards", ids: cur });
-  const frameH = (r: number) => D.head + D.pad * 2 + r * D.mini.h + (r - 1) * D.ng;
-  const rowH = (r: Row) => (r.kind === "cards" ? D.app.h : frameH(r.rows));
+  const rowW = (r: Row) => (r.kind === "cards" ? r.ids.length * cellW - 10 : r.w);
+  const rowH = (r: Row) => (r.kind === "cards" ? D.app.h : r.h);
   const h = rows.reduce((a, r) => a + rowH(r), 0) + Math.max(0, rows.length - 1) * D.gy;
-  const anyFrame = rows.some((r) => r.kind === "frame");
-  const maxCards = rows.reduce((m, r) => (r.kind === "cards" ? Math.max(m, r.ids.length) : m), 0);
-  const w = appIds.length ? (anyFrame ? fullW : maxCards * cellW - 10) : 0;
-  const place = (top: number, out: Layout, parent: string, hue?: string | null) => {
+  const w = rows.reduce((m, r) => Math.max(m, rowW(r)), 0);
+  const place = (x0: number, top: number, out: Layout, parent: string, hue?: string | null) => {
     let y = top;
     for (const r of rows) {
+      const x = x0 + (w - rowW(r)) / 2;
       if (r.kind === "cards") {
         r.ids.forEach((id, i) => {
-          out.rects[id] = { x: x0 + i * cellW, y, w: D.app.w, h: D.app.h, mode: "app" };
+          out.rects[id] = { x: x + i * cellW, y, w: D.app.w, h: D.app.h, mode: "app" };
           out.edges.push({ from: parent, to: id, kind: parent === input.orchId ? "direct" : "app" });
         });
       } else {
         const fid = `frame:${r.id}`;
-        const fh = frameH(r.rows);
-        out.frames[fid] = { x: x0, y, w: fullW, h: fh };
-        out.clusters.push({ id: fid, x: x0, y, w: fullW, h: fh, label: `${input.appNames[r.id] ?? r.id} · ${plural(input.members[r.id]?.length ?? 0, "agent")}`, hue });
+        out.frames[fid] = { x, y, w: r.w, h: r.h };
+        out.clusters.push({ id: fid, x, y, w: r.w, h: r.h, label: `${input.appNames[r.id] ?? r.id} · ${plural(input.members[r.id]?.length ?? 0, "agent")}`, hue });
         out.edges.push({ from: parent, to: fid, kind: parent === input.orchId ? "direct" : "app" });
-        const innerW = (fullW - D.pad * 2 - D.ng) / 2;
-        (input.members[r.id] ?? []).forEach((nid, i) => {
-          out.rects[nid] = { x: x0 + D.pad + (i % 2) * (innerW + D.ng), y: y + D.head + D.pad + Math.floor(i / 2) * (D.mini.h + D.ng), w: innerW, h: D.mini.h, mode: "agent" };
+        const [lead, ...others] = input.members[r.id] ?? [];
+        const ly = y + D.head + D.pad;
+        if (lead) out.rects[lead] = { x: x + (r.w - D.mini.w) / 2, y: ly, w: D.mini.w, h: D.mini.h, mode: "agent" };
+        const gridW = r.cols * D.mini.w + (r.cols - 1) * D.ng;
+        const gx = x + (r.w - gridW) / 2;
+        const gy = ly + D.mini.h + D.ng * 3;
+        others.forEach((nid, i) => {
+          out.rects[nid] = { x: gx + (i % r.cols) * (D.mini.w + D.ng), y: gy + Math.floor(i / r.cols) * (D.mini.h + D.ng), w: D.mini.w, h: D.mini.h, mode: "agent" };
         });
       }
       y += rowH(r) + D.gy;
@@ -127,61 +140,87 @@ function appGrid(
   return { h, w, place };
 }
 
+/**
+ * Top-down portfolio: the Orchestrator in the centre of the first row with the Planner, the Git agent
+ * and custom agents with no app beside it; the managers on the second row; the apps (their leads)
+ * under their manager; an expanded app's other agents in a square under its lead.
+ */
 export function portfolioLayout(input: PortfolioInput): Layout {
   const out: Layout = { rects: {}, frames: {}, edges: [], clusters: [], labels: [], deco: [], bounds: { w: 0, h: 0 } };
-  const xMgr = D.orch.w + D.gx;
-  const xApp = xMgr + D.mgr.w + D.gx;
-  type Block = { kind: "mgr"; m: PortfolioInput["managers"][number]; grid: ReturnType<typeof appGrid>; h: number } | { kind: "direct"; grid: ReturnType<typeof appGrid>; h: number };
+  const P = 14; // group box padding
+  const BG = 40; // gap between groups
+  const hasMgr = input.managers.length > 0;
+  const mgrY = D.orch.h + VG;
+  const appY = hasMgr ? mgrY + D.mgr.h + VG : D.orch.h + VG;
+  type Block = { kind: "mgr"; m: PortfolioInput["managers"][number]; grid: ReturnType<typeof appGrid>; w: number } | { kind: "direct"; grid: ReturnType<typeof appGrid>; w: number };
   const blocks: Block[] = input.managers.map((m) => {
-    const grid = appGrid(input.collapsed.has(m.id) ? [] : m.appIds, input, xApp);
-    return { kind: "mgr", m, grid, h: Math.max(D.mgr.h, grid.h) + 28 };
+    const grid = appGrid(input.collapsed.has(m.id) ? [] : m.appIds, input);
+    return { kind: "mgr", m, grid, w: Math.max(D.mgr.w, grid.w) };
   });
   if (input.directAppIds.length) {
-    const grid = appGrid(input.directAppIds, input, xMgr);
-    blocks.push({ kind: "direct", grid, h: grid.h + 28 });
+    const grid = appGrid(input.directAppIds, input);
+    blocks.push({ kind: "direct", grid, w: grid.w });
   }
-  const total = blocks.reduce((a, b) => a + b.h, 0) + D.cgap * Math.max(0, blocks.length - 1);
-  let y = 0;
-  let maxR = xMgr + D.mgr.w;
-  for (const b of blocks) {
-    const cy = y + b.h / 2;
-    if (b.kind === "mgr") {
-      out.rects[b.m.id] = { x: xMgr, y: cy - D.mgr.h / 2, w: D.mgr.w, h: D.mgr.h, mode: "mgr" };
-      b.grid.place(cy - b.grid.h / 2, out, b.m.id, b.m.hue);
-      const right = b.grid.w ? xApp + b.grid.w + 14 : xMgr + D.mgr.w + 14;
-      maxR = Math.max(maxR, right);
-      out.clusters.push({ id: `cl-${b.m.id}`, x: xMgr - 14, y, w: right - (xMgr - 14), h: b.h, label: `${b.m.name} · ${plural(b.m.appIds.length, "app")}`, hue: b.m.hue });
-      out.edges.push({ from: input.orchId, to: b.m.id, kind: "mgr" });
-    } else {
-      b.grid.place(cy - b.grid.h / 2, out, input.orchId);
-      const right = xMgr + b.grid.w + 14;
-      maxR = Math.max(maxR, right);
-      if (input.managers.length) out.clusters.push({ id: "cl-direct", x: xMgr - 14, y, w: right - (xMgr - 14), h: b.h, label: `Reports to the Orchestrator · ${plural(input.directAppIds.length, "app")}`, dashed: true });
-    }
-    y += b.h + D.cgap;
-  }
-  const height = Math.max(total, D.orch.h);
-  out.rects[input.orchId] = { x: 0, y: height / 2 - D.orch.h / 2, w: D.orch.w, h: D.orch.h, mode: "orch" };
-  let h = height;
-  // the Planner sits right below the Orchestrator, unconnected; custom agents with no app below it
-  let sy = height / 2 + D.orch.h / 2 + 28;
-  for (const s of input.side ?? []) {
-    out.rects[s.id] = { x: 0, y: sy, w: D.orch.w, h: D.nh, mode: "agent" };
+  const blocksW = blocks.reduce((a, b) => a + b.w + P * 2, 0) + BG * Math.max(0, blocks.length - 1);
+
+  // the first row: Orchestrator centred, the Planner on its left, the Git agent on its right, then the others outward
+  const side = input.side ?? [];
+  const sideW = D.orch.w;
+  const left = side.filter((_, i) => i % 2 === 0);
+  const right = side.filter((_, i) => i % 2 === 1);
+  const rowW = D.orch.w + Math.max(left.length, right.length) * 2 * (sideW + 24);
+  const W = Math.max(blocksW, rowW, D.orch.w);
+  const ox = W / 2 - D.orch.w / 2;
+  out.rects[input.orchId] = { x: ox, y: 0, w: D.orch.w, h: D.orch.h, mode: "orch" };
+  const sy = (D.orch.h - D.nh) / 2;
+  const placeSide = (s: { id: string; parentId: string | null }, x: number) => {
+    out.rects[s.id] = { x, y: sy, w: sideW, h: D.nh, mode: "agent" };
     if (s.parentId && s.parentId !== input.orchId) out.edges.push({ from: s.parentId, to: s.id, kind: "direct" });
-    sy += D.nh + 14;
+  };
+  left.forEach((s, i) => placeSide(s, ox - (i + 1) * (sideW + 24)));
+  right.forEach((s, i) => placeSide(s, ox + D.orch.w + 24 + i * (sideW + 24)));
+
+  let x = (W - blocksW) / 2;
+  let maxB = D.orch.h;
+  for (const b of blocks) {
+    const inner = x + P;
+    if (b.kind === "mgr") {
+      out.rects[b.m.id] = { x: inner + (b.w - D.mgr.w) / 2, y: mgrY, w: D.mgr.w, h: D.mgr.h, mode: "mgr" };
+      b.grid.place(inner + (b.w - b.grid.w) / 2, appY, out, b.m.id, b.m.hue);
+      const bottom = b.grid.h ? appY + b.grid.h : mgrY + D.mgr.h;
+      out.clusters.push({ id: `cl-${b.m.id}`, x, y: mgrY - P - 6, w: b.w + P * 2, h: bottom - mgrY + P * 2 + 6, label: `${b.m.name} · ${plural(b.m.appIds.length, "app")}`, hue: b.m.hue });
+      out.edges.push({ from: input.orchId, to: b.m.id, kind: "mgr" });
+      maxB = Math.max(maxB, bottom + P);
+    } else {
+      b.grid.place(inner, appY, out, input.orchId);
+      if (hasMgr) out.clusters.push({ id: "cl-direct", x, y: appY - P - 6, w: b.w + P * 2, h: b.grid.h + P * 2 + 6, label: `Reports to the Orchestrator · ${plural(input.directAppIds.length, "app")}`, dashed: true });
+      maxB = Math.max(maxB, appY + b.grid.h + P);
+    }
+    x += b.w + P * 2 + BG;
   }
-  h = Math.max(h, sy);
+  let h = maxB;
+  let maxR = W;
   const ghosts = input.ghosts ?? [];
   if (ghosts.length) {
-    const oy = height + 54;
-    out.labels.push({ x: xMgr - 14, y: oy - 24, text: input.ghostLabel ?? `Outside this run · ${plural(ghosts.length, "thread")} · read-only` });
+    const oy = h + 54;
+    const gx = Math.max(0, W / 2 - (Math.min(3, ghosts.length) * (D.app.w + 12)) / 2);
+    out.labels.push({ x: gx, y: oy - 24, text: input.ghostLabel ?? `Outside this run · ${plural(ghosts.length, "thread")} · read-only` });
     ghosts.forEach((id, i) => {
-      out.rects[id] = { x: xMgr - 14 + (i % 3) * (D.app.w + 12), y: oy + Math.floor(i / 3) * 96, w: D.app.w, h: 84, mode: "ghost" };
+      out.rects[id] = { x: gx + (i % 3) * (D.app.w + 12), y: oy + Math.floor(i / 3) * 96, w: D.app.w, h: 84, mode: "ghost" };
     });
     h = oy + Math.ceil(ghosts.length / 3) * 96;
-    maxR = Math.max(maxR, xMgr - 14 + Math.min(3, ghosts.length) * (D.app.w + 12));
+    maxR = Math.max(maxR, gx + Math.min(3, ghosts.length) * (D.app.w + 12));
   }
-  out.bounds = { w: maxR + 4, h };
+  // the first row may reach left of 0 when there are many side agents: shift everything right
+  const minX = Math.min(0, ...Object.values(out.rects).map((r) => r.x));
+  if (minX < 0) {
+    for (const r of Object.values(out.rects)) r.x -= minX;
+    for (const f of Object.values(out.frames)) f.x -= minX;
+    for (const c of out.clusters) c.x -= minX;
+    for (const l of out.labels) l.x -= minX;
+    maxR -= minX;
+  }
+  out.bounds = { w: Math.max(maxR, ...Object.values(out.rects).map((r) => r.x + r.w)) + 4, h };
   return out;
 }
 
@@ -194,42 +233,48 @@ export interface SquadInput {
   hue?: string | null;
 }
 
+/** One app, top-down: its chain of command, the lead, its builders in a square, then the quality gates. */
 export function squadLayout(a: SquadInput): Layout {
   const out: Layout = { rects: {}, frames: {}, edges: [], clusters: [], labels: [], deco: [], bounds: { w: 0, h: 0 } };
   const { W1, nw, nh, ng, pad, head } = D;
-  const rows = Math.max(1, Math.ceil(a.specialists.length / 2));
-  const sfW = nw * 2 + ng + pad * 2;
+  const cols = squareCols(a.specialists.length);
+  const rows = Math.max(1, Math.ceil(a.specialists.length / cols));
+  const sfW = nw * cols + ng * (cols - 1) + pad * 2;
   const sfH = head + rows * nh + (rows - 1) * ng + pad * 2;
-  const gRows = Math.max(1, Math.ceil(a.gates.length / 2));
+  const gRows = Math.max(1, Math.ceil(a.gates.length / cols));
   const gfH = head + gRows * nh + (gRows - 1) * ng + pad * 2;
-  const gap = 44;
-  const x2 = W1 + 64;
-  const totalH = sfH + gap + gfH;
-  const gfY = sfH + gap;
-  out.clusters.push({ id: "sf", x: x2, y: 0, w: sfW, h: sfH, label: `Specialists · ${a.specialists.length}`, hue: a.hue });
-  out.frames.sf = { x: x2, y: 0, w: sfW, h: sfH };
-  a.specialists.forEach((id, i) => {
-    out.rects[id] = { x: x2 + pad + (i % 2) * (nw + ng), y: head + pad + Math.floor(i / 2) * (nh + ng), w: nw, h: nh, mode: "agent" };
-  });
-  out.clusters.push({ id: "gf", x: x2, y: gfY, w: sfW, h: gfH, label: "Quality gates · spawned on demand", dashed: true });
-  out.frames.gf = { x: x2, y: gfY, w: sfW, h: gfH };
-  a.gates.forEach((id, i) => {
-    out.rects[id] = { x: x2 + pad + (i % 2) * (nw + ng), y: gfY + head + pad + Math.floor(i / 2) * (nh + ng), w: nw, h: nh, mode: "agent" };
-  });
+  const W = Math.max(sfW, W1);
+  const cx = W / 2;
   const leadH = 136;
   const chipH = 46;
   const vg = 28;
-  const leadY = Math.max(a.chain.length * (chipH + vg), totalH / 2 - leadH / 2);
-  out.rects[a.leadId] = { x: 0, y: leadY, w: W1, h: leadH, mode: "agent" };
-  let prev = a.leadId;
-  [...a.chain].reverse().forEach((id, i) => {
-    out.rects[id] = { x: 0, y: leadY - (i + 1) * (vg + chipH), w: W1, h: chipH, mode: "chip" };
-    out.edges.push({ from: id, to: prev, kind: "v" });
+  let y = 0;
+  let prev: string | null = null;
+  for (const id of a.chain) {
+    out.rects[id] = { x: cx - W1 / 2, y, w: W1, h: chipH, mode: "chip" };
+    if (prev) out.edges.push({ from: prev, to: id, kind: "v" });
     prev = id;
+    y += chipH + vg;
+  }
+  out.rects[a.leadId] = { x: cx - W1 / 2, y, w: W1, h: leadH, mode: "agent" };
+  if (prev) out.edges.push({ from: prev, to: a.leadId, kind: "v" });
+  y += leadH + 44;
+  const sx = cx - sfW / 2;
+  const sfY = y;
+  out.clusters.push({ id: "sf", x: sx, y: sfY, w: sfW, h: sfH, label: `Specialists · ${a.specialists.length}`, hue: a.hue });
+  out.frames.sf = { x: sx, y: sfY, w: sfW, h: sfH };
+  a.specialists.forEach((id, i) => {
+    out.rects[id] = { x: sx + pad + (i % cols) * (nw + ng), y: sfY + head + pad + Math.floor(i / cols) * (nh + ng), w: nw, h: nh, mode: "agent" };
   });
-  out.edges.push({ from: a.leadId, to: "sf", kind: "frame" }, { from: a.leadId, to: "gf", kind: "gate" });
-  out.deco.push({ x: x2 + sfW / 2, y1: sfH + 6, y2: gfY - 6, text: "integrate → review → slop check" });
-  out.bounds = { w: x2 + sfW, h: Math.max(totalH, leadY + leadH) };
+  const gfY = sfY + sfH + 44;
+  out.clusters.push({ id: "gf", x: sx, y: gfY, w: sfW, h: gfH, label: "Quality gates · spawned on demand", dashed: true });
+  out.frames.gf = { x: sx, y: gfY, w: sfW, h: gfH };
+  a.gates.forEach((id, i) => {
+    out.rects[id] = { x: sx + pad + (i % cols) * (nw + ng), y: gfY + head + pad + Math.floor(i / cols) * (nh + ng), w: nw, h: nh, mode: "agent" };
+  });
+  out.edges.push({ from: a.leadId, to: "sf", kind: "frame" });
+  out.deco.push({ x: cx, y1: sfY + sfH + 6, y2: gfY - 6, text: "integrate → review → slop check" });
+  out.bounds = { w: W, h: gfY + gfH };
   return out;
 }
 
@@ -256,7 +301,8 @@ function refit(box: Rect, before: Rect[], after: Rect[]): Rect {
 /**
  * The layout with the nodes the user dragged moved by their offsets. An offset on a frame or group
  * box (`frame:<app>` for an expanded app, a manager's group) moves everything in it; frames and
- * group boxes stretch to hold their members; nothing goes above or left of 0.
+ * group boxes stretch to hold their members. Nodes may go anywhere, also above or left of the
+ * origin: `bounds.x0`/`y0` then say where the drawing starts.
  */
 export function withOffsets(L: Layout, off: Offsets): Layout {
   const boxOf = (id: string): Rect | undefined => L.frames[id] ?? L.clusters.find((c) => c.id === id);
@@ -276,7 +322,7 @@ export function withOffsets(L: Layout, off: Offsets): Layout {
   const rects: Record<string, PlacedRect> = { ...L.rects };
   for (const id in shift) {
     const r = L.rects[id];
-    rects[id] = { ...r, x: Math.max(0, r.x + shift[id].dx), y: Math.max(0, r.y + shift[id].dy) };
+    rects[id] = { ...r, x: r.x + shift[id].dx, y: r.y + shift[id].dy };
   }
   const regroup = <T extends Rect>(box: T): T => {
     const members = Object.keys(L.rects).filter((m) => inside(L.rects[m], box));
@@ -287,23 +333,35 @@ export function withOffsets(L: Layout, off: Offsets): Layout {
   for (const k in L.frames) frames[k] = regroup(L.frames[k]);
   const clusters = L.clusters.map(regroup);
   const all = [...Object.values(rects), ...Object.values(frames), ...clusters];
-  const bounds = { w: Math.max(L.bounds.w, ...all.map((r) => r.x + r.w + 20)), h: Math.max(L.bounds.h, ...all.map((r) => r.y + r.h + 20)) };
+  const bounds = {
+    w: Math.max(L.bounds.w, ...all.map((r) => r.x + r.w + 20)),
+    h: Math.max(L.bounds.h, ...all.map((r) => r.y + r.h + 20)),
+    x0: Math.min(L.bounds.x0 ?? 0, ...all.map((r) => r.x - 20)),
+    y0: Math.min(L.bounds.y0 ?? 0, ...all.map((r) => r.y - 20 - 10)),
+  };
   return { ...L, rects, frames, clusters, bounds };
 }
 
-export function pathD(a: Rect, b: Rect, kind: "v" | "h"): string {
-  if (kind === "v") {
-    const x1 = a.x + a.w / 2;
-    const y1 = a.y + a.h;
-    const x2 = b.x + b.w / 2;
-    const y2 = b.y;
+/**
+ * An edge between two boxes: top-down (bottom of the upper box to the top of the lower one) when
+ * they are apart vertically, side to side when they share a row. `"h"` forces side to side.
+ */
+export function pathD(a: Rect, b: Rect, kind: "v" | "h" | "auto" = "auto"): string {
+  const vertical = kind === "v" || (kind === "auto" && (b.y >= a.y + a.h + 8 || a.y >= b.y + b.h + 8));
+  if (vertical) {
+    const [top, bot] = b.y >= a.y + a.h || kind === "v" ? [a, b] : [b, a];
+    const x1 = top.x + top.w / 2;
+    const y1 = top.y + top.h;
+    const x2 = bot.x + bot.w / 2;
+    const y2 = bot.y;
     const d = Math.max(10, (y2 - y1) / 2);
     return `M${x1} ${y1} C${x1} ${y1 + d} ${x2} ${y2 - d} ${x2} ${y2}`;
   }
-  const x1 = a.x + a.w;
-  const y1 = a.y + a.h / 2;
-  const x2 = b.x;
-  const y2 = b.y + b.h / 2;
+  const [l, r] = b.x >= a.x ? [a, b] : [b, a];
+  const x1 = l.x + l.w;
+  const y1 = l.y + l.h / 2;
+  const x2 = r.x;
+  const y2 = r.y + r.h / 2;
   const d = Math.max(28, (x2 - x1) * 0.5);
   return `M${x1} ${y1} C${x1 + d} ${y1} ${x2 - d} ${y2} ${x2} ${y2}`;
 }
@@ -320,14 +378,18 @@ export interface Viewport {
 }
 
 /** Fit bounds into a canvas, leaving room for the floating controls. */
-export function fitTransform(bounds: { w: number; h: number }, cw: number, ch: number): { px: number; py: number; zoom: number } {
+export function fitTransform(bounds: { w: number; h: number; x0?: number; y0?: number }, cw: number, ch: number): { px: number; py: number; zoom: number } {
   const padX = 44;
   const top = 92;
   const bot = 56;
+  const x0 = bounds.x0 ?? 0;
+  const y0 = bounds.y0 ?? 0;
+  const bw = bounds.w - x0;
+  const bh = bounds.h - y0;
   const aw = Math.max(1, cw - padX * 2);
   const ah = Math.max(1, ch - top - bot);
-  const z = Math.max(0.28, Math.min(1, Math.min(aw / Math.max(1, bounds.w), ah / Math.max(1, bounds.h))));
-  return { zoom: z, px: (cw - bounds.w * z) / 2, py: top + (ah - bounds.h * z) / 2 };
+  const z = Math.max(0.28, Math.min(1, Math.min(aw / Math.max(1, bw), ah / Math.max(1, bh))));
+  return { zoom: z, px: (cw - bw * z) / 2 - x0 * z, py: top + (ah - bh * z) / 2 - y0 * z };
 }
 
 /** Zoom about a point (canvas coordinates). */

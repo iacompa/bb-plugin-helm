@@ -2,6 +2,7 @@
 // returns the updated entity; the engine emits the realtime patches.
 
 import { needLook } from "./look.ts";
+import { worktreesViewFor } from "./worktree-view.ts";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { ensureGitAgent, ensurePlanner } from "./engine/custom.ts";
 import { RPC } from "../shared/protocol.ts";
@@ -43,6 +44,7 @@ export function registerRpc(bb: BbPluginApi, svc: HelmService): void {
     settings_models: () => svc.defaultModels(),
     settings_setModels: (input) => svc.setDefaultModels(input as never),
     worktrees_list: ({ runId, app }) => svc.worktrees(runId, app),
+    worktrees_view: ({ runId, measure, fresh }) => worktreesViewFor(e).view(runId, { measure: !!measure, fresh: !!fresh }),
     git_open: async ({ runId }) => {
       const n = await ensureGitAgent(e, runId, { queue: true });
       return { nodeId: n.id, threadId: n.threadId, label: e.label(n) };

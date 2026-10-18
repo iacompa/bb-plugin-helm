@@ -42,10 +42,12 @@ behaves. If something isn't covered here or in `bb helm <command> --help`, say y
   branch, `helm/<run-slug>-<id6>/<project-id>`, at the repository's current HEAD. It adds **no commits and
   no files**, never touches the user's checkout, working tree, index, stash or other branches, and never
   merges. The user merges a signed-off branch themselves.
-- **Each project has exactly two worktrees**: the user's checkout and one shared work worktree beside
-  the repository, `<repository folder>/.helm-work/<repository>`, on that branch and on the same disk.
-  Every agent of the project works there, so they see **committed work only**. Keep `appsRoot` on a
-  disk with room; the run's **Git agent** keeps the two-worktree rule and pushes signed-off work.
+- **Each project works in one shared worktree**: besides the user's checkout, one shared work worktree
+  beside the repository, `<repository folder>/.helm-work/<repository>`, on that branch and on the same
+  disk, plus only the lanes the Git agent adds for parallel work (at most the "Worktrees per project"
+  setting, default 10). Every agent of the project works there, so they see **committed work only**.
+  Keep `appsRoot` on a disk with room; the run's **Git agent** keeps the rule, watches disk space
+  and pushes signed-off work.
   If the user has uncommitted work the agents should build on, they must commit it before that wave is
   admitted. `bb helm plan` prints the uncommitted changes per folder.
 - **Read-only folders** (`reads`) are enforced by the agents' instructions, not file permissions.

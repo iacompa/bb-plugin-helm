@@ -1,16 +1,23 @@
-// The two-worktree rule. Every app has exactly two worktrees: the human's checkout and one
-// shared work worktree beside it on the same disk, where all of the app's agents work on its
-// integration branch. This module reports each app's worktrees, alerts the Git agent when an app
-// has more, and consolidates an app that still uses one worktree per agent (apps started before
-// the rule): once every extra worktree's work is committed and on the integration branch, its
-// agents move into the shared worktree and the extra worktrees are removed.
+// The worktree rule. Every app has the human's checkout and one shared work worktree beside it on
+// the same disk, where all of the app's agents work on its work branch; the Git agent may add
+// lanes (`.helm-work/<repo>--<lane>`, detached on the work branch) for parallel work, up to the
+// "worktrees per project" setting (default 10). This module reports each app's worktrees, alerts
+// the Git agent when an app is over the limit, still uses one worktree per agent, has leftover
+// agent branches, or its disk runs low, and consolidates an app that still uses one worktree per
+// agent (apps started before the rule): once every extra worktree's work is committed and on the
+// work branch, its agents move into the shared worktree and the extra worktrees are removed.
 
 import type { AppInfo, NodeInfo } from "../../shared/types.ts";
 import type { Engine } from "./engine.ts";
 import { HelmError } from "./engine.ts";
 import { GIT_ID } from "./custom.ts";
 
+/** The checkout and the shared work worktree: what every app has. */
 export const MAX_WORKTREES = 2;
+/** The most worktrees an app may have (the setting, 2 to 32). */
+export const worktreeCap = (e: Engine) => Math.max(MAX_WORKTREES, Math.min(32, e.settings.worktreesPerApp ?? 10));
+/** Below this much free space on an app's disk the Git agent is told (or below 10% of the disk). */
+const LOW_DISK = 15e9;
 /** How often the watchdog looks at a run's worktrees. */
 const AUDIT_EVERY_MS = 30 * 60_000;
 
@@ -20,7 +27,8 @@ export interface WorktreeRow {
   head: string | null;
   dirty: number;
   missing: boolean;
-  role: "checkout" | "work" | "extra";
+  /** checkout (the human's) · work (the shared one) · lane (one the Git agent added beside it) · extra (anything else). */
+  role: "checkout" | "work" | "lane" | "extra";
   /** The agents whose BB environment is this folder. */
   agents: string[];
 }
@@ -32,8 +40,12 @@ export interface AppWorktrees {
   work: string | null;
   branch: string | null;
   worktrees: WorktreeRow[];
-  /** How many worktrees beyond the allowed two. */
+  /** How many worktrees beyond the limit (the "worktrees per project" setting). */
   extra: number;
+  /** The limit it was measured against. */
+  cap: number;
+  /** One worktree per agent and no shared work worktree (an app started before the rule). */
+  legacy: boolean;
   /** Branches besides main and the work branch that Helm's agents made (bb/…, helm/…): the Git agent removes them once merged. */
   extraBranches: string[];
   /** Other branches (the human's or another tool's): reported, never touched. */
@@ -65,14 +77,17 @@ export async function appWorktrees(e: Engine, runId: string, opts: { appId?: str
   for (const app of apps) {
     const work = e.workTree(runId, app.id);
     const branch = e.repo.appExtra(runId, app.id).integrationBranch;
-    const row: AppWorktrees = { appId: app.id, name: app.name, repo: app.repoPath, work, branch, worktrees: [], extra: 0, extraBranches: [], otherBranches: [], error: null };
+    const cap = worktreeCap(e);
+    const row: AppWorktrees = { appId: app.id, name: app.name, repo: app.repoPath, work, branch, worktrees: [], extra: 0, cap, legacy: false, extraBranches: [], otherBranches: [], error: null };
     out.push(row);
     if (!app.repoPath) continue;
     try {
       const res = await e.host(runId).worktrees({ repo: app.repoPath, status: opts.status ?? true });
       const who = opts.status === false ? new Map<string, string[]>() : await agentsByPath(e, nodes.filter((n) => n.appId === app.id || (n.alsoLead && apps[0]?.id === app.id)));
-      row.worktrees = res.worktrees.map((w) => ({ path: w.path, branch: w.branch, head: w.head, dirty: w.dirty, missing: w.missing, role: w.main ? "checkout" : w.path === work ? "work" : "extra", agents: who.get(w.path) ?? [] }));
-      row.extra = Math.max(0, row.worktrees.length - MAX_WORKTREES);
+      const lanePrefix = work ? `${work}--` : null;
+      row.worktrees = res.worktrees.map((w) => ({ path: w.path, branch: w.branch, head: w.head, dirty: w.dirty, missing: w.missing, role: w.main ? "checkout" : w.path === work ? "work" : lanePrefix && w.path.startsWith(lanePrefix) ? "lane" : "extra", agents: who.get(w.path) ?? [] }));
+      row.extra = Math.max(0, row.worktrees.length - cap);
+      row.legacy = !work && row.worktrees.length > MAX_WORKTREES;
       const keep = new Set([branch, app.userBranch ?? "main", "main", "master"].filter(Boolean));
       const rest = (res.branches ?? []).filter((b) => !keep.has(b));
       row.extraBranches = rest.filter((b) => AGENT_BRANCH.test(b));
@@ -88,9 +103,12 @@ export async function appWorktrees(e: Engine, runId: string, opts: { appId?: str
 export function worktreesText(list: AppWorktrees[]): string {
   if (!list.length) return "No apps with repositories yet.";
   const over = list.filter((a) => a.extra > 0);
+  const legacy = list.filter((a) => a.legacy && !a.extra);
   const branchy = list.filter((a) => a.extraBranches.length);
+  const cap = list[0]?.cap ?? MAX_WORKTREES;
   const lines = [
-    over.length ? `${over.length} app(s) have more than ${MAX_WORKTREES} worktrees: ${over.map((a) => `${a.name} (${a.worktrees.length})`).join(", ")}.` : `Every app has at most ${MAX_WORKTREES} worktrees.`,
+    over.length ? `${over.length} app(s) have more than ${cap} worktrees (the limit per project): ${over.map((a) => `${a.name} (${a.worktrees.length})`).join(", ")}.` : `Every app is within the limit of ${cap} worktrees per project.`,
+    ...(legacy.length ? [`${legacy.length} app(s) still use one worktree per agent (consolidate them onto the shared work worktree): ${legacy.map((a) => a.name).join(", ")}.`] : []),
     branchy.length ? `${branchy.length} app(s) have agent branches besides main and the work branch: ${branchy.map((a) => `${a.name} (${a.extraBranches.length})`).join(", ")}.` : "No agent branches besides main and the work branches.",
   ];
   for (const a of list) {
@@ -104,8 +122,9 @@ export function worktreesText(list: AppWorktrees[]): string {
 }
 
 /**
- * Watchdog: wake the Git agent when an app has more than two worktrees. At most every 30
- * minutes per run, and once per distinct situation.
+ * Watchdog: wake the Git agent when an app is over the worktree limit, still uses one worktree per
+ * agent, has leftover agent branches, or its disk runs low. At most every 30 minutes per run, and
+ * once per distinct situation (low disk: once a day per disk).
  */
 export async function auditWorktrees(e: Engine, runId: string): Promise<string[]> {
   const git = e.repo.getNode(runId, GIT_ID);
@@ -114,14 +133,39 @@ export async function auditWorktrees(e: Engine, runId: string): Promise<string[]
   if (e.now() - last < AUDIT_EVERY_MS) return [];
   e.repo.setMeta(`wt-audit-at:${runId}`, String(e.now()));
   const list = await appWorktrees(e, runId, { status: false });
-  const over = list.filter((a) => a.extra > 0 || a.extraBranches.length > 0);
+  await lowDiskCheck(e, runId, list);
+  const over = list.filter((a) => a.extra > 0 || a.legacy || a.extraBranches.length > 0);
   const sig = over.map((a) => `${a.appId}:${a.worktrees.length}:${a.extraBranches.length}`).join(",");
   if (!over.length || e.repo.getMeta(`wt-alert:${runId}`) === sig) return over.map((a) => a.appId);
   e.repo.setMeta(`wt-alert:${runId}`, sig);
-  const what = (a: AppWorktrees) => [a.extra > 0 ? `${a.name} has ${a.worktrees.length} worktrees` : null, a.extraBranches.length ? `${a.name} has ${a.extraBranches.length} agent branch(es) besides main and ${a.branch ?? "its work branch"}` : null].filter(Boolean).join("; ");
-  e.sendFromHelm(runId, GIT_ID, `Helm worktree check: ${over.map(what).join("; ")} (the rule: two worktrees, the checkout and one shared work worktree; two branches, main and the work branch). Call helm_worktrees, then bring each app back to two: helm_consolidate once the extra worktrees' work is committed and on the work branch, and \`git branch -d\` for agent branches already merged into it. Your instructions on git are binding on every agent. Tell the human what you did.`, { key: `wt-alert:${runId}:${sig}` });
+  const what = (a: AppWorktrees) =>
+    [
+      a.extra > 0 ? `${a.name} has ${a.worktrees.length} worktrees (limit ${a.cap})` : a.legacy ? `${a.name} has ${a.worktrees.length} worktrees, one per agent, and no shared work worktree` : null,
+      a.extraBranches.length ? `${a.name} has ${a.extraBranches.length} agent branch(es) besides main and ${a.branch ?? "its work branch"}` : null,
+    ]
+      .filter(Boolean)
+      .join("; ");
+  e.sendFromHelm(runId, GIT_ID, `Helm worktree check: ${over.map(what).join("; ")} (the rule: two branches, main and the work branch; worktrees: the checkout, the shared work worktree and any lanes you made, at most ${worktreeCap(e)} per project). Call helm_worktrees, then: helm_consolidate an app that uses one worktree per agent once that work is committed and on the work branch; remove lanes that are merged and idle to get under the limit; \`git branch -d\` agent branches already merged into the work branch. Your instructions on git are binding on every agent. Tell the human what you did.`, { key: `wt-alert:${runId}:${sig}` });
   return over.map((a) => a.appId);
 }
+
+/** Tell the Git agent once a day per disk when an app's disk is low on space (free space only; nothing is measured). */
+async function lowDiskCheck(e: Engine, runId: string, list: AppWorktrees[]): Promise<void> {
+  const paths = list.map((a) => a.repo).filter((p): p is string => !!p);
+  if (!paths.length) return;
+  const r = await e.host(runId).diskUsage({ paths: paths.slice(0, 40), measure: false }).catch(() => null);
+  const day = Math.floor(e.now() / 86_400_000);
+  const seen = new Set<number>();
+  for (const s of r?.sizes ?? []) {
+    if (s.free === null || s.total === null || s.dev === null || seen.has(s.dev)) continue;
+    seen.add(s.dev);
+    if (s.free >= LOW_DISK && s.free >= s.total * 0.1) continue;
+    const apps = list.filter((a) => a.repo && r!.sizes.find((x) => x.path === a.repo)?.dev === s.dev).map((a) => a.name);
+    e.sendFromHelm(runId, GIT_ID, `Helm disk check: only ${gb(s.free)} free of ${gb(s.total)} on the disk holding ${apps.join(", ")}. Call helm_worktrees with sizes: true to see what each worktree takes, then free space without losing work: remove merged, idle lanes and extra worktrees (\`git worktree remove\`, never --force), consolidate apps that use one worktree per agent, \`git worktree prune\`. Build folders inside worktrees (build/, DerivedData, node_modules) are the agents': ask the app's lead before deleting them. Tell the human what you freed and what is left.`, { key: `disk-alert:${runId}:${s.dev}:${day}` });
+  }
+}
+
+export const gb = (n: number | null) => (n === null ? "?" : n >= 1e9 ? `${(n / 1e9).toFixed(n >= 100e9 ? 0 : 1)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
 
 /**
  * Move an app onto one shared work worktree. Refuses (with what to do) while any extra worktree

@@ -52,6 +52,8 @@ export const RPC_SCHEMAS = {
   settings_setModels: { input: z.object({ planner: ModelRefZ.nullable().optional(), orchestrator: ModelRefZ.nullable().optional(), git: ModelRefZ.nullable().optional(), applyToPlanners: z.boolean().optional() }), output: Any },
   /** Every app's worktrees (the rule is two per app). */
   worktrees_list: { input: z.object({ runId: Id, app: z.string().max(80).optional() }), output: Any },
+  /** The Git agent's Worktrees view: every app's worktrees and branches, their state, and (with `measure`) the space they take. */
+  worktrees_view: { input: z.object({ runId: Id, measure: z.boolean().optional(), fresh: z.boolean().optional() }), output: Any },
   /** Create (and start) the run's Git agent if needed; returns its thread. */
   git_open: { input: z.object({ runId: Id }), output: Any },
   /** What a decision is about, read live from git: the app's checkout and worktrees, and the commits it names. */

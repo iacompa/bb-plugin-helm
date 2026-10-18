@@ -24,6 +24,8 @@ export interface HelmSettings {
   defaultModels: { planner: ModelRef | null; orchestrator: ModelRef | null; git: ModelRef | null };
   /** What the Git agent does when the human signs a project off. */
   gitOnSignoff: "push" | "merge-push" | "report";
+  /** The most worktrees an app may have: the checkout, the shared work worktree and lanes the Git agent makes. */
+  worktreesPerApp: number;
 }
 
 export const DEFAULT_SETTINGS: HelmSettings = {
@@ -32,6 +34,7 @@ export const DEFAULT_SETTINGS: HelmSettings = {
   names: { planner: "", orchestrator: "", git: "" },
   defaultModels: { planner: null, orchestrator: null, git: null },
   gitOnSignoff: "merge-push",
+  worktreesPerApp: 10,
   showLeadsInSidebar: false,
   appsRoot: "~/Projects/helm",
   weights: SEED_WEIGHTS,

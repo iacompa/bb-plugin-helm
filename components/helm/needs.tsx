@@ -566,7 +566,7 @@ function CapModal({ need, cap, onClose, onRaise }: { need: NeedInfo; cap: number
 }
 
 interface LookPlace {
-  role: "checkout" | "work" | "extra";
+  role: "checkout" | "work" | "lane" | "extra";
   path: string;
   branch: string | null;
   head: string | null;
@@ -594,7 +594,7 @@ interface NeedLook {
   error: string | null;
 }
 
-const ROLE: Record<LookPlace["role"], string> = { checkout: "Your checkout", work: "Work worktree (all agents)", extra: "Other worktree" };
+const ROLE: Record<LookPlace["role"], string> = { checkout: "Your checkout", work: "Work worktree (all agents)", lane: "Lane (parallel work)", extra: "Other worktree" };
 
 /** What a decision is about, read from git when opened: so the human can check before answering. */
 function LookPanel({ runId, needId }: { runId: string; needId: string }) {

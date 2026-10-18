@@ -10,6 +10,7 @@ import { homedir, platform, tmpdir } from "node:os";
 import type { HostOps } from "../shared/host-contract.ts";
 import { scan, type ScanFile } from "../server/domain/slop/scan.ts";
 import { createScreenOps } from "./screens.ts";
+import { createDiskOps } from "./disk.ts";
 
 const GIT_ENV = {
   ...process.env,
@@ -181,6 +182,7 @@ async function listWorktrees(root: string): Promise<Array<{ path: string; branch
 export function createHostOps(): HostOps {
   return {
     ...createScreenOps(),
+    ...createDiskOps(),
     async ensureRepo({ path, files, message }) {
       const root = resolve(path);
       await mkdir(root, { recursive: true });

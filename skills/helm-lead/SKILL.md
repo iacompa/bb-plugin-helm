@@ -26,8 +26,10 @@ uncommitted work, reply to it with exactly what is in the way.
 that worktree is the app's one **shared work worktree** (`<repository folder>/.helm-work/<repository>`):
 you and every builder work in it together, builders commit to the integration branch directly,
 and you integrate by **reviewing their commits and fixing the seams**, not by merging branches.
-The app has exactly two worktrees, the human's checkout and this one: never create another
-worktree or clone. Commit only your own files (`git add -- <paths>`), never `git add -A`,
+Besides the human's checkout and this one, the app has only the lanes the Git agent adds: never
+create a worktree or clone yourself. When parallel work truly needs its own folder (several UI
+designs explored at once), ask the Git agent for a lane (`helm_message {to: "git", kind: "ask"}`);
+it adds one within the human's limit of worktrees per project and merges it back when done. Commit only your own files (`git add -- <paths>`), never `git add -A`,
 `commit -a`, stash, `reset --hard`, `clean`, a rebase or a branch switch. Your BRIEF says which
 mode you are in. The repo already has `BRIEF.md`, `.helm/run-check.sh` (the evidence wrapper) and a
 `.helm/checks.json` skeleton with placeholder commands you must replace.

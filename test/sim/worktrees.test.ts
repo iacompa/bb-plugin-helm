@@ -63,7 +63,7 @@ test("the Git agent stands beside the Orchestrator, checks the worktrees on star
   assert.equal(git.parentId, null, "outside the chain of command");
   assert.equal(h.engine.label(git), "Git agent", "no personal name by default");
   assert.equal(h.engine.effectiveModel(h.engine.run(runId), git)?.modelId, h.engine.run(runId).slots.orchestrator?.modelId, "no Git agent default: the Orchestrator's model");
-  assert.ok(h.agents.log.some((l) => /^git: Every app has at most 2 worktrees/.test(l)), h.agents.log.filter((l) => l.startsWith("git")).join("\n"));
+  assert.ok(h.agents.log.some((l) => /^git: Every app is within the limit of 10 worktrees per project/.test(l)), h.agents.log.filter((l) => l.startsWith("git")).join("\n"));
 
   const so = h.repo.listNeeds(runId, "open").find((n) => n.kind === "signoff" && n.appId === "alpha")!;
   assert.match(so.body, /Result: branch alpha-work .*Signing off is your approval: the Git agent merges it into main and pushes both/);
@@ -141,7 +141,8 @@ test("an app with one worktree per agent: the audit wakes the Git agent; consoli
   const { h, runId } = await run({ legacy: true });
   const before = (await appWorktrees(h.engine, runId, { appId: "alpha" }))[0];
   assert.equal(before.work, null, "no shared worktree: the old layout");
-  assert.ok(before.extra > 0, `${before.worktrees.length} worktrees`);
+  assert.ok(before.legacy && before.worktrees.length > 2, `${before.worktrees.length} worktrees`);
+  assert.equal(before.extra, 0, "within the limit of 10, but still one worktree per agent");
 
   // the watchdog's audit tells the Git agent, once per situation
   assert.deepEqual(await auditWorktrees(h.engine, runId), ["alpha"]);
@@ -262,4 +263,58 @@ test("Look shows what a decision is about: the checkout, the work worktree with 
   assert.equal(c.onWork, true);
   assert.equal(look.commits.find((x) => x.ref === "deadbeef1")!.sha, null);
   assert.deepEqual(commitRefs("c767f2e and 9e8924389a, not 1234567 or abcdefg"), ["c767f2e", "9e8924389a"]);
+});
+
+test("the limit per project is a setting: lanes beside the work worktree count, and going over it wakes the Git agent", async () => {
+  const { h, runId } = await run({ settings: { worktreesPerApp: 3 } });
+  const repo = h.repo.getApp(runId, "alpha")!.repoPath!;
+  const work = h.engine.workTree(runId, "alpha")!;
+  const tip = h.sim.git.resolve(repo, "alpha-work")!;
+  h.sim.git.addWorktree(repo, `${work}--ui-b`, "lane-tmp", tip);
+  let [a] = await appWorktrees(h.engine, runId, { appId: "alpha" });
+  assert.deepEqual(a.worktrees.map((w) => w.role).sort(), ["checkout", "lane", "work"]);
+  assert.equal(a.cap, 3);
+  assert.equal(a.extra, 0);
+  h.sim.git.addWorktree(repo, `${work}--ui-c`, "lane-tmp2", tip);
+  [a] = await appWorktrees(h.engine, runId, { appId: "alpha" });
+  assert.equal(a.extra, 1);
+  await h.clock.advance(H);
+  assert.ok((await auditWorktrees(h.engine, runId)).includes("alpha"));
+  assert.ok(sentTo(h, runId, GIT_ID, /Alpha has 4 worktrees \(limit 3\)/));
+  const brief = h.engine.buildBrief(h.engine.run(runId), h.repo.listNodes(runId).find((n) => n.appId === "alpha" && n.tier === "lead")!);
+  assert.match(brief, /at most 3 worktrees per project/);
+});
+
+test("the Worktrees view: each worktree's state and own size, the git storage, the app's total and the disk; a low disk wakes the Git agent", async () => {
+  const { h, runId } = await run();
+  const { worktreesViewFor, worktreeSizesText } = await import("../../src/server/worktree-view.ts");
+  const view = worktreesViewFor(h.engine);
+  const work = h.engine.workTree(runId, "alpha")!;
+  h.sim.git.wts.get(work)!.work.set("src/wip.swift", "x".repeat(5000));
+  const first = await view.view(runId, { measure: true });
+  assert.equal(first.measuring, true, "sizes are measured in the background");
+  const v = await view.measureAndWait(runId);
+  const a = v.apps.find((x) => x.appId === "alpha")!;
+  const w = a.worktrees.find((x) => x.role === "work")!;
+  assert.equal(w.state, "editing");
+  assert.ok((w.bytes ?? 0) > 5000, String(w.bytes));
+  assert.equal(a.store?.bytes, 1_000_000);
+  assert.equal(a.total, a.worktrees.reduce((s, x) => s + (x.bytes ?? 0), 0) + 1_000_000);
+  assert.deepEqual(a.branches.slice(0, 2).map((b) => [b.name, b.kind]), [["main", "main"], ["alpha-work", "work"]]);
+  assert.equal(v.disks.length, 1);
+  assert.equal(v.disks[0].free, 200e9);
+  assert.match(worktreeSizesText(v), /Alpha: .* in total \(git storage 1 MB\)/);
+  // a low disk: the Git agent hears once a day
+  h.sim.git.diskFree = 8e9;
+  await h.clock.advance(H);
+  await auditWorktrees(h.engine, runId);
+  assert.ok(sentTo(h, runId, GIT_ID, /Helm disk check: only 8\.0 GB free of 500 GB on the disk holding Alpha, Beta/));
+  const n = h.repo.outboxForRun(runId).filter((o) => o.nodeId === GIT_ID && /Helm disk check/.test(String(o.payload.text))).length;
+  await h.clock.advance(H);
+  await auditWorktrees(h.engine, runId);
+  assert.equal(h.repo.outboxForRun(runId).filter((o) => o.nodeId === GIT_ID && /Helm disk check/.test(String(o.payload.text))).length, n, "once a day");
+  // the Git agent's tool measures too
+  const git = h.repo.getNode(runId, GIT_ID)!;
+  const r = await callTool(h.engine, "helm_worktrees", git.threadId!, { sizes: true });
+  assert.match(r.text, /## Space[\s\S]*Disk with Alpha, Beta: 8\.0 GB free/);
 });

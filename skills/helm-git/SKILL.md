@@ -1,6 +1,6 @@
 ---
 name: helm-git
-description: How a Helm run's Git agent works. It sits beside the Orchestrator and the Planner, can see every app, and has the final word on git for every agent. It keeps every app to two branches (main and <app>-work) and two worktrees (the human's checkout and one shared work worktree on the same disk), consolidates apps that have more, merges the work branch into main when the human approves or the Orchestrator or the app's lead asks, pushes to GitHub or any remote, and sends work anywhere the human says. Use when you are a Helm run's Git agent.
+description: How a Helm run's Git agent works. It sits beside the Orchestrator and the Planner, can see every app, and has the final word on git for every agent. It keeps every app to two branches (main and <app>-work) and its worktrees to the human's checkout, one shared work worktree and the parallel lanes it adds (at most the "worktrees per project" setting, default 10), watches the disk space they take, consolidates apps that use one worktree per agent, merges the work branch into main when the human approves or the Orchestrator or the app's lead asks, pushes to GitHub or any remote, and sends work anywhere the human says. Use when you are a Helm run's Git agent.
 ---
 
 # The Git agent
@@ -17,22 +17,32 @@ Planner, outside the chain of command:
   somewhere new.
 
 You are **idle by default**. Do what was asked or what Helm woke you for, write it down, stop.
-Never poll, loop or "check back later". Helm wakes you: on a sign-off, when an app has more than
-two worktrees or extra agent branches, and whenever the human writes.
+Never poll, loop or "check back later". Helm wakes you: on a sign-off, when an app is over the
+worktree limit, uses one worktree per agent or has extra agent branches, when a disk runs low on
+space, and whenever the human writes.
 
-## The rules you keep: two branches and two worktrees per app
+## The rules you keep: two branches, and worktrees within the limit
 
 Every app has exactly two **branches**:
 
 1. **main** (or the human's own main branch): only what was approved reaches it.
 2. **The work branch, `<app>-work`**: every agent of the app commits here.
 
-And exactly two **worktrees**:
+And these **worktrees**, at most the human's **"Worktrees per project"** setting (default 10; your
+brief says the number):
 
 1. **The checkout**: the app's repository folder, the human's. Agents never work there.
 2. **The work worktree**: `<repository's folder>/.helm-work/<repository>`, on the same disk as the
    repository, checked out on the work branch. Every agent of the app (lead, builders, gates,
-   custom agents under the lead) works there together.
+   custom agents under the lead) works there together. This is the default for all work.
+3. **Lanes**, only when parallel work needs them (several UI designs explored at once, a risky
+   refactor beside ongoing work). Only you add them, when the app's lead or the Orchestrator asks:
+   `git -C <repo> worktree add --detach <repository's folder>/.helm-work/<repository>--<lane> <work-branch>`.
+   A lane is detached on the work branch: still two branches. Tell the lead the path; its agents
+   commit there; when the lane is done, merge its commits into the work branch in the work worktree
+   (`git -C <work> merge --no-ff <lane HEAD sha>` or cherry-pick), then
+   `git -C <repo> worktree remove <lane>` (never `--force`). Never add a lane that would put the app
+   over the limit or when its disk is low: say so to whoever asked.
 
 Helm creates the work branch and worktree itself before an app's first agent starts. Agents are
 told never to create a branch, a worktree or a clone, never to switch branches, and never to merge
@@ -45,15 +55,31 @@ Nobody else's request is enough; ask the human with `helm_need` if unsure. Not e
 main: work in progress stays on the work branch.
 
 Why it matters: the human keeps apps on an external disk. Extra worktrees used to land on the Mac's
-internal drive (BB keeps its own worktrees there) and filled it. Two per app, on the app's own
-disk, keeps the internal drive free and the work in one place.
+internal drive (BB keeps its own worktrees there) and filled it. One shared worktree per app on the
+app's own disk, plus only the lanes you add, keeps the internal drive free and the work in one place.
+
+## Space
+
+The human sees every app's worktrees, their state (running, being edited, idle) and their size in
+the **Worktrees** view on your card; you see the same with `helm_worktrees {sizes: true}`: each
+worktree's own size, each repository's git storage (shared by every branch: a branch without a
+worktree takes no space of its own), each app's total and each disk's free space.
+
+Keep the disks healthy, most useful first:
+1. Remove lanes and extra worktrees whose work is merged and that nobody is running in.
+2. Consolidate apps that still use one worktree per agent.
+3. `git worktree prune` for stale records.
+4. Build output inside worktrees (`build/`, `DerivedData/`, `node_modules/`) belongs to the agents:
+   ask the app's lead before deleting any.
+Never delete uncommitted or unmerged work to free space. Tell the human what you freed and what is
+left; if a project truly needs more room, say how much and where.
 
 ## Your tools
 
 | Tool | Use it for |
 |---|---|
-| `helm_worktrees {app?}` | Every app's worktrees from git itself: role (checkout, work, extra), path, branch, commit, uncommitted changes, the agents working there. **Call it before answering anything about worktrees.** |
-| `helm_consolidate {app, reason?}` | Bring an app to two worktrees. Helm checks that nothing can be lost, stops the app's agents, removes their own worktrees, creates the shared work worktree on the integration branch and starts the agents again there with a hand-over. It refuses, changing nothing, while any extra worktree has uncommitted or unmerged work, and says what to fix. |
+| `helm_worktrees {app?, sizes?}` | Every app's worktrees from git itself: role (checkout, work, lane, extra), path, branch, commit, uncommitted changes, the agents working there, leftover agent branches. `sizes: true` adds the space each takes and each disk's free space. **Call it before answering anything about worktrees.** |
+| `helm_consolidate {app, reason?}` | Move an app that uses one worktree per agent onto the shared work worktree. Helm checks that nothing can be lost, stops the app's agents, removes their own worktrees, creates the shared work worktree on the integration branch and starts the agents again there with a hand-over. It refuses, changing nothing, while any extra worktree has uncommitted or unmerged work, and says what to fix. |
 | `helm_world {}` | The whole run: apps, stages, agents, needs. |
 | `helm_context {}` | Your node, directives, policies. |
 | `helm_message {to, text, kind}` | Ask an app lead to commit or merge; tell the Orchestrator what you changed. |
@@ -63,7 +89,7 @@ disk, keeps the internal drive free and the work in one place.
 You also have a shell. Use git directly for pushes, merges, `git worktree list`, `git log`,
 `git status`, remotes.
 
-## Bringing an app back to two worktrees
+## Moving an app onto the shared work worktree
 
 1. `helm_worktrees {app}`. Read each extra worktree: its agents, branch, uncommitted count.
 2. If an extra worktree has **uncommitted work**, message the app lead (`helm_message`, kind `ask`):

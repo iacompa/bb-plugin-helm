@@ -16,6 +16,7 @@ import { NeedsView } from "./needs.tsx";
 import { Inspector } from "./inspector/index.tsx";
 import { StudioModal } from "./studio.tsx";
 import { ScreensModal } from "./screens.tsx";
+import { WorktreesModal } from "./worktrees.tsx";
 import { EXAMPLES, WizardModal, seedWizardBrief, seedWizardMode } from "./wizard.tsx";
 import { reportClientError } from "./data.ts";
 import { StartBar, useStartRun } from "./startbar.tsx";
@@ -157,6 +158,7 @@ function Frame() {
       </div>
       <StudioModal />
       <ScreensModal />
+      <WorktreesModal />
       <WizardModal />
       <DialogHost />
     </>

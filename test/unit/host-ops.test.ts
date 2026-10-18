@@ -213,3 +213,17 @@ test("ensureWorktree: one work worktree beside the repository on its branch; ide
   assert.equal(worktrees[1].dirty, 1);
   assert.equal((await ops.worktrees({ repo, status: false })).worktrees[1].dirty, 0, "status skipped");
 });
+
+test("diskUsage measures a folder on the real disk and reads its disk's free space", async () => {
+  const { createDiskOps } = await import("../../src/host/disk.ts");
+  const { mkdtempSync, writeFileSync: wf } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "helm-du-"));
+  wf(join(dir, "a.bin"), Buffer.alloc(300_000));
+  const r = await createDiskOps().diskUsage({ paths: [dir, join(dir, "nope")], measure: true });
+  assert.ok((r.sizes[0].bytes ?? 0) >= 290_000, String(r.sizes[0].bytes));
+  assert.ok((r.sizes[0].free ?? 0) > 0 && (r.sizes[0].total ?? 0) >= (r.sizes[0].free ?? 0));
+  assert.equal(r.sizes[1].bytes, null, "a missing folder has no size");
+  const quick = await createDiskOps().diskUsage({ paths: [dir], measure: false });
+  assert.equal(quick.sizes[0].bytes, null, "measure: false reads free space only");
+});

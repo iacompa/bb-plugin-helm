@@ -3,6 +3,7 @@
 // tier, identity, parent and app come from the database, never from metadata
 // or arguments (§8.2, V12).
 
+import { worktreesViewFor, worktreeSizesText } from "../worktree-view.ts";
 import { setTask } from "../engine/tasks.ts";
 import { applyVerdicts, watcherRun, type WatchVerdict } from "../engine/watch.ts";
 import { answerPrompt } from "../engine/prompts.ts";
@@ -126,7 +127,7 @@ export const TOOL_DEFS: ToolDef[] = [
     presentation: { label: { pending: "Designing an agent", completed: "Designed an agent" }, icon: { glyph: "UserRoundPlus" } },
   },
   { name: "helm_rename_agent", description: "Give any agent in the run a new personal name when the human asks (including yourself or the Orchestrator). Names are unique in the run; the agent's thread title follows.", parameters: z.object({ nodeId: z.string().min(1).max(80), name: z.string().min(1).max(40) }).strict(), presentation: { label: { pending: "Renaming", completed: "Renamed" }, icon: { glyph: "Edit" } } },
-  { name: "helm_worktrees", description: "The Git agent's view of every app's worktrees, from git itself: the human's checkout, the shared work worktree and any extra ones (the rule is two per app), each with branch, commit, uncommitted changes and the agents working there. Narrow it with `app`.", parameters: z.object({ app: z.string().min(1).max(80).optional() }).strict(), presentation: { label: { pending: "Listing worktrees", completed: "Listed worktrees" }, icon: { glyph: "GitBranch" } } },
+  { name: "helm_worktrees", description: "The Git agent's view of every app's worktrees, from git itself: the human's checkout, the shared work worktree, lanes and any extra ones (limit: the worktrees-per-project setting), each with branch, commit, uncommitted changes and the agents working there, plus leftover agent branches. Narrow it with `app`. `sizes: true` also measures the space each worktree and each repository's git storage takes and each disk's free space (can take a minute on big folders).", parameters: z.object({ app: z.string().min(1).max(80).optional(), sizes: z.boolean().optional() }).strict(), presentation: { label: { pending: "Listing worktrees", completed: "Listed worktrees" }, icon: { glyph: "GitBranch" } } },
   {
     name: "helm_consolidate",
     description: "Bring an app to two worktrees: once every extra agent worktree's work is committed and on the integration branch, Helm stops those agents, removes their worktrees, creates the shared work worktree on the integration branch and starts the agents again there with a hand-over. Refuses, changing nothing, with what to fix first while anything could be lost.",
@@ -317,7 +318,10 @@ async function dispatch(e: Engine, node: NodeInfo, name: string, p: Record<strin
       return JSON.stringify(world(e, node.runId, { appsPage: p.appsPage as number | undefined }));
     case "helm_worktrees": {
       const app = p.app ? resolveApp(e, node.runId, String(p.app)) : undefined;
-      return worktreesText(await appWorktrees(e, node.runId, { appId: app }));
+      const text = worktreesText(await appWorktrees(e, node.runId, { appId: app }));
+      if (!p.sizes) return text;
+      const v = await worktreesViewFor(e).measureAndWait(node.runId);
+      return `${text}\n\n## Space\n${worktreeSizesText({ ...v, apps: v.apps.filter((a) => !app || a.appId === app) })}`;
     }
     case "helm_consolidate":
       return consolidate(e, node.runId, resolveApp(e, node.runId, String(p.app)), e.label(node));

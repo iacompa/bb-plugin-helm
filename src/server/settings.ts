@@ -57,7 +57,7 @@ function modelSelects(choices: ModelChoice[], who: "Planner" | "Orchestrator" | 
 export function settingsDescriptors(choices: ModelChoice[]) {
   const pl = modelSelects(choices, "Planner", "Not set: use each run's Orchestrator model", "The Planner's model in runs whose Planner role has no model.");
   const or = modelSelects(choices, "Orchestrator", "Not set: choose it in each new run", "The Orchestrator's model for new runs that do not choose one.");
-  const gt = modelSelects(choices, "Git agent", "Not set: use each run's Orchestrator model", "The Git agent's model: it keeps every app to two worktrees and sends work where you tell it.");
+  const gt = modelSelects(choices, "Git agent", "Not set: use each run's Orchestrator model", "The Git agent's model: it keeps every app's branches and worktrees in order, watches their disk space and sends work where you tell it.");
   return { plannerModel: pl.model, plannerReasoning: pl.reasoning, orchestratorModel: or.model, orchestratorReasoning: or.reasoning, gitModel: gt.model, gitReasoning: gt.reasoning, ...BASE_DESCRIPTORS };
 }
 
@@ -76,6 +76,12 @@ const BASE_DESCRIPTORS = {
       report: "Only reports what is where; sends nothing",
     },
     default: DEFAULT_SETTINGS.gitOnSignoff,
+  },
+  worktreesPerApp: {
+    type: "number",
+    label: "Worktrees per project (most)",
+    description: "The most worktrees one project may have (2 to 32): your checkout, the shared work worktree every agent uses, and extra lanes the Git agent makes when a project needs parallel work (several UI designs at once, say). Above this the Git agent is told to bring it back down. The Git agent's Worktrees view shows each project's worktrees and the space they take.",
+    default: DEFAULT_SETTINGS.worktreesPerApp,
   },
   appsRoot: { type: "string", label: "Apps root folder", description: "Default parent folder for new app repositories: <root>/<run>/<app>. An app can also name its own folder or an existing repository anywhere (brief: \"- Name — tagline · macOS · /path/to/repo\"), and bb helm plan --root sets this per run.", default: DEFAULT_SETTINGS.appsRoot },
   concurrency: { type: "number", label: "Concurrent agents", description: `Default for new runs: how many of a run's agents may run at once (max ${LIMIT_CEILINGS.concurrency}). Change a running run with bb helm limits or the capacity chip.`, default: LIMIT_DEFAULTS.concurrency },
@@ -196,6 +202,7 @@ export function toHelmSettings(v: Values, warn: (m: string) => void = () => {}, 
       git: withReasoning(parseModelSetting(v.gitModel, "Default Git agent model", warn), v.gitReasoning, choices),
     },
     gitOnSignoff: v.gitOnSignoff === "push" || v.gitOnSignoff === "report" ? v.gitOnSignoff : "merge-push",
+    worktreesPerApp: clampInt(v.worktreesPerApp, 2, 32, DEFAULT_SETTINGS.worktreesPerApp),
     weights,
     zeroTolerance: typeof v.zeroTolerance === "string" ? v.zeroTolerance.split(/[,\s]+/).filter((x) => /^S\d+$/.test(x)) : DEFAULT_SETTINGS.zeroTolerance,
     createRemote: v.createRemote === true,

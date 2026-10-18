@@ -8,7 +8,7 @@ import { HelmError } from "./engine/engine.ts";
 import { appWorktrees } from "./engine/worktrees.ts";
 
 export interface LookPlace {
-  role: "checkout" | "work" | "extra";
+  role: "checkout" | "work" | "lane" | "extra";
   path: string;
   branch: string | null;
   head: string | null;
@@ -92,5 +92,5 @@ export async function needLook(e: Engine, runId: string, needId: string): Promis
 }
 
 function order(role: LookPlace["role"]): number {
-  return role === "checkout" ? 0 : role === "work" ? 1 : 2;
+  return role === "checkout" ? 0 : role === "work" ? 1 : role === "lane" ? 2 : 3;
 }
