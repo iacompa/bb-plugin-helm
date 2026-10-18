@@ -189,8 +189,8 @@ Cost rule for development:
 
 ## Privacy and scope
 
-- The plugin server talks to BB only through `bb.sdk`. It sends no telemetry and never stores credentials. The only network contact Helm makes itself is a read-only `git ls-remote` to your apps' own remotes when you open the GitHub tab (or run `bb helm worktrees --github`), using the login git already has.
-- Git and file work runs in Helm's host entry (`host.ts`), with no shell.
+- The plugin server talks to BB only through `bb.sdk`. It sends no telemetry and never stores credentials. The only network contact Helm makes itself is a read-only `git ls-remote` to your apps' own remotes when you open the GitHub tab (or run `bb helm worktrees --github`), using the login in your global git config.
+- Git and file work runs in Helm's host entry (`host.ts`), with no shell. A repository's own git config cannot make Helm's git run a program: Helm's own git commands skip the repository's hooks (your agents' commits still run them), switch off filter drivers it defines except the stock Git LFS ones (your global ones, such as LFS, still run), never sign Helm's own commits, and read remotes from outside the repository, so a repository-level credential helper is not used. In a repository that uses git-crypt or another filter of its own, worktrees Helm creates hold the committed form of those files until an agent checks them out again.
 - Helm manages only the threads it spawns. Everything else is read-only (the Observatory).
 - Repositories and your own branches are never deleted. In an existing repository, Helm adds only its work branch and its work worktree. The Git agent deletes only Helm's own merged agent and lane branches (`git branch -d`, never `-D`) and removes idle lanes it made. Consolidating an app removes its agents' older per-agent worktrees, only after checking they hold no uncommitted or unmerged work.
 

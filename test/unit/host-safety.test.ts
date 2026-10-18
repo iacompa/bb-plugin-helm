@@ -3,11 +3,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { createHostOps, parseStatusZ } from "../../src/host/ops.ts";
-import { cleanUrl, safeRemoteName } from "../../src/host/remote.ts";
+import { cleanUrl, lsRemoteTarget, safeRemoteName } from "../../src/host/remote.ts";
+import { filterOverrides } from "../../src/host/git-env.ts";
 import { scan } from "../../src/server/domain/slop/scan.ts";
 import { emptyBodyEnd, redactSecrets } from "../../src/server/domain/slop/rules.ts";
 import { quoteNear } from "../../src/server/domain/verdict.ts";
@@ -106,6 +107,64 @@ test("repository config cannot make host git run programs (fsmonitor, upload-pac
   assert.equal(safeRemoteName("origin"), true);
   assert.equal(safeRemoteName("--upload-pack=x"), false);
   assert.equal(safeRemoteName("a/../b"), false);
+});
+
+test("a repository's own hooks and filter drivers do not run in Helm's git; its remote is read from outside it", async () => {
+  const dir = tmp();
+  const marker = join(dir, "ran");
+  const prog = join(dir, "prog.sh");
+  writeFileSync(prog, `#!/bin/sh\necho "$0 $*" >> "${marker}"\ncat\n`);
+  chmodSync(prog, 0o755);
+  const upstream = join(dir, "upstream");
+  await ops.ensureRepo({ path: upstream, files: [{ path: ".gitattributes", content: "*.txt filter=evil\n*.md filter=odd one\n" }, { path: "a.txt", content: "hello\n" }], message: "one" });
+  const repo = join(dir, "repo");
+  execFileSync("git", ["clone", "-q", upstream, repo], { env: G, stdio: "pipe" });
+  for (const h of ["post-checkout", "reference-transaction", "pre-commit", "post-commit"]) {
+    writeFileSync(join(repo, ".git", "hooks", h), `#!/bin/sh\necho hook-${h} >> "${marker}"\n`);
+    chmodSync(join(repo, ".git", "hooks", h), 0o755);
+  }
+  gitIn(repo, "config", "filter.evil.smudge", prog);
+  gitIn(repo, "config", "filter.evil.clean", prog);
+  gitIn(repo, "config", "filter.evil.required", "true");
+  // a driver from an included file counts as the repository's too
+  writeFileSync(join(dir, "inc.cfg"), `[filter "odd one"]\n\tprocess = ${prog}\n`);
+  gitIn(repo, "config", "include.path", join(dir, "inc.cfg"));
+  const w = await ops.ensureWorktree({ repo, path: join(dir, "w"), branch: "b1", base: "HEAD" });
+  assert.equal(w.created, true);
+  assert.equal(readFileSync(join(dir, "w", "a.txt"), "utf8"), "hello\n", "checked out as committed");
+  execFileSync("touch", ["-t", "202001010000", join(dir, "w", "a.txt")]);
+  await ops.status({ path: join(dir, "w") });
+  await ops.worktrees({ repo, status: true });
+  assert.equal(existsSync(marker) ? readFileSync(marker, "utf8") : "", "", "no hook or filter ran");
+  // the remote is read from an empty folder: a relative address still resolves against the repository
+  gitIn(repo, "remote", "set-url", "origin", "../upstream");
+  const rs = await ops.remoteStatus({ repo });
+  assert.equal(rs.error, null);
+  assert.ok(rs.branches.some((b) => b.name === "main" && b.state === "synced"));
+  // an address that could pass for an option (git's own commands refuse to set one)
+  writeFileSync(join(repo, ".git", "config"), readFileSync(join(repo, ".git", "config"), "utf8") + `[remote "evil"]\n\turl = --upload-pack=${prog}\n`);
+  assert.match((await ops.remoteStatus({ repo, remote: "evil" })).error ?? "", /no usable address/);
+  assert.equal(existsSync(marker), false);
+});
+
+test("filterOverrides switches off the repository's own drivers, keeps stock Git LFS and global ones, and refuses names -c cannot carry", () => {
+  const L = (...e: [string, string, string][]) => e.map(([sc, k, v]) => `${sc}\0${k}\n${v}\0`).join("");
+  assert.deepEqual(filterOverrides(""), []);
+  assert.deepEqual(filterOverrides(L(["global", "filter.lfs.process", "git-lfs filter-process"], ["local", "filter.lfs.smudge", "git-lfs smudge -- %f"], ["local", "filter.lfs.process", "git-lfs filter-process --skip"], ["global", "filter.crypt.clean", "/usr/local/bin/x"])), []);
+  assert.deepEqual(filterOverrides(L(["local", "filter.evil.smudge", "/x"], ["worktree", "filter.a b.clean", "y"], ["local", "filter.evil.clean", "/x"])), [
+    "-c", "filter.evil.process=", "-c", "filter.evil.smudge=", "-c", "filter.evil.clean=", "-c", "filter.evil.required=false",
+    "-c", "filter.a b.process=", "-c", "filter.a b.smudge=", "-c", "filter.a b.clean=", "-c", "filter.a b.required=false",
+  ]);
+  // a stock LFS command does not excuse another key of the same driver
+  assert.equal((filterOverrides(L(["local", "filter.lfs.process", "git-lfs filter-process"], ["local", "filter.lfs.clean", "/x"])) as string[]).length, 8);
+  assert.match((filterOverrides(L(["local", "filter.a=b.smudge", "/x"])) as { error: string }).error, /cannot switch off/);
+  // git without --show-scope: every driver counts as the repository's
+  assert.equal((filterOverrides("filter.mine.clean\n/x\0", false) as string[]).length, 8);
+  assert.equal(lsRemoteTarget("https://github.com/o/r.git", "/r"), "https://github.com/o/r.git");
+  assert.equal(lsRemoteTarget("git@github.com:o/r.git\n", "/r"), "git@github.com:o/r.git");
+  assert.equal(lsRemoteTarget("/srv/r.git", "/r"), "/srv/r.git");
+  assert.equal(lsRemoteTarget("../up", "/a/r"), resolve("/a/r", "../up"));
+  assert.equal(lsRemoteTarget("-u x", "/r"), null);
 });
 
 test("credentials are removed from remote addresses even when the password holds / or @", () => {

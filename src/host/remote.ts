@@ -1,12 +1,15 @@
 // Host side of the GitHub view: what a repository's remote (GitHub or any other) has, compared
 // with this computer, without downloading anything. `git ls-remote` asks the remote only for its
 // branch names and the commit each points at; commits are counted locally where both commits are
-// here. Git's own login (credential helper, SSH key) is used as it is; Helm never sees or stores
-// a credential, and git is never allowed to ask for one (it fails instead of waiting).
+// here. Git's own login from your global git config (credential helper, SSH key) is used as it is;
+// Helm never sees or stores a credential, and git is never allowed to ask for one (it fails
+// instead of waiting). ls-remote runs outside the repository, so the repository's own config
+// (which agents can write) cannot name a program for git to run while it talks to the remote.
 
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { gitEnv, SAFE_GIT_CONFIG, SAFE_REMOTE_CONFIG } from "./git-env.ts";
 
 export type RemoteBranchState = "synced" | "ahead" | "behind" | "diverged" | "newer" | "local" | "remote";
@@ -57,10 +60,28 @@ export function safeRemoteName(name: string): boolean {
   return /^[\w.\/-]{1,100}$/.test(name) && !name.startsWith("-") && !name.includes("..");
 }
 
+let neutral: string | null = null;
+/** An empty folder of Helm's own, outside every repository, where ls-remote runs. */
+function neutralDir(): string {
+  if (!neutral || !existsSync(neutral)) neutral = mkdtempSync(join(tmpdir(), "helm-git-"));
+  return neutral;
+}
+
+/** The address ls-remote is given: a relative folder is resolved against the repository; null when it could pass for an option. */
+export function lsRemoteTarget(url: string, repoDir: string): string | null {
+  const u = url.trim();
+  if (!u || u.startsWith("-")) return null;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(u) || /^[a-z][a-z0-9+.-]*::/i.test(u) || isAbsolute(u) || /^[^/\\]+:/.test(u)) return u;
+  return resolve(repoDir, u);
+}
+
 function git(cwd: string, args: string[], timeout = 20_000): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((res) => {
-    const safe = args[0] === "ls-remote" ? SAFE_REMOTE_CONFIG : SAFE_GIT_CONFIG;
-    execFile("git", [...safe, ...args], { cwd, timeout, maxBuffer: 8 * 1024 * 1024, env: ENV, encoding: "utf8" }, (err, stdout, stderr) => {
+    const remote = args[0] === "ls-remote";
+    const safe = remote ? SAFE_REMOTE_CONFIG : SAFE_GIT_CONFIG;
+    // GIT_CEILING_DIRECTORIES: git looks for a repository only in the folder itself
+    const env = remote ? { ...ENV, GIT_CEILING_DIRECTORIES: dirname(cwd) } : ENV;
+    execFile("git", [...safe, ...args], { cwd, timeout, maxBuffer: 8 * 1024 * 1024, env, encoding: "utf8" }, (err, stdout, stderr) => {
       const code = err ? (typeof (err as { code?: unknown }).code === "number" ? (err as { code: number }).code : 124) : 0;
       res({ code, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
     });
@@ -83,6 +104,12 @@ export function webUrl(url: string): string | null {
   const std = u.match(/^(?:https?|ssh|git):\/\/(?:[^@/]+@)?([\w.-]+)(?::\d+)?\/(.+?)(?:\.git)?\/?$/i);
   if (std) return `https://${std[1]}/${std[2]}`;
   return null;
+}
+
+/** Whether the repository's own config names a credential helper or askpass program (Helm does not use them). */
+async function ownLogin(dir: string): Promise<boolean> {
+  const q = await git(dir, ["config", "-z", "--show-scope", "--get-regexp", "^(credential\\..*helper|core\\.askpass)$"]);
+  return q.code === 0 && /(^|\0)(local|worktree)\0/.test(q.stdout);
 }
 
 /** Why the remote could not be read, in words (never with the address's credentials). */
@@ -123,11 +150,14 @@ export function createRemoteOps() {
       const u = await git(dir, ["remote", "get-url", remote]);
       out.url = u.code === 0 ? cleanUrl(u.stdout.trim()) : null;
       out.web = out.url ? webUrl(out.url) : null;
-      // the remote's branch list: names and commits only
-      // the stock upload-pack: a remote.<name>.uploadpack in the repository's config would run a program here for a local remote
-      const ls = await git(dir, ["ls-remote", "--upload-pack=git-upload-pack", "--symref", remote, "HEAD", "refs/heads/*"], 30_000);
+      const target = u.code === 0 ? lsRemoteTarget(u.stdout, dir) : null;
+      // the remote's branch list: names and commits only, asked from outside the repository with the stock upload-pack
+      const ls = target
+        ? await git(neutralDir(), ["ls-remote", "--upload-pack=git-upload-pack", "--symref", target, "HEAD", "refs/heads/*"], 30_000)
+        : { code: 1, stdout: "", stderr: `fatal: '${remote}' has no usable address` };
       if (ls.code !== 0) {
         out.error = why(ls.stderr, ls.code, repo, remote);
+        if (/asked for a login/.test(out.error) && (await ownLogin(dir))) out.error = `the remote asked for a login, and this repository names its own credential helper or askpass program in its git config. Helm checks remotes with your global git login only, because a repository's config can name any program; set the login up globally (for GitHub: gh auth setup-git), then check again`;
         out.branches = [...local].map(([name, l]) => ({ name, local: l.sha, remote: null, state: "local" as const, ahead: null, behind: null, at: l.at }));
         return out;
       }

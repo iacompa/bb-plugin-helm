@@ -13,7 +13,7 @@ import { scan, type ScanFile } from "../server/domain/slop/scan.ts";
 import { createScreenOps } from "./screens.ts";
 import { createDiskOps } from "./disk.ts";
 import { createRemoteOps } from "./remote.ts";
-import { gitEnv, SAFE_GIT_CONFIG } from "./git-env.ts";
+import { FILTER_QUERY, filterOverrides, gitEnv, SAFE_GIT_CONFIG } from "./git-env.ts";
 
 const GIT_ENV = gitEnv({
   // reads (git status while planning, evidence) must not refresh the index of the
@@ -62,7 +62,25 @@ function run(cmd: string, args: string[], opts: { cwd?: string; timeoutMs?: numb
   });
 }
 
-const git = (repo: string, args: string[], timeoutMs?: number, maxBuffer?: number) => run("git", [...SAFE_GIT_CONFIG, ...args], { cwd: repo, timeoutMs, maxBuffer });
+// Commands that check files out or compare them with the index run filter drivers.
+const FILTERING = new Set(["status", "add", "commit", "worktree"]);
+
+async function git(repo: string, args: string[], timeoutMs?: number, maxBuffer?: number): Promise<RunResult> {
+  let off: string[] = [];
+  if (FILTERING.has(args[0])) {
+    // exit 1: no filter configured; anything else (git before 2.26) lists without scopes
+    let q = await run("git", [...SAFE_GIT_CONFIG, ...FILTER_QUERY], { cwd: repo });
+    let scoped = true;
+    if (q.code > 1) {
+      q = await run("git", [...SAFE_GIT_CONFIG, ...FILTER_QUERY.filter((a) => a !== "--show-scope")], { cwd: repo });
+      scoped = false;
+    }
+    const o = filterOverrides(q.code === 0 ? q.stdout : "", scoped);
+    if (!Array.isArray(o)) return { code: 1, stdout: "", stderr: o.error };
+    off = o;
+  }
+  return run("git", [...SAFE_GIT_CONFIG, ...off, ...args], { cwd: repo, timeoutMs, maxBuffer });
+}
 
 /** Refs from agents are untrusted: allow only ordinary ref/sha characters, never an option. */
 export function safeRef(ref: string): string | null {
