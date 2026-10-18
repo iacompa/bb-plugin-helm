@@ -68,7 +68,7 @@ export class FakeGit {
   resolve(repoOrWt: string, ref: string): string | null {
     const repo = this.repoFor(repoOrWt);
     if (!repo) return null;
-    const r = ref.replace(/\^\{commit\}$/, "");
+    const r = ref.replace(/\^\{commit\}$/, "").replace(/^refs\/heads\//, "");
     if (r === "HEAD") {
       const w = this.wtFor(repoOrWt)?.wt ?? this.wts.get(repo.root);
       return w ? this.head(w) : null;
@@ -114,6 +114,30 @@ export class FakeGit {
     repo.refs.set(branch, base);
     this.wts.set(path, { path, root, branch, detached: null, work: new Map(repo.commits.get(base)!.tree) });
     return { path, branch };
+  }
+  /** `git worktree add <path> <branch>` (the branch made from base when missing). */
+  addWorktree(root: string, path: string, branch: string, base: string): { path: string; branch: string; created: boolean } {
+    const repo = this.repos.get(root);
+    if (!repo) throw new Error(`no repo at ${root}`);
+    const here = this.wts.get(path);
+    if (here) {
+      if (here.branch !== branch) throw new Error(`${path} is a worktree on ${here.branch}, not ${branch}.`);
+      return { path, branch, created: false };
+    }
+    const busy = [...this.wts.values()].find((w) => w.root === root && w.branch === branch);
+    if (busy) throw new Error(`branch ${branch} is checked out in ${busy.path}; only one worktree can hold it.`);
+    if (!repo.refs.has(branch)) {
+      const b = this.resolve(root, base);
+      if (!b) throw new Error(`base ${base} not found`);
+      repo.refs.set(branch, b);
+    }
+    const sha = repo.refs.get(branch)!;
+    this.wts.set(path, { path, root, branch, detached: null, work: new Map(repo.commits.get(sha)!.tree) });
+    return { path, branch, created: true };
+  }
+  /** `git worktree remove` (what BB does when an environment is deleted). */
+  removeWorktree(path: string): void {
+    this.wts.delete(path);
   }
   write(wtPath: string, rel: string, content: string): void {
     const w = this.wts.get(wtPath);
@@ -188,6 +212,14 @@ export class FakeGit {
   // ───────── HostOps ─────────
   hostOps(home = "/home/sim"): HostOps {
     return {
+      ensureWorktree: async ({ repo, path, branch, base }) => {
+        const r = this.addWorktree(repo, path, branch, base);
+        return { ...r, head: this.head(this.wts.get(path)!) };
+      },
+      worktrees: async ({ repo }) => {
+        const list = [...this.wts.values()].filter((w) => w.root === repo).sort((a, b) => Number(b.path === repo) - Number(a.path === repo));
+        return { worktrees: list.map((w) => ({ path: w.path, branch: w.detached ? null : w.branch, head: this.head(w), main: w.path === repo, dirty: this.statusOf(w).filter((p) => !p.startsWith("reports/")).length, missing: false })) };
+      },
       ensureRepo: async ({ path, files, message }) => {
         let created = false;
         if (!this.repos.has(path)) {

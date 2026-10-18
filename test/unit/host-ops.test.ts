@@ -182,3 +182,34 @@ test("inspectPath never rewrites the index of the human's repository (no optiona
   execFileSync("git", ["status", "--porcelain"], { cwd: dir, env: { ...process.env, GIT_OPTIONAL_LOCKS: "1" } });
   assert.notEqual(statSync(join(dir, ".git", "index")).mtimeMs, before, "control: plain git status refreshes the index");
 });
+
+test("ensureWorktree: one work worktree beside the repository on its branch; idempotent; refuses a busy branch or a full folder; worktrees lists them", async () => {
+  const root = tmp();
+  const repo = join(root, "app");
+  await ops.ensureRepo({ path: repo, files: [{ path: "README.md", content: "# App\n" }], message: "init" });
+  const work = join(root, ".helm-work", "app");
+  const a = await ops.ensureWorktree({ repo, path: work, branch: "helm/run/app", base: "HEAD" });
+  assert.equal(a.created, true);
+  assert.equal(a.branch, "helm/run/app");
+  assert.match(a.head!, /^[0-9a-f]{40}$/);
+  const b = await ops.ensureWorktree({ repo, path: work, branch: "helm/run/app", base: "HEAD" });
+  assert.equal(b.created, false);
+  assert.equal(b.path, a.path);
+  // the same folder on another branch, a branch held elsewhere, a folder with files: refused
+  await assert.rejects(ops.ensureWorktree({ repo, path: work, branch: "other", base: "HEAD" }), /is a worktree on helm\/run\/app/);
+  await assert.rejects(ops.ensureWorktree({ repo, path: join(root, "second"), branch: "helm/run/app", base: "HEAD" }), /checked out in/);
+  mkdirSync(join(root, "full"));
+  writeFileSync(join(root, "full", "x.txt"), "x");
+  await assert.rejects(ops.ensureWorktree({ repo, path: join(root, "full"), branch: "fresh", base: "HEAD" }), /exists and is not empty/);
+  await assert.rejects(ops.ensureWorktree({ repo, path: join(root, "w"), branch: "bad..name", base: "HEAD" }), /refusing branch/);
+
+  writeFileSync(join(a.path, "README.md"), "# changed\n");
+  const { worktrees } = await ops.worktrees({ repo });
+  assert.equal(worktrees.length, 2, "the checkout and the work worktree");
+  assert.equal(worktrees[0].main, true);
+  assert.equal(worktrees[0].branch, "main");
+  assert.equal(worktrees[1].path, a.path);
+  assert.equal(worktrees[1].branch, "helm/run/app");
+  assert.equal(worktrees[1].dirty, 1);
+  assert.equal((await ops.worktrees({ repo, status: false })).worktrees[1].dirty, 0, "status skipped");
+});

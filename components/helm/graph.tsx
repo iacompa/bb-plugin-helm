@@ -44,8 +44,10 @@ function nowFallback(n: SnapNode): string {
   }
 }
 
+const SIDE_ORDER = ["planner", "git", "custom"];
+
 function agentTitle(n: SnapNode): string {
-  if (n.role === "planner" || n.role === "custom") return n.label;
+  if (n.role === "planner" || n.role === "git" || n.role === "custom") return n.label;
   if (n.role === "platform" && n.platform) return `${PLAT[n.platform] ?? n.platform} builder`;
   return ROLE_LABEL[n.role] ?? n.label;
 }
@@ -191,7 +193,12 @@ export function GraphView({ active }: { active: boolean }) {
       collapsed: ui.collapsed,
       expanded: ui.expanded,
       members: der.members,
-      side: data.nodeOrder.map((id) => data.nodes[id]).filter((n) => n.role === "planner" || (n.role === "custom" && !n.appId && n.status !== "done")).sort((a, b) => Number(b.role === "planner") - Number(a.role === "planner")).map((n) => ({ id: n.id, parentId: n.role === "planner" ? null : n.parentId })),
+      // free-standing beside the Orchestrator: the Planner, the Git agent, then custom agents with no app
+      side: data.nodeOrder
+        .map((id) => data.nodes[id])
+        .filter((n) => n.role === "planner" || n.role === "git" || (n.role === "custom" && !n.appId && n.status !== "done"))
+        .sort((a, b) => SIDE_ORDER.indexOf(a.role) - SIDE_ORDER.indexOf(b.role))
+        .map((n) => ({ id: n.id, parentId: n.role === "custom" ? n.parentId : null })),
       ghosts: ghosts.map((g) => GHOST + g.threadId),
       ghostLabel: ghosts.length ? `Outside this run · ${plural(ghosts.length, "thread")} · read-only` : undefined,
     });

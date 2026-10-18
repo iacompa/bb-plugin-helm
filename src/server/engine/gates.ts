@@ -494,7 +494,8 @@ export async function enterGate(e: Engine, runId: string, appId: string, gate: "
       const prior = e.repo.findings(runId, appId).filter((f) => f.gate === gate && f.status !== "open" && f.status !== "waived").map((f) => f.id);
       const open = e.repo.findings(runId, appId).filter((f) => f.gate === gate && f.status === "open").map((f) => `${f.id} ${f.path}:${f.line}`);
       e.repo.updateNode(runId, g.id, { status: "running", lastActivityAt: e.now(), nudgedAt: null });
-      e.sendFromHelm(runId, g.id, `Re-check commit ${head}: run \`git checkout --detach ${head}\`, verify the earlier findings first${open.length ? ` (${open.join(", ")})` : prior.length ? ` (${prior.join(", ")})` : ""}, then review the new diff and re-run every check through the wrapper. Answer with one helm_verdict.${scanner ? `\nScanner findings at this commit:\n${scanner}` : ""}`, { key: `recheck:${runId}:${g.id}:${head}`, bypassPause: false });
+      const shared = e.workTree(runId, appId);
+      e.sendFromHelm(runId, g.id, `Re-check commit ${head}: ${shared ? `confirm \`git rev-parse HEAD\` is ${head} in the shared work worktree (never check out there)` : `run \`git checkout --detach ${head}\``}, verify the earlier findings first${open.length ? ` (${open.join(", ")})` : prior.length ? ` (${prior.join(", ")})` : ""}, then review the new diff and re-run every check through the wrapper. Answer with one helm_verdict.${scanner ? `\nScanner findings at this commit:\n${scanner}` : ""}`, { key: `recheck:${runId}:${g.id}:${head}`, bypassPause: false });
     }
     e.repo.event(runId, g.id, "gate", `${gate === "review" ? "Reviewer" : "Slop Hunter"} engaged on ${head.slice(0, 9)}`);
   });
@@ -677,6 +678,13 @@ export async function signoff(e: Engine, runId: string, appId: string, d: Direct
     for (const id of order) e.repo.updateNode(runId, id, { status: "done", endedAt: e.now() });
     const withThread = order.filter((id) => e.repo.getNode(runId, id)?.threadId);
     if (withThread.length) e.repo.enqueue({ id: e.oid(), runId, kind: "archive", nodeId: null, payload: { nodeIds: withThread }, idemKey: `archive:${runId}:${appId}:${d.id}` });
+    // the Git agent sends the signed-off work where the settings say
+    const git = e.repo.getNode(runId, "git");
+    if (git && git.status !== "done") {
+      const branch = e.repo.appExtra(runId, appId).integrationBranch;
+      const what = e.settings.gitOnSignoff === "merge-push" ? `merge ${branch ?? "its Helm branch"} into its main branch${app.userBranch ? ` (${app.userBranch})` : ""} and push main and ${branch ?? "the branch"} to its remote` : e.settings.gitOnSignoff === "push" ? `push ${branch ?? "its Helm branch"} to its remote` : "record where its work is (send nothing)";
+      e.sendFromHelm(runId, git.id, `Helm: the human signed off ${app.name} (${appId}). Repository ${app.repoPath ?? "?"}, integration branch ${branch ?? "?"}${e.workTree(runId, appId) ? `, work worktree ${e.workTree(runId, appId)}` : ""}. Settings say: ${what}. If it has no remote, tell the human the exact command to add one instead of guessing. Record the result in GIT-NOTES.md and report with helm_report.`, { key: `signoff-git:${runId}:${appId}:${d.id}` });
+    }
   });
   e.outbox.kick();
   e.proposeNextWave(runId);

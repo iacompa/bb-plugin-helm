@@ -7,7 +7,8 @@ import type { Autonomy, DirectiveInfo, ModelRef, NodeInfo, PermissionMode, Portf
 import { MODEL_REASONING, NO_MODEL, PERMISSION_KEYS, modelSettingText, type SettingsWriter } from "./settings.ts";
 import { SLOT_IDS, SEED_PRESETS, modelName, validateRef } from "./domain/models.ts";
 import { ORCH_ID } from "./domain/topology.ts";
-import { ensurePlanner, nameOf, renameNode, retireAgent } from "./engine/custom.ts";
+import { ensureGitAgent, ensurePlanner, nameOf, renameNode, retireAgent } from "./engine/custom.ts";
+import { appWorktrees, consolidate, worktreesText } from "./engine/worktrees.ts";
 import { createDirective, previewDirective, resolveNeed, type DirectiveInput, type NeedResolution } from "./engine/direct.ts";
 import { HelmError, autonomyText, type Engine } from "./engine/engine.ts";
 import { reconcile, watchdog } from "./engine/events.ts";
@@ -144,7 +145,7 @@ export class HelmService {
 
   /** The Planner, the Orchestrator and every custom agent, with names and who designed them. */
   agents(runId: string) {
-    const nodes = this.repo.listNodes(runId).filter((n) => n.role === "planner" || n.role === "orch" || n.role === "custom");
+    const nodes = this.repo.listNodes(runId).filter((n) => n.role === "planner" || n.role === "git" || n.role === "orch" || n.role === "custom");
     return nodes.map((n) => ({ id: n.id, label: this.engine.label(n), role: n.role, name: nameOf(this.engine, n), title: n.title, status: n.status, parent: n.parentId, threadId: n.threadId, mission: n.charter, wakeOn: n.wakeOn, createdBy: n.createdBy }));
   }
 
@@ -208,29 +209,31 @@ export class HelmService {
     return this.permissions();
   }
 
-  /** The default Planner and Orchestrator models (Settings), as refs and as setting text. */
+  /** The default Planner, Orchestrator and Git agent models (Settings), as refs and as setting text. */
   defaultModels() {
     const d = this.engine.settings.defaultModels;
-    return { planner: d.planner, orchestrator: d.orchestrator, text: { planner: modelSettingText(d.planner), orchestrator: modelSettingText(d.orchestrator) } };
+    return { planner: d.planner, orchestrator: d.orchestrator, git: d.git, text: { planner: modelSettingText(d.planner), orchestrator: modelSettingText(d.orchestrator), git: modelSettingText(d.git) } };
   }
 
   /**
-   * Set the default Planner and/or Orchestrator model (null clears it). New runs use them for an
-   * empty role; with `applyToPlanners`, every live run's Planner also moves to the new model now.
+   * Set the default Planner, Orchestrator and/or Git agent model (null clears it). New runs use them
+   * for an empty role; with `applyToPlanners`, every live run's Planner (and Git agent, for a Git
+   * default) also moves to the new model now.
    */
-  async setDefaultModels(input: { planner?: ModelRef | null; orchestrator?: ModelRef | null; applyToPlanners?: boolean }) {
+  async setDefaultModels(input: { planner?: ModelRef | null; orchestrator?: ModelRef | null; git?: ModelRef | null; applyToPlanners?: boolean }) {
     if (!this.writeSettings) throw new HelmError("Settings cannot be written here.", "bad_state");
     const cat = await this.engine.catalog(null);
     const values: Record<string, string> = {};
-    for (const key of ["planner", "orchestrator"] as const) {
+    const LABEL = { planner: "Planner", orchestrator: "Orchestrator", git: "Git agent" } as const;
+    for (const key of ["planner", "orchestrator", "git"] as const) {
       const ref = input[key];
       if (ref === undefined) continue;
       if (ref) {
         const p = validateRef(cat, ref);
-        if (p) throw new HelmError(`${key === "planner" ? "Planner" : "Orchestrator"}: ${p.message}`, "invalid_value");
+        if (p) throw new HelmError(`${LABEL[key]}: ${p.message}`, "invalid_value");
       }
-      values[key === "planner" ? "plannerModel" : "orchestratorModel"] = ref ? `${ref.providerId}/${ref.modelId}` : NO_MODEL;
-      values[key === "planner" ? "plannerReasoning" : "orchestratorReasoning"] = ref?.reasoning ?? MODEL_REASONING;
+      values[`${key}Model`] = ref ? `${ref.providerId}/${ref.modelId}` : NO_MODEL;
+      values[`${key}Reasoning`] = ref?.reasoning ?? MODEL_REASONING;
     }
     if (Object.keys(values).length) {
       try {
@@ -241,17 +244,40 @@ export class HelmService {
       }
     }
     const moved: string[] = [];
-    if (input.applyToPlanners && input.planner) {
+    for (const role of ["planner", "git"] as const) {
+      const ref = input[role];
+      if (!input.applyToPlanners || !ref) continue;
       for (const run of this.repo.listRuns().filter((r) => r.status === "running" || r.status === "paused")) {
-        const p = this.repo.getNode(run.id, "planner");
+        const p = this.repo.getNode(run.id, role);
         if (!p || p.status === "done") continue;
-        const want = modelSettingText(input.planner);
-        if (modelSettingText(p.model) === want && modelSettingText(run.slots.planner) === want) continue;
-        await this.changeSlots(run.id, { planner: input.planner }, "all");
-        moved.push(run.name);
+        const want = modelSettingText(ref);
+        if (modelSettingText(p.model) === want && modelSettingText(run.slots[role]) === want) continue;
+        await this.changeSlots(run.id, { [role]: ref }, "all");
+        if (!moved.includes(run.name)) moved.push(run.name);
       }
     }
     return { ...this.defaultModels(), moved };
+  }
+
+  /** Every app's worktrees in a run (the rule is two per app), as text and data. */
+  async worktrees(runId: string, app?: string) {
+    this.engine.run(runId);
+    const appId = app ? this.appFor(runId, app).id : undefined;
+    const list = await appWorktrees(this.engine, runId, { appId });
+    return { apps: list, text: worktreesText(list) };
+  }
+
+  /** Bring one app to two worktrees (the human asked; refuses while anything could be lost). */
+  async consolidate(runId: string, app: string) {
+    return { text: await consolidate(this.engine, runId, this.appFor(runId, app).id, "the human") };
+  }
+
+  /** Add the Git agent to a running run that has none (runs started before it existed). */
+  async startGitAgent(runId: string) {
+    const run = this.engine.run(runId);
+    if (run.status !== "running") throw new HelmError(`The run is ${run.status}; the Git agent starts with a running run.`, "bad_state");
+    const n = await ensureGitAgent(this.engine, runId, { queue: true });
+    return { id: n.id, label: this.engine.label(n), status: n.status, threadId: n.threadId };
   }
 
   private screensView: ScreensView | null = null;
@@ -267,6 +293,7 @@ export class HelmService {
     // runs started before the Planner existed get one (it introduces itself once, then idles)
     const run = this.engine.run(runId);
     if (run.status === "running" && !this.repo.getNode(runId, "planner")) await ensurePlanner(this.engine, runId, { queue: true });
+    if (run.status === "running" && !this.repo.getNode(runId, "git")) await ensureGitAgent(this.engine, runId, { queue: true });
     return refreshRun(this.engine, runId);
   }
 

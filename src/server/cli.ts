@@ -411,11 +411,12 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
           }),
       }),
       defaults: cliCommand({
-        summary: "Show or set the default Planner and Orchestrator models (new runs use them when a run leaves those roles empty)",
+        summary: "Show or set the default Planner, Orchestrator and Git agent models (new runs use them when a run leaves those roles empty)",
         options: {
           planner: { type: "string", description: "provider/model:reasoning, or none to clear" },
           orchestrator: { type: "string", description: "provider/model:reasoning, or none to clear" },
-          apply: { type: "boolean", description: "Also move every running run's Planner to the new Planner model now" },
+          git: { type: "string", description: "provider/model:reasoning for the Git agent, or none to clear" },
+          apply: { type: "boolean", description: "Also move every running run's Planner / Git agent to the new model now" },
           json: JSON_OPT,
         },
         run: (i) =>
@@ -429,10 +430,42 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             };
             const planner = await parse(i.options.planner);
             const orchestrator = await parse(i.options.orchestrator);
-            const r = planner === undefined && orchestrator === undefined ? { ...svc.defaultModels(), moved: [] as string[] } : await svc.setDefaultModels({ planner, orchestrator, applyToPlanners: !!i.options.apply });
-            const lines = [`Planner: ${r.text.planner || "not set (uses the run's Orchestrator model)"}`, `Orchestrator: ${r.text.orchestrator || "not set (choose it in each new run)"}`];
-            if (r.moved.length) lines.push(`Moved the Planner now in: ${r.moved.join(", ")}`);
+            const git = await parse(i.options.git);
+            const r = planner === undefined && orchestrator === undefined && git === undefined ? { ...svc.defaultModels(), moved: [] as string[] } : await svc.setDefaultModels({ planner, orchestrator, git, applyToPlanners: !!i.options.apply });
+            const lines = [`Planner: ${r.text.planner || "not set (uses the run's Orchestrator model)"}`, `Orchestrator: ${r.text.orchestrator || "not set (choose it in each new run)"}`, `Git agent: ${r.text.git || "not set (uses the run's Orchestrator model)"}`];
+            if (r.moved.length) lines.push(`Moved now in: ${r.moved.join(", ")}`);
             return out(i.options.json, r, lines.join("\n"));
+          }),
+      }),
+      worktrees: cliCommand({
+        summary: "Every app's worktrees (the rule is two: your checkout and one shared work worktree); --consolidate <app> brings an app back to two",
+        options: {
+          run: RUN,
+          app: { type: "string", description: "Only this app (name or id)" },
+          consolidate: { type: "string", description: "App to consolidate: refuses, changing nothing, while any extra worktree has uncommitted or unmerged work" },
+          yes: { type: "boolean", description: "Confirm --consolidate (its agents restart in the shared worktree)" },
+          json: JSON_OPT,
+        },
+        run: (i) =>
+          guard(async () => {
+            const run = runOf(i.options.run);
+            if (i.options.consolidate) {
+              if (!i.options.yes) throw new PluginCliError(`This stops ${i.options.consolidate}'s agents, removes their own worktrees (only when everything there is committed and merged) and restarts them in the shared work worktree. Re-run with --yes.`, { code: "confirm" });
+              const r = await svc.consolidate(run.id, i.options.consolidate);
+              return out(i.options.json, r, r.text);
+            }
+            const r = await svc.worktrees(run.id, i.options.app);
+            return out(i.options.json, r, r.text);
+          }),
+      }),
+      git: cliCommand({
+        summary: "Start the run's Git agent if it has none (runs started before it existed); talk to it in its thread",
+        options: { run: RUN, json: JSON_OPT },
+        run: (i) =>
+          guard(async () => {
+            const run = runOf(i.options.run);
+            const r = await svc.startGitAgent(run.id);
+            return out(i.options.json, r, `${r.label} is ${r.status}${r.threadId ? ` (thread ${r.threadId})` : ""}. Talk to it in its thread: tell it where to send work (GitHub, a folder on this Mac or an external disk).`);
           }),
       }),
       screens: cliCommand({

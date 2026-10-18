@@ -4,7 +4,7 @@
 
 import { execFile, spawn } from "node:child_process";
 import { access, chmod, constants as fsc, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { homedir, platform, tmpdir } from "node:os";
 import type { HostOps } from "../shared/host-contract.ts";
@@ -163,6 +163,21 @@ async function versionOf(cmd: string, args: string[], cwd?: string): Promise<str
   return (r.stdout || r.stderr).trim().split("\n")[0]?.slice(0, 120) || null;
 }
 
+/** `git worktree list --porcelain`: the main checkout first. */
+async function listWorktrees(root: string): Promise<Array<{ path: string; branch: string | null; head: string | null }>> {
+  const r = await git(root, ["worktree", "list", "--porcelain"]);
+  if (r.code !== 0) throw new Error(`git worktree list failed: ${r.stderr.trim().slice(0, 300)}`);
+  const out: Array<{ path: string; branch: string | null; head: string | null }> = [];
+  for (const block of r.stdout.split("\n\n")) {
+    const lines = block.split("\n");
+    const p = lines.find((l) => l.startsWith("worktree "))?.slice(9);
+    if (!p) continue;
+    const br = lines.find((l) => l.startsWith("branch "))?.slice(7).replace(/^refs\/heads\//, "") ?? null;
+    out.push({ path: p, branch: br, head: lines.find((l) => l.startsWith("HEAD "))?.slice(5) ?? null });
+  }
+  return out;
+}
+
 export function createHostOps(): HostOps {
   return {
     ...createScreenOps(),
@@ -280,6 +295,42 @@ export function createHostOps(): HostOps {
       } finally {
         await rm(dir, { recursive: true, force: true }).catch(() => undefined);
       }
+    },
+
+    async ensureWorktree({ repo, path, branch, base }) {
+      const root = resolve(repo);
+      const wt = resolve(path);
+      const b = safeBranchName(branch);
+      const from = safeRef(base);
+      if (!b || !from) throw new Error(`refusing branch ${JSON.stringify(branch)} or base ${JSON.stringify(base)}`);
+      const list = await listWorktrees(root);
+      const here = list.find((w) => w.path === wt || w.path === (existsSync(wt) ? realpathSync(wt) : wt));
+      if (here) {
+        if (here.branch !== b) throw new Error(`${wt} is a worktree on ${here.branch ?? "a detached HEAD"}, not ${b}.`);
+        return { path: here.path, branch: b, head: here.head, created: false };
+      }
+      const busy = list.find((w) => w.branch === b);
+      if (busy) throw new Error(`branch ${b} is checked out in ${busy.path}; only one worktree can hold it.`);
+      if (existsSync(wt) && (await readdir(wt)).filter((n) => n !== ".DS_Store").length) throw new Error(`${wt} exists and is not empty.`);
+      if (!(await revParse(root, `refs/heads/${b}`))) {
+        const mk = await git(root, ["branch", b, from]);
+        if (mk.code !== 0) throw new Error(`git branch failed: ${mk.stderr.trim().slice(0, 300)}`);
+      }
+      await mkdir(dirname(wt), { recursive: true });
+      const add = await git(root, ["worktree", "add", wt, b], 120_000);
+      if (add.code !== 0) throw new Error(`git worktree add failed: ${add.stderr.trim().slice(0, 300)}`);
+      return { path: realpathSync(wt), branch: b, head: await revParse(wt, "HEAD"), created: true };
+    },
+
+    async worktrees({ repo, status }) {
+      const list = await listWorktrees(resolve(repo));
+      const out = [];
+      for (const [i, w] of list.slice(0, 100).entries()) {
+        const missing = !existsSync(w.path);
+        const s = missing || status === false ? null : await git(w.path, ["status", "--porcelain", "--untracked-files=no"], 60_000);
+        out.push({ ...w, main: i === 0, missing, dirty: s && s.code === 0 ? s.stdout.split("\n").filter(Boolean).length : 0 });
+      }
+      return { worktrees: out };
     },
 
     async revParse({ repo, ref }) {

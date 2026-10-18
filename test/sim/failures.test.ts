@@ -5,6 +5,7 @@ import { watchdog } from "../../src/server/engine/events.ts";
 import { createDirective } from "../../src/server/engine/direct.ts";
 import type { HelmThreadMeta } from "../../src/server/bb/port.ts";
 import type { Profile } from "../../src/server/bb/sim-agents.ts";
+import { nodeWorktree } from "../../src/server/engine/gates.ts";
 
 const one = (name = "Alpha", platforms = ["ios"]) => ({ apps: [{ name, tagline: "t", platforms }], groups: [], assumptions: [], questions: [] });
 const two = { apps: [{ name: "Alpha", tagline: "a", platforms: ["ios"] }, { name: "Beta", tagline: "b", platforms: ["mac"] }], groups: [], assumptions: [], questions: [] };
@@ -218,7 +219,7 @@ test("retrying a node whose thread was archived outside Helm respawns it with a 
   const t = h.sim.threads.get(after.threadId!)!;
   assert.match(t.firstPrompt ?? "", /Hand-over from the previous holder/);
   assert.match(t.firstPrompt ?? "", /tokens and button component committed/);
-  assert.notEqual(after.branch, ui.branch, "its own new branch was recorded");
+  assert.equal(await nodeWorktree(h.engine, after), h.engine.workTree(runId, h.repo.listApps(runId)[0].id), "it continues in the app's shared work worktree");
 
   // the lead: archived outside Helm, retried; its replacement starts from the integration branch
   const app = h.repo.listApps(runId)[0];
@@ -232,7 +233,7 @@ test("retrying a node whose thread was archived outside Helm respawns it with a 
   const lead2 = h.repo.getNode(runId, lead.id)!;
   assert.notEqual(lead2.threadId, lead.threadId);
   const now = h.repo.appExtra(runId, app.id).integrationBranch!;
-  assert.notEqual(now, before, "the replacement's branch is the integration branch now");
+  assert.equal(now, before, "the replacement continues on the same integration branch, in the same worktree");
   const repo = h.sim.git.repos.get([...h.sim.git.repos.keys()].find((k) => k.endsWith("/alpha"))!)!;
   assert.ok(h.sim.git.isAncestorSha(repo, headBefore!, repo.refs.get(now)!), "it continues from the old integration head");
 });

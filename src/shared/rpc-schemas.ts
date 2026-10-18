@@ -49,7 +49,11 @@ export const RPC_SCHEMAS = {
   run_readiness: { input: Run, output: Any },
   settings_permissions: { input: z.object({}), output: Any },
   settings_models: { input: z.object({}), output: Any },
-  settings_setModels: { input: z.object({ planner: ModelRefZ.nullable().optional(), orchestrator: ModelRefZ.nullable().optional(), applyToPlanners: z.boolean().optional() }), output: Any },
+  settings_setModels: { input: z.object({ planner: ModelRefZ.nullable().optional(), orchestrator: ModelRefZ.nullable().optional(), git: ModelRefZ.nullable().optional(), applyToPlanners: z.boolean().optional() }), output: Any },
+  /** Every app's worktrees (the rule is two per app). */
+  worktrees_list: { input: z.object({ runId: Id, app: z.string().max(80).optional() }), output: Any },
+  /** Create (and start) the run's Git agent if needed; returns its thread. */
+  git_open: { input: z.object({ runId: Id }), output: Any },
   screens_list: { input: z.object({ runId: Id, appId: z.string().max(80).nullish(), fresh: z.boolean().optional() }), output: Any },
   screens_image: { input: z.object({ runId: Id, appId: z.string().min(1).max(80), path: z.string().min(1).max(1500) }), output: Any },
   settings_setPermissions: { input: z.object({ modes: z.record(z.enum(["orchestrator", "manager", "lead", "specialist", "gate"]), z.enum(["auto", "accept-edits", "full"])).optional(), approvePrompts: z.enum(["supervisor", "human"]).optional() }), output: Any },

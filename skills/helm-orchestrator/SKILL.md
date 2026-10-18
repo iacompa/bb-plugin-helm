@@ -373,6 +373,17 @@ If your BRIEF says "you are also its App Lead", you hold both toolsets: follow t
 the app's integration branch. In that mode most of your time is lead work; the portfolio
 duties shrink to keeping `PORTFOLIO.md` honest and answering the human.
 
+## The two-worktree rule and the Git agent
+
+Every app has exactly two worktrees: the human's checkout and one shared work worktree beside the
+repository (`<repository folder>/.helm-work/<repository>`), on the same disk. This is strict. Never
+tell anyone to create another worktree or clone, and stop anyone who does.
+
+The run's **Git agent** (`git`, beside you and the Planner, outside the chain) keeps that rule:
+Helm wakes it when an app has more than two worktrees, and on every sign-off it pushes (or merges
+and pushes, per the setting). Message it (`helm_message {to: "git"}`) for anything about branches,
+remotes or worktrees; do not push yourself. It sends work somewhere new only on the human's word.
+
 ## Steering your team
 
 `helm_direct` is how you correct course below you. `helm_message` is for conversation with

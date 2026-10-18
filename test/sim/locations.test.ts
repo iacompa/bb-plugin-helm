@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHarness, CHEAP } from "../helpers/harness.ts";
 import type { Portfolio } from "../../src/shared/types.ts";
+import { nodeWorktree } from "../../src/server/engine/gates.ts";
 
 const app = (name: string, extra: Record<string, unknown> = {}) => ({ name, tagline: `${name} app`, platforms: ["ios" as const], shape: "lean" as const, ...extra });
 const pf = (...apps: ReturnType<typeof app>[]): Portfolio => ({ apps, groups: [], assumptions: [], questions: [] }) as unknown as Portfolio;
@@ -41,16 +42,21 @@ test("an existing repository is adopted on a Helm branch; the human's checkout, 
   assert.equal(checkout.branch, "main");
   assert.equal(checkout.work.get("WIP.txt"), "half-done work, not committed");
   assert.equal(checkout.work.has(".helm/checks.json"), false, "nothing was written into the human's checkout");
-  // no bootstrap commit: Helm's branch is exactly the human's commit, and nothing of Helm's is in the repository
-  assert.equal(git.resolve(repo, tide.helmBranch!), humanHead, "the Helm branch points at the human's HEAD: no Helm commit");
-  const helmTree = git.treeAt(repo, tide.helmBranch!)!;
-  assert.equal([...helmTree.keys()].some((k) => k.startsWith(".helm/") || k === "BRIEF.md"), false);
+  // no bootstrap commit: Helm's branch starts at the human's commit, and nothing of Helm's is in the repository
+  assert.ok(git.isAncestorSha(r0, humanHead, git.resolve(repo, tide.helmBranch!)!), "the Helm branch starts at the human's HEAD");
+  // Helm itself added no commit: every commit after the human's is an agent's work
+  const msgs: string[] = [];
+  for (let c = git.resolve(repo, tide.helmBranch!); c && c !== humanHead; c = r0.commits.get(c)!.parents[0] ?? null) msgs.push(r0.commits.get(c)!.msg);
+  assert.equal(msgs.some((m) => m.startsWith("Helm: start")), false, msgs.join(" | "));
   // the wrapper lives in Helm's Studio instead
   const studio = h.engine.studioPath(h.engine.run(runId));
   assert.ok(h.sim.git.treeAt(studio, "HEAD")?.has("bin/run-check.sh"), "Studio has the wrapper");
-  // the lead's integration branch descends from the Helm branch
+  // two worktrees: the human's checkout and one shared work worktree beside it, on the Helm branch
   const integration = h.repo.appExtra(runId, "tide").integrationBranch!;
-  assert.ok(git.isAncestorSha(r0, git.resolve(repo, tide.helmBranch!)!, git.resolve(repo, integration)!));
+  assert.equal(integration, tide.helmBranch, "the Helm branch is the integration branch");
+  const wts = [...git.wts.values()].filter((w) => w.root === repo).map((w) => w.path);
+  assert.deepEqual(wts.sort(), [repo, "/disk/work/.helm-work/tide"].sort(), "exactly two worktrees for the app");
+  for (const n of h.repo.listNodes(runId).filter((x) => x.appId === "tide" && x.threadId)) assert.equal(await nodeWorktree(h.engine, n), "/disk/work/.helm-work/tide", `${n.id} works in the shared worktree`);
   // the agents were told where they are
   const brief = h.engine.buildBrief(h.engine.run(runId), h.repo.getNode(runId, "tide.lead")!);
   assert.match(brief, /existing repository/);

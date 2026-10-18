@@ -19,16 +19,19 @@ export interface HelmSettings {
   /** Who answers an agent's BB permission prompt: its supervisor (escalating only what the human must decide) or the human. */
   approvePrompts: "supervisor" | "human";
   /** Default personal names for new runs; any agent can be renamed later. */
-  names: { planner: string; orchestrator: string };
-  /** Default models (settings plannerModel, orchestratorModel): used when a run's slot is empty. */
-  defaultModels: { planner: ModelRef | null; orchestrator: ModelRef | null };
+  names: { planner: string; orchestrator: string; git: string };
+  /** Default models (settings plannerModel, orchestratorModel, gitModel): used when a run's slot is empty. */
+  defaultModels: { planner: ModelRef | null; orchestrator: ModelRef | null; git: ModelRef | null };
+  /** What the Git agent does when the human signs a project off. */
+  gitOnSignoff: "push" | "merge-push" | "report";
 }
 
 export const DEFAULT_SETTINGS: HelmSettings = {
   limits: LIMIT_DEFAULTS,
-  permissionMode: { orchestrator: "auto", manager: "auto", lead: "auto", specialist: "auto", gate: "auto", planner: "auto", custom: "auto" },
-  names: { planner: "Amer", orchestrator: "Gestra" },
-  defaultModels: { planner: null, orchestrator: null },
+  permissionMode: { orchestrator: "auto", manager: "auto", lead: "auto", specialist: "auto", gate: "auto", planner: "auto", git: "auto", custom: "auto" },
+  names: { planner: "Amer", orchestrator: "Gestra", git: "Git Pusher" },
+  defaultModels: { planner: null, orchestrator: null, git: null },
+  gitOnSignoff: "push",
   showLeadsInSidebar: false,
   appsRoot: "~/Projects/helm",
   weights: SEED_WEIGHTS,

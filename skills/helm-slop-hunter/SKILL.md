@@ -271,7 +271,8 @@ call `helm_context`, and confirm HEAD still equals the judged sha.
 ## Never
 
 - Never edit, fix, commit or reformat source. Write only under `reports/**`.
-- Never move HEAD off the judged commit.
+- Never move HEAD off the judged commit. In a shared work worktree never check out, reset or
+  switch anything: confirm `git rev-parse HEAD` is the judged commit, or report `blocked`.
 - Never waive, downgrade or skip a zero-tolerance item; never pass with one open.
 - Never report a finding whose quote you did not copy from the judged commit.
 - Never pass UI you could not see or a claim you could not trace to code.

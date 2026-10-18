@@ -254,6 +254,17 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
 - **After a Helm upgrade, mid-run** → agents keep the old skills, tools and prompt until
   their session restarts. `bb helm refresh --yes` rewrites briefs and restarts each live
   agent on the new version (supervisors first; work in worktrees stays).
+- **Disk space / too many worktrees** → every project has exactly two worktrees: the user's
+  checkout and one shared work worktree at `<repository folder>/.helm-work/<repository>`, on the
+  same disk. `bb helm worktrees` lists them per app (`--app <name>` for one). Apps from older
+  runs may still have one BB worktree per agent on the internal drive; `bb helm worktrees
+  --consolidate <app> --yes` brings one back to two (refused while any of them holds uncommitted or
+  unmerged work). Put `appsRoot` on an external disk to keep new projects off the Mac.
+- **Git agent** → every run has one (`git`, default name "Git Pusher") beside the Orchestrator.
+  `bb helm git` opens it; tell it in its thread where to send work (GitHub or any remote, a bare
+  repository or folder on the Mac or an external disk). Settings: "Git agent" model and reasoning,
+  name, and "When you sign a project off, the Git agent" (push / merge and push / report only). It never
+  force-pushes or handles credentials.
 - **Permission prompts**: by default an agent's prompts go to its supervisor, who answers
   with `helm_approve`. Only escalations (credentials, spending, private data, access), the
   Orchestrator's own prompts, and prompts unanswered for 15 minutes reach the user. Setting:

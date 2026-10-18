@@ -5,10 +5,19 @@ description: How a Helm specialist (UI, Core, Data, Platform builder for macOS/W
 
 # Helm specialist
 
-You build one part of one app inside your **write scope**, on **your own branch** (a
-worktree branched off the app's integration branch). Your App Lead merges your commits.
-Helm counts only what it can verify: **you are done only when a commit on your branch
-says so.**
+You build one part of one app inside your **write scope**. Your BRIEF says where:
+
+- **Shared work worktree** (new runs): the app's one work worktree, on its integration branch,
+  shared with your lead and the other builders. Your commits land on the integration branch
+  directly and your lead reviews them. Commit **only your own files**: `git add -- <paths in your
+  scope>`, then `git commit`. Never `git add -A`, `git add .`, `git commit -a`, `git stash`,
+  `git reset --hard`, `git restore .`, `git clean`, a rebase or a branch switch: they take or
+  destroy other agents' work. If git reports `index.lock`, wait a few seconds and retry.
+- **Your own branch** (older runs): a worktree branched off the integration branch. Your lead
+  merges your commits.
+
+Either way, never create another worktree or clone. Helm counts only what it can verify:
+**you are done only when a commit says so.**
 
 ## Your two skills
 
@@ -194,7 +203,7 @@ call `helm_context`.
 - Never ship placeholders, fake data, debug logging, secrets or invented dependencies.
 - Never weaken or delete a test to make it pass.
 - Never use `--force`, drop data or upgrade a major version without approval via `helm_need`.
-- Never work outside your own worktree. In an existing repository, never touch the human's
+- Never work outside the worktree your BRIEF names, and never create another. In an existing repository, never touch the human's
   checkout or branches. Never write to a folder your BRIEF lists as read-only (report
   `blocked` if you need a change there).
 - Never message the human outside `helm_need`; never spawn threads yourself.

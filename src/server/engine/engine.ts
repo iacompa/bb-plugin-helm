@@ -27,7 +27,7 @@ import { OutboxWorker, type HandlerResult } from "./outbox.ts";
 import { DEFAULT_SETTINGS, expandHome, newRunId, silentLogger, type HelmSettings, type Logger } from "./context.ts";
 import { parseBrief, withProfiles } from "../domain/brief.ts";
 import { ORCH_ID, planTopology, slugify, type TopologyPlan } from "../domain/topology.ts";
-import { ensurePlanner, nameOf, PLANNER_ID, threadTitle, wakeCustom, customMeta } from "./custom.ts";
+import { ensureGitAgent, ensurePlanner, GIT_ID, nameOf, PLANNER_ID, threadTitle, wakeCustom, customMeta } from "./custom.ts";
 import { ROLES, roleLabel, scopeFor, tierOfRole } from "../domain/roles.ts";
 import { forecast, normalizeModel, PROVIDER_LABEL, requiredSlots, resolveModel, validateRef, modelName, unsetSlots, familyWarnings } from "../domain/models.ts";
 import { briefFor, escapeForPrompt, initialPortfolioMd, managerNotesMd, type BriefContext, type ProjectBrief } from "../domain/briefs.ts";
@@ -81,6 +81,12 @@ export interface PlanPreview {
 }
 
 const STUDIO_DIR = "_studio";
+/** Beside each repository: the folder that holds its one shared work worktree. */
+export const WORK_DIR = ".helm-work";
+
+/** How to work in a worktree several agents share. */
+export const SHARED_WORKTREE_RULES =
+  "Several agents work in this folder at once. Commit only your own files: `git add -- <paths in your scope>` then `git commit -m …`. Never run `git add -A`, `git add .`, `git commit -a`, `git stash`, `git reset --hard`, `git checkout -- .`, `git restore .`, `git clean`, a rebase, or switch branches: they would take or destroy other agents' work. Never create another worktree or clone. If git says `index.lock` exists, wait a few seconds and retry.";
 const DEFER_SHORT = 3_000;
 /** How long unread FYI lines wait for a free ride on a tool result before they are sent on their own. */
 const FLUSH_MS = 120_000;
@@ -254,6 +260,7 @@ export class Engine {
     const name = nameOf(this, n);
     if (n.role === "orch") return name ? `${name} · Orchestrator` : "Orchestrator";
     if (n.role === "planner") return `${name ?? "Amer"} · Planner`;
+    if (n.role === "git") return `${name ?? "Git Pusher"} · Git agent`;
     const app = n.appId ? this.repo.getApp(n.runId, n.appId) : null;
     if (n.role === "custom") return `${name ?? n.id} · ${n.title ?? "Custom agent"}${app ? ` (${app.name})` : ""}`;
     const base = n.role === "mgr" ? `${this.managerName(n.runId, n.id)} manager` : app ? `${app.name} · ${n.role === "lead" ? "App lead" : roleLabel(n.role, n.platform)}` : n.role === "lead" ? "App lead" : roleLabel(n.role, n.platform);
@@ -286,6 +293,59 @@ export class Engine {
   helmBranchFor(run: RunInfo, app: AppInfo): string {
     // the run id suffix keeps two runs with the same name from sharing a branch
     return `helm/${slugify(run.name).slice(0, 24).replace(/-+$/, "") || "run"}-${run.id.slice(-6).toLowerCase()}/${app.id}`;
+  }
+
+  /**
+   * The app's one work worktree, beside its repository on the same disk:
+   * <repo's folder>/.helm-work/<repo name>. Every agent of the app works there (two worktrees
+   * per app: the human's checkout and this one).
+   */
+  workTreePath(repoPath: string, suffix = ""): string {
+    const clean = repoPath.replace(/[\\/]+$/, "");
+    const i = Math.max(clean.lastIndexOf("/"), clean.lastIndexOf("\\"));
+    return `${clean.slice(0, i)}/${WORK_DIR}/${clean.slice(i + 1)}${suffix}`;
+  }
+
+  /** The app's shared work worktree, if it has one (apps started before it existed have none until consolidated). */
+  workTree(runId: string, appId: string): string | null {
+    return this.repo.getMeta(`work:${runId}:${appId}`);
+  }
+
+  /** What a lead is told about where its squad works. */
+  leadWorkText(run: RunInfo, app: AppInfo): string {
+    const work = this.workTree(run.id, app.id);
+    if (!work) return "Your own worktree branch is the app's **integration branch**.";
+    return `You and your whole squad work in one shared work worktree, \`${work}\`, on the app's **integration branch** \`${this.repo.appExtra(run.id, app.id).integrationBranch}\`: the app has exactly two worktrees, the human's checkout and this one. Builders commit there directly, so you integrate by reviewing their commits and fixing the seams, not by merging branches. ${SHARED_WORKTREE_RULES}`;
+  }
+
+  /**
+   * Create (or find) the app's work worktree on its integration branch: the Helm branch of an
+   * adopted repository, else helm/<run>/<app> off main. Records it as the integration branch.
+   * `baseOverride` is where a missing branch is created (consolidation passes its last commit).
+   */
+  async ensureWorkTree(run: RunInfo, app: AppInfo, baseOverride?: string): Promise<string> {
+    const have = this.workTree(run.id, app.id);
+    if (have) return have;
+    if (!app.repoPath) throw new HelmError(`${app.name} has no repository yet.`, "bad_state");
+    const extra = this.repo.appExtra(run.id, app.id);
+    const branch = extra.integrationBranch ?? app.helmBranch ?? this.helmBranchFor(run, app);
+    const base = baseOverride ?? app.helmBranch ?? "HEAD";
+    const host = this.host(run.id);
+    let res;
+    try {
+      res = await host.ensureWorktree({ repo: app.repoPath, path: this.workTreePath(app.repoPath), branch, base });
+    } catch (err) {
+      // the usual folder belongs to another run's branch: use one named for this run
+      if (!/is a worktree on/.test(err instanceof Error ? err.message : "")) throw err;
+      res = await host.ensureWorktree({ repo: app.repoPath, path: this.workTreePath(app.repoPath, `--${run.id.slice(-6).toLowerCase()}`), branch, base });
+    }
+    this.repo.tx(() => {
+      this.repo.setMeta(`work:${run.id}:${app.id}`, res.path);
+      this.repo.updateApp(run.id, app.id, { integrationBranch: res.branch });
+      const lead = this.leadOf(run.id, app.id);
+      this.repo.event(run.id, lead?.id ?? ORCH_ID, "repo", `${app.name}: work worktree ${res.created ? "created" : "ready"} at ${res.path} on ${res.branch}`);
+    });
+    return res.path;
   }
 
   /**
@@ -566,7 +626,7 @@ export class Engine {
   /** Effective model for a node right now: node override > app override > run slots (§7.5). */
   effectiveModel(run: RunInfo, n: NodeInfo): ModelRef | null {
     const app = n.appId ? this.repo.getApp(run.id, n.appId) : null;
-    const runSlot = run.slots[n.slot] ?? (n.role === "planner" ? this.settings.defaultModels.planner ?? run.slots.orchestrator ?? null : null);
+    const runSlot = run.slots[n.slot] ?? (n.role === "planner" ? this.settings.defaultModels.planner ?? run.slots.orchestrator ?? null : n.role === "git" ? this.settings.defaultModels.git ?? run.slots.orchestrator ?? null : null);
     return resolveModel({ nodeOverride: n.modelOverride ? n.model : null, appOverride: app?.slotOverrides?.[n.slot] ?? null, runSlot });
   }
 
@@ -609,6 +669,8 @@ export class Engine {
     });
     // the run's Planner (Amer): beside the Orchestrator, idle until someone writes to it
     await ensurePlanner(this, runId, { catalog: cat });
+    // the Git agent: beside them, keeps every app to two worktrees and sends work where the human says
+    await ensureGitAgent(this, runId);
     const fresh = this.run(runId);
     const studio = this.studioPath(fresh);
     const w = wavesEstimate(plan.apps.length, fresh.concurrency);
@@ -642,6 +704,7 @@ export class Engine {
       this.repo.enqueue({ id: this.oid(), runId, kind: "project", nodeId: ORCH_ID, payload: { studio: true }, idemKey: `project:${runId}:studio` });
       this.repo.updateNode(runId, ORCH_ID, { status: "queued", firstInLine: true });
       if (this.repo.getNode(runId, PLANNER_ID)) this.repo.updateNode(runId, PLANNER_ID, { status: "queued", firstInLine: true });
+      if (this.repo.getNode(runId, GIT_ID)) this.repo.updateNode(runId, GIT_ID, { status: "queued", firstInLine: true });
       for (const m of plan.managers) this.repo.updateNode(runId, m.id, { status: "queued", firstInLine: true });
       const apps = this.repo.listApps(runId);
       const wave = c1 ? apps : firstWave(apps.map((a) => ({ id: a.id, stage: a.stage, priority: a.priority, order: a.order, managerId: a.managerNodeId })), fresh.concurrency);
@@ -789,6 +852,8 @@ export class Engine {
   handoverFor(runId: string, nodeId: string): string | null {
     const reps = this.repo.reportsFor(runId, nodeId, 8);
     const lines: string[] = [];
+    if (this.repo.getMeta(`moved:${runId}:${nodeId}`))
+      lines.push("Helm moved your role into the app's one shared work worktree (the app now has exactly two: the human's checkout and this one). Your previous worktree was removed after its work was committed and merged: it is all on the integration branch, which is checked out here. Run `git log` first and continue from there.");
     if (this.repo.getMeta(`reuse:${runId}:${nodeId}`))
       lines.push("You replace a thread that ran on another model, in the same workspace. Run `git status` and `git log` first: uncommitted changes there are your predecessor's work in progress — keep and finish them, do not start over.");
     if (!reps.length) return lines.length ? lines.join("\n") : null;
@@ -892,9 +957,18 @@ export class Engine {
       if (q && !n.threadId) lines.push(`## The human's question (answer it first)\n${escapeForPrompt(q, 8000)}`);
       if (custom.length) lines.push(`## Custom agents now\n${custom.slice(0, 20).map((x) => `- ${this.label(x)} (${x.id}) → reports to ${x.parentId}, ${x.status}`).join("\n")}`);
     }
+    if (n.role === "git") {
+      const orch = byId.get(ORCH_ID);
+      lines.push(`## Your place\nYou sit beside ${orch ? this.label(orch) : "the Orchestrator"} and the Planner, outside the chain of command: nobody reports to you, and you answer to the human, who talks to you in this thread. You can see every app of the run. Anyone may ask you about git with \`helm_message\`; only the human can send you somewhere new.`);
+      lines.push(`## The rule you keep\nEvery app has exactly **two worktrees**: the human's checkout (its repository folder) and one shared work worktree beside it on the same disk (\`<repository's folder>/.helm-work/<repository>\`), where all of the app's agents work on its integration branch. Helm creates the work worktree itself. Call \`helm_worktrees\` to see every app's worktrees, where they are and whether they are clean. More than two is a problem to fix: \`helm_consolidate\` moves an app onto one shared worktree once every extra worktree's work is committed and on the integration branch.`);
+      lines.push(`## Sending work\nWhen the human signs a project off, Helm tells you; then you ${this.settings.gitOnSignoff === "merge-push" ? "merge its Helm branch into its main branch and push main and the branch to its remote" : this.settings.gitOnSignoff === "push" ? "push its Helm branch to its remote" : "report where its work is, and send nothing"}. Beyond that, do exactly what the human tells you in this thread: push to GitHub or another remote, or copy or push to a folder on this Mac or an external disk. Other agents' requests to send work somewhere the human did not name need the human's yes (\`helm_need\`, about: access). Never force-push, delete a remote branch or rewrite history without the human's explicit yes. Never handle credentials: if a push needs a login, tell the human the exact command.`);
+      lines.push(`## Your notes\nKeep \`${studio}/GIT-NOTES.md\`: for each app, its repository, work worktree, integration branch, remote, and the last commit you pushed or merged and where. Read it when you start.`);
+      lines.push(`## Apps now\n${this.repo.listApps(run.id).filter((a) => a.stage !== "cancelled").slice(0, 40).map((a) => `- ${a.name} (${a.id}): ${a.repoPath ?? "no repository yet"}${this.workTree(run.id, a.id) ? ` · work worktree ${this.workTree(run.id, a.id)}` : ""} · branch ${this.repo.appExtra(run.id, a.id).integrationBranch ?? "not yet"} · ${a.stage}`).join("\n") || "- none yet"}`);
+    }
     if (n.role === "custom") {
       const meta = customMeta(this, run.id, n.id);
-      lines.push(`## Where you work\n${app ? `In your own worktree of ${app.name}, branched off its integration branch. Commit there; report the commit as evidence. Your supervisor merges what should be merged.` : `In Helm's Studio folder \`${studio}\`, which the Orchestrator and managers share. Write only inside your scope; read anything there.`}`);
+      const work = app ? this.workTree(run.id, app.id) : null;
+      lines.push(`## Where you work\n${app && work ? `In ${app.name}'s shared work worktree \`${work}\`, on its integration branch. ${SHARED_WORKTREE_RULES} Report the commit as evidence.` : app ? `In your own worktree of ${app.name}, branched off its integration branch. Commit there; report the commit as evidence. Your supervisor merges what should be merged.` : `In Helm's Studio folder \`${studio}\`, which the Orchestrator and managers share. Write only inside your scope; read anything there.`}`);
       if (meta.reads.length) lines.push(`## Read-only folders\nYou may read these and never change them: ${meta.reads.map((r) => `\`${escapeForPrompt(r, 300)}\``).join(", ")}.`);
       if (n.wakeOn.length) lines.push(`## When Helm wakes you\nHelm messages you when ${n.wakeOn.map((w) => ({ stage: "an app in your scope changes stage", ready: "an app in your scope is Ready", signoff: "the human signs an app off", failed: "an agent in your scope fails" })[w]).join(", ")}. Between wake-ups you are idle: never poll, loop or sleep waiting.`);
       lines.push("## Real-world actions\nAnything that leaves this machine or touches a real account (pushing to a remote, publishing, deploying, sending messages or email, spending money, changing settings outside your workspace) needs the human: ask once with `helm_need` (about: access, credentials or spending) and stop, unless your mission says the human already approved exactly that action. Never handle credentials yourself.");
@@ -911,16 +985,22 @@ export class Engine {
     const wrapper = app?.adopted ? `"${this.wrapperPath(run)}"` : ".helm/run-check.sh";
     if (this.isLeadNode(n) && app?.adopted)
       lines.push(
-        `## Your squad\nShape: ${app.shape}. Planned squad: ${nodes.filter((x) => x.appId === app.id && x.tier === "specialist").map((x) => roleLabel(x.role, x.platform)).join(", ") || "none (solo — you build it yourself)"}. Gates: Reviewer, Slop Hunter (Helm spawns them when you reach Review).\nYour own worktree branch is the app's **integration branch**. This is an existing repository: Helm added no files and no commits to it. For the spec stage, reuse the repository's own documents: call \`helm_existing_docs\` with the committed files that serve as the spec, architecture, contract and acceptance documents, and its real check commands. Create SPEC.md / ARCHITECTURE.md / CONTRACT.md / ACCEPTANCE.md only for what has no existing equivalent, and only if the brief allows it; otherwise report \`blocked\` with what is missing. Then \`helm_publish_contract\`, \`helm_stage\` to build and \`helm_spawn_squad\`.\nRun each check through ${wrapper} <name> -- <command…> (Helm's wrapper lives outside the repository) and record it with \`helm_record_check\`.`,
+        `## Your squad\nShape: ${app.shape}. Planned squad: ${nodes.filter((x) => x.appId === app.id && x.tier === "specialist").map((x) => roleLabel(x.role, x.platform)).join(", ") || "none (solo — you build it yourself)"}. Gates: Reviewer, Slop Hunter (Helm spawns them when you reach Review).\n${this.leadWorkText(run, app)} This is an existing repository: Helm added no files and no commits to it. For the spec stage, reuse the repository's own documents: call \`helm_existing_docs\` with the committed files that serve as the spec, architecture, contract and acceptance documents, and its real check commands. Create SPEC.md / ARCHITECTURE.md / CONTRACT.md / ACCEPTANCE.md only for what has no existing equivalent, and only if the brief allows it; otherwise report \`blocked\` with what is missing. Then \`helm_publish_contract\`, \`helm_stage\` to build and \`helm_spawn_squad\`.\nRun each check through ${wrapper} <name> -- <command…> (Helm's wrapper lives outside the repository) and record it with \`helm_record_check\`.`,
       );
     else if (this.isLeadNode(n) && app)
       lines.push(
-        `## Your squad\nShape: ${app.shape}. Planned squad: ${nodes.filter((x) => x.appId === app.id && x.tier === "specialist").map((x) => roleLabel(x.role, x.platform)).join(", ") || "none (solo — you build it yourself)"}. Gates: Reviewer, Slop Hunter (Helm spawns them when you reach Review).\nYour own worktree branch is the app's **integration branch**. ${app.kind === "review" ? "Commit ACCEPTANCE.md (the review plan) there, then \`helm_stage\` to build and \`helm_spawn_squad\` (each auditor's task names its area, the pinned commit and its reports folder). When every auditor has reported, compile REVIEW.md, record the project's checks (a failure is a finding), and \`helm_stage\` to review." : "Commit SPEC.md, ARCHITECTURE.md, CONTRACT.md and ACCEPTANCE.md there, then \`helm_publish_contract\`, \`helm_stage\` to build and \`helm_spawn_squad\`."}\nChecks are declared in \`.helm/checks.json\`; run each through \`.helm/run-check.sh <name> -- <command…>\` and record it with \`helm_record_check\`.`,
+        `## Your squad\nShape: ${app.shape}. Planned squad: ${nodes.filter((x) => x.appId === app.id && x.tier === "specialist").map((x) => roleLabel(x.role, x.platform)).join(", ") || "none (solo — you build it yourself)"}. Gates: Reviewer, Slop Hunter (Helm spawns them when you reach Review).\n${this.leadWorkText(run, app)} ${app.kind === "review" ? "Commit ACCEPTANCE.md (the review plan) there, then \`helm_stage\` to build and \`helm_spawn_squad\` (each auditor's task names its area, the pinned commit and its reports folder). When every auditor has reported, compile REVIEW.md, record the project's checks (a failure is a finding), and \`helm_stage\` to review." : "Commit SPEC.md, ARCHITECTURE.md, CONTRACT.md and ACCEPTANCE.md there, then \`helm_publish_contract\`, \`helm_stage\` to build and \`helm_spawn_squad\`."}\nChecks are declared in \`.helm/checks.json\`; run each through \`.helm/run-check.sh <name> -- <command…>\` and record it with \`helm_record_check\`.`,
       );
-    if (n.tier === "specialist") lines.push(`## Your branch\nYou work in your own worktree branched off the app's integration branch. Commit there; your lead merges it. Report done with the commit sha as evidence.${app?.adopted ? ` Run checks through ${wrapper} <name> -- <command…>.` : ""}`);
+    const work = app ? this.workTree(run.id, app.id) : null;
+    if (n.tier === "specialist")
+      lines.push(
+        work
+          ? `## Your workspace\nYou share ${app!.name}'s one work worktree \`${work}\` with your lead and the other builders, on the integration branch \`${this.repo.appExtra(run.id, app!.id).integrationBranch}\`. ${SHARED_WORKTREE_RULES} Your commits land on the integration branch directly; your lead reviews them. Report done with the commit sha as evidence.${app?.adopted ? ` Run checks through ${wrapper} <name> -- <command…>.` : ""}`
+          : `## Your branch\nYou work in your own worktree branched off the app's integration branch. Commit there; your lead merges it. Report done with the commit sha as evidence.${app?.adopted ? ` Run checks through ${wrapper} <name> -- <command…>.` : ""}`,
+      );
     if (n.tier === "gate")
       lines.push(
-        `## Gate protocol\nBefore judging, run \`git fetch . 2>/dev/null; git checkout --detach <commit>\` for the commit Helm names, so your HEAD is exactly that commit. You are read-only on source: write only under \`reports/**\`. Re-run every declared check through the wrapper (${wrapper} <name> -- <command…>)${app?.adopted ? `; the checks are ${this.declaredChecksText(run.id, app.id)}` : " — they are in `.helm/checks.json`"}, then answer with exactly one \`helm_verdict\` call.`,
+        `## Gate protocol\n${work ? `You work in ${app!.name}'s shared work worktree \`${work}\`, whose HEAD is the commit Helm names (builders do not commit during review). Check that \`git rev-parse HEAD\` is exactly that commit; if it is not, report \`blocked\` with both shas. Never check out, reset or switch anything there: other agents share the folder.` : "Before judging, run \`git fetch . 2>/dev/null; git checkout --detach <commit>\` for the commit Helm names, so your HEAD is exactly that commit."} You are read-only on source: write only under \`reports/**\`. Re-run every declared check through the wrapper (${wrapper} <name> -- <command…>)${app?.adopted ? `; the checks are ${this.declaredChecksText(run.id, app.id)}` : " — they are in `.helm/checks.json`"}, then answer with exactly one \`helm_verdict\` call.`,
       );
     const scope = this.scopeLine(n);
     if (scope) lines.push(`## Your scope\n${scope}`);
@@ -948,7 +1028,7 @@ export class Engine {
       repoPath: app?.repoPath ?? null,
       location: app && (app.adopted || app.reads.length) ? { adopted: app.adopted, userBranch: app.userBranch, helmBranch: app.helmBranch, reads: app.reads } : null,
       project: app && n.role !== "custom" ? this.projectBrief(run, app, n) : null,
-      displayName: n.role === "planner" || n.role === "custom" || n.name || n.role === "orch" ? this.label(n) : null,
+      displayName: n.role === "planner" || n.role === "git" || n.role === "custom" || n.name || n.role === "orch" ? this.label(n) : null,
       mission: n.role === "custom" && n.charter ? { text: n.charter, by: (n.createdBy && byId.get(n.createdBy) ? this.label(byId.get(n.createdBy)!) : "the Planner") } : null,
       extra: lines,
       integrationCommit: extra.integrationCommit ?? null,
@@ -1089,7 +1169,7 @@ export class Engine {
 
   private envFor(run: RunInfo, n: NodeInfo, hostId: string | null): EnvSpec | { wait: string } {
     const c1 = n.alsoLead;
-    if ((n.role === "orch" && !c1) || n.role === "mgr" || n.role === "planner" || (n.role === "custom" && !n.appId)) {
+    if ((n.role === "orch" && !c1) || n.role === "mgr" || n.role === "planner" || n.role === "git" || (n.role === "custom" && !n.appId)) {
       if (!run.studioProjectId) return { wait: "studio project" };
       return { kind: "path", hostId, path: this.studioPath(run) };
     }
@@ -1098,15 +1178,19 @@ export class Engine {
     // a replacement thread (another provider) continues in its predecessor's workspace
     const reuse = this.repo.getMeta(`reuse:${run.id}:${n.id}`);
     if (reuse) return { kind: "reuse", environmentId: reuse };
+    // every agent of the app works in its one shared work worktree
+    const work = this.workTree(run.id, app.id);
+    if (work) return { kind: "path", hostId, path: work };
     const integration = this.repo.appExtra(run.id, app.id).integrationBranch;
-    // a lead's first thread starts the integration branch; a replacement lead continues from it
+    if (!integration) return { wait: "work worktree" };
+    // an app started before shared worktrees: per-agent worktrees until it is consolidated
     if (this.isLeadNode(n)) return { kind: "worktree", hostId, baseBranch: integration ?? app.helmBranch ?? null };
     if (!integration) return { wait: "integration branch" };
     return { kind: "worktree", hostId, baseBranch: integration };
   }
 
   projectFor(run: RunInfo, n: NodeInfo): string | null {
-    if ((n.role === "orch" && !n.alsoLead) || n.role === "mgr" || n.role === "planner" || (n.role === "custom" && !n.appId)) return run.studioProjectId;
+    if ((n.role === "orch" && !n.alsoLead) || n.role === "mgr" || n.role === "planner" || n.role === "git" || (n.role === "custom" && !n.appId)) return run.studioProjectId;
     const app = n.appId ? this.repo.getApp(run.id, n.appId) : n.alsoLead ? this.repo.listApps(run.id)[0] ?? null : null;
     return app?.projectId ?? null;
   }
@@ -1128,6 +1212,15 @@ export class Engine {
       }
     }
     const hostId = this.repo.runHost(run.id);
+    // a new app's agents share one work worktree beside its repository: make it before the first spawn
+    const appOf = n.appId ? this.repo.getApp(run.id, n.appId) : n.alsoLead ? this.repo.listApps(run.id)[0] ?? null : null;
+    if (appOf?.projectId && appOf.repoPath && !this.workTree(run.id, appOf.id) && !this.repo.appExtra(run.id, appOf.id).integrationBranch) {
+      try {
+        await this.ensureWorkTree(run, appOf);
+      } catch (err) {
+        return { defer: DEFER_SHORT, reason: `work worktree: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}` };
+      }
+    }
     let env = this.envFor(run, n, hostId);
     if ("wait" in env) return { defer: DEFER_SHORT, reason: `waiting for ${env.wait}` };
     if (env.kind === "reuse" && !(await this.port.environment(env.environmentId).catch(() => null))) {
@@ -1190,7 +1283,7 @@ export class Engine {
       const integrationCommit = n.tier === "gate" && n.appId ? this.repo.appExtra(run.id, n.appId).integrationHead : null;
       if (n.appId) await this.probeRun(run.id).catch(() => undefined);
       const prompt = this.buildBrief(run, n, { integrationCommit, scannerFindings: this.repo.getMeta(`scanner:${run.id}:${n.id}`), handover: typeof row.payload.handover === "string" ? row.payload.handover : null });
-      const visible = n.role === "orch" || n.role === "planner" || (this.settings.showLeadsInSidebar && this.isLeadNode(n));
+      const visible = n.role === "orch" || n.role === "planner" || n.role === "git" || (this.settings.showLeadsInSidebar && this.isLeadNode(n));
       ref = await this.port.spawnThread({
         projectId,
         environment: env,
@@ -1207,6 +1300,7 @@ export class Engine {
     const threadId = ref.threadId;
     this.repo.tx(() => {
       this.repo.deleteMeta(`reuse:${run.id}:${n.id}`);
+      this.repo.deleteMeta(`moved:${run.id}:${n.id}`);
       if (n.role === "planner") this.repo.deleteMeta(`planner-q:${run.id}`);
       this.repo.updateNode(run.id, n.id, { ...(env.kind === "reuse" ? {} : { branch: null }), threadId, environmentId: ref!.environmentId, status: "running", spawnedAt: this.now(), lastActivityAt: this.now(), firstInLine: false, model, providerId: model.providerId, prevStatus: null });
       // directives stored before spawn were in the prompt: they are delivered now (§6.3)
@@ -1242,11 +1336,9 @@ export class Engine {
     this.repo.tx(() => {
       this.repo.updateNode(runId, nodeId, { branch: env.branch!, environmentId: envId });
       // the lead's current branch is the integration branch (a replacement lead's branch starts from the old one)
-      if (this.isLeadNode(n) && n.appId) this.repo.updateApp(runId, n.appId, { integrationBranch: env.branch! });
-      else if (n.alsoLead) {
-        const app = this.repo.listApps(runId)[0];
-        if (app) this.repo.updateApp(runId, app.id, { integrationBranch: env.branch! });
-      }
+      const appId = n.appId ?? (n.alsoLead ? this.repo.listApps(runId)[0]?.id : null);
+      // a shared work worktree's branch is already the integration branch
+      if (appId && this.isLeadNode(n) && !this.workTree(runId, appId)) this.repo.updateApp(runId, appId, { integrationBranch: env.branch! });
     });
     if (this.isLeadNode(n)) this.outbox.kick();
   }

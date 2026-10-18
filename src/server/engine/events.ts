@@ -12,6 +12,7 @@ import { isQuestion } from "../domain/directives.ts";
 import { nodeWorktree } from "./gates.ts";
 import { expirePrompts, getPrompt, rerouteOpenPrompts, routePrompt } from "./prompts.ts";
 import { sweep } from "./watch.ts";
+import { auditWorktrees } from "./worktrees.ts";
 
 const TERMINAL = new Set(["done", "failed"]);
 const COMPACT_AT = 0.7;
@@ -207,7 +208,7 @@ async function onDispatch(e: Engine, node: NodeInfo, ev: Extract<HelmEvent, { ty
   if (!text) return;
   if (isHelmText(e, node, text)) return;
   // the Planner is a conversation with the human, not a chain of command: nothing to record or relay
-  if (node.role === "planner") {
+  if (node.role === "planner" || node.role === "git") {
     e.repo.event(node.runId, node.id, "question", `the human: ${text.slice(0, 160)}`);
     return;
   }
@@ -280,6 +281,8 @@ export async function watchdog(e: Engine): Promise<{ nudged: string[]; stalled: 
     if (expirePrompts(e, run.id, (n, i, note) => raiseInteractionNeed(e, n, i, note))) e.emit(run.id, "run.updated", { id: run.id });
     e.proposeNextWave(run.id);
   }
+  // the two-worktree rule: the Git agent hears about any app with more (throttled, host calls)
+  for (const run of e.repo.activeRuns()) await auditWorktrees(e, run.id).catch((err) => e.log.warn(`worktree check for ${run.id} failed: ${err instanceof Error ? err.message : String(err)}`));
   e.outbox.kick();
   return { nudged, stalled };
 }

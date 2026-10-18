@@ -98,6 +98,7 @@ export const ROLE_LABEL: Record<Role, string> = {
   compliance: "Compliance",
   assets: "Asset builder",
   planner: "Planner",
+  git: "Git agent",
   custom: "Custom agent",
 };
 
@@ -119,6 +120,7 @@ export const ROLE_ICON: Record<Role, string> = {
   compliance: "Lock",
   assets: "Palette",
   planner: "AiBrain01",
+  git: "GitBranch",
   custom: "Puzzle",
 };
 export function roleIcon(n: { role: Role; platform?: string | null }): string {
@@ -294,7 +296,7 @@ export function modelText(cat: Catalog | null | undefined, r: ModelRef | null | 
 export const sameRef = (a: ModelRef | null | undefined, b: ModelRef | null | undefined) =>
   !!a && !!b && a.providerId === b.providerId && a.modelId === b.modelId && (a.reasoning ?? null) === (b.reasoning ?? null);
 
-export const BASE_TOK: Record<Role, number> = { orch: 1800, mgr: 700, lead: 1400, ui: 900, code: 1100, platform: 800, security: 350, test: 300, review: 500, slop: 300, research: 300, docs: 300, data: 700, compliance: 350, assets: 700, planner: 400, custom: 400 };
+export const BASE_TOK: Record<Role, number> = { orch: 1800, mgr: 700, lead: 1400, ui: 900, code: 1100, platform: 800, security: 350, test: 300, review: 500, slop: 300, research: 300, docs: 300, data: 700, compliance: 350, assets: 700, planner: 400, git: 300, custom: 400 };
 export const RW: Record<string, number> = { none: 0.5, low: 0.7, medium: 0.85, high: 1, xhigh: 1.35, max: 1.7, ultra: 2.2, ultracode: 1.8 };
 export const UNIT_PER_KTOK = 0.0075;
 export const FORECAST_LOW = 0.7;

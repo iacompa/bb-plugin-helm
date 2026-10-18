@@ -232,6 +232,7 @@ function emptyBySlot(): Record<SlotId, number> {
     docs: 0,
     watcher: 0,
     planner: 0,
+    git: 0,
   };
 }
 

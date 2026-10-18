@@ -25,7 +25,8 @@ which). The Planner designed you but does not supervise you.
 ## How you work
 
 1. **Read your mission and brief.** Know where you work:
-   - under an app lead, your own worktree of that project's repository;
+   - under an app lead, that project's shared work worktree (commit only your own files; never
+     `git add -A`, stash, reset, clean or switch branches) or, in older runs, your own worktree;
    - otherwise, Helm's Studio folder, shared with the Orchestrator and managers.
 2. **Do the work the mission asks for.** Stay inside your write scope. Read what you need, and
    nothing more.

@@ -80,8 +80,10 @@ in a workspace with a write scope, and is woken by events or messages, never by 
 - **reportsTo**: whoever should read its reports.
   - The Orchestrator (`orch`) for run-wide concerns: storage, cost, workflow health, releases.
   - A **manager** for one group of projects.
-  - An **app lead** for one project. Under a lead it works in that project's repository, in its own
-    worktree off the integration branch. Otherwise it works in the Studio folder.
+  - An **app lead** for one project. Under a lead it works in that project's shared work worktree,
+    on the integration branch. Otherwise it works in the Studio folder.
+  - Never design an agent for git housekeeping or pushing: the run already has a **Git agent**
+    (`git`) beside you that keeps every project to two worktrees and sends work where the human says.
 - **mission**: the most important part. It becomes the agent's system prompt. Write it in this shape:
   ```
   Purpose: <one sentence: why this agent exists>

@@ -229,6 +229,18 @@ function TopBar() {
       toast.error("Could not open the Planner", { description: errMsg(err) });
     }
   };
+  const gitNode = data?.nodes.git ?? null;
+  const gitName = gitNode?.label.split(" · ")[0] ?? "Git";
+  const openGit = async () => {
+    if (!data?.run) return;
+    try {
+      const r = (await h.rpc.call("git_open", { runId: data.run.id })) as { threadId: string | null; label: string };
+      if (r.threadId) nav.toThread(r.threadId, { split: true });
+      else toast.success(`${r.label} is starting`, { description: "It checks every app's worktrees first. Its thread appears in the sidebar in a moment; tell it where to send work there." });
+    } catch (err) {
+      toast.error("Could not open the Git agent", { description: errMsg(err) });
+    }
+  };
   const run = data?.run ?? null;
   const nodes = useMemo(() => (data ? data.nodeOrder.map((id) => data.nodes[id]) : []), [data, h.rev]); // eslint-disable-line react-hooks/exhaustive-deps
   const open = data ? openNeeds(data).length : 0;
@@ -324,6 +336,12 @@ function TopBar() {
         <button type="button" className="btn" onClick={() => void openPlanner()} title={`${planner?.label ?? "Amer · Planner"}: ask about the run, change it, or have it design a new agent`} aria-label={`Ask ${plannerName}, the Planner`} data-testid="planner">
           <Ic name="AiBrain01" size="sm" />
           <span className="btn-lbl"> {plannerName}</span>
+        </button>
+      ) : null}
+      {run && (run.status === "running" || run.status === "paused") ? (
+        <button type="button" className="btn" onClick={() => void openGit()} title={`${gitNode?.label ?? "Git agent"}: keeps every app to two worktrees and sends work where you tell it (GitHub, this Mac, an external disk)`} aria-label={`Open ${gitName}, the Git agent`} data-testid="git">
+          <Ic name="GitBranch" size="sm" />
+          <span className="btn-lbl"> {gitName}</span>
         </button>
       ) : null}
       <button type="button" className="btn" onClick={() => h.openScreens()} disabled={!run} title="Screens: click through each app's screens, page by page (no device, nothing runs)" aria-label="Screens" aria-pressed={h.screensOpen} data-testid="screens">

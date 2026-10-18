@@ -225,6 +225,19 @@ export const ROLES: Record<Role, RoleDef> = {
     doneMeans: ["the human's question is answered, or the change they asked for is made and on the record"],
     skill: "helm-planner-agent",
   },
+  git: {
+    role: "git",
+    tier: "git",
+    slot: "git",
+    label: "Git agent",
+    mission:
+      "Keep the run's git in order. Every app has exactly two worktrees: the human's checkout and one shared work worktree beside it, on the same disk. Watch for any extra worktree and get it merged and removed. Send work where the human says: GitHub, another remote, or a folder on this Mac or an external disk. Know, for every app, what has reached its main branch and its remote. You do not write app code.",
+    scope: ["GIT-NOTES.md", "agents/git/**"],
+    inputs: ["the human's instructions", "helm_world", "helm_worktrees", "sign-off notices", "worktree alerts from Helm"],
+    outputs: ["pushes and merges the human asked for", "consolidated worktrees (helm_consolidate)", "GIT-NOTES.md: where each app's work is"],
+    doneMeans: ["each app has two worktrees", "what the human asked to send is sent, with the commit and destination on record"],
+    skill: "helm-git",
+  },
   custom: {
     role: "custom",
     tier: "custom",
@@ -347,6 +360,7 @@ export const TOOLS_BY_TIER: Record<Tier, string[]> = {
     "helm_rename_agent",
     "helm_retire_agent",
   ],
+  git: ["helm_context", "helm_report", "helm_ack", "helm_need", "helm_message", "helm_world", "helm_worktrees", "helm_consolidate"],
   custom: ["helm_context", "helm_report", "helm_ack", "helm_need", "helm_message"],
   gate: [
     "helm_context",
@@ -416,6 +430,7 @@ export const CUSTOM_SKILLS = [
 
 export function skillsFor(n: { role: Role; platform: Platform | null; alsoLead: boolean }, app: SkillProfile | null, extra: string[] = []): string[] {
   if (n.role === "planner") return ["helm-planner-agent"];
+  if (n.role === "git") return ["helm-git"];
   if (n.role === "custom") return [...new Set(["helm-custom", ...extra.filter((x) => CUSTOM_SKILLS.includes(x)).slice(0, 4)])];
   const kind = app?.kind ?? "app";
   const needs = app?.needs ?? [];

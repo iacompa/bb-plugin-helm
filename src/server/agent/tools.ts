@@ -20,6 +20,7 @@ import { buildSpec, renameNode, retireAgent } from "../engine/custom.ts";
 import { assignFix, declareExisting, publishContract, recordCheck, releaseSquadMembers, report, slopScan, spawnSquad, stageRequest, verdict } from "../engine/gates.ts";
 import { context, digest, world } from "../engine/world.ts";
 import { validateDelta, type ProfileChange } from "../engine/delta.ts";
+import { appWorktrees, consolidate, worktreesText } from "../engine/worktrees.ts";
 import { normalizeNeed, normalizeTool } from "../domain/profile.ts";
 import { planTopology } from "../domain/topology.ts";
 
@@ -125,6 +126,13 @@ export const TOOL_DEFS: ToolDef[] = [
     presentation: { label: { pending: "Designing an agent", completed: "Designed an agent" }, icon: { glyph: "UserRoundPlus" } },
   },
   { name: "helm_rename_agent", description: "Give any agent in the run a new personal name when the human asks (including yourself or the Orchestrator). Names are unique in the run; the agent's thread title follows.", parameters: z.object({ nodeId: z.string().min(1).max(80), name: z.string().min(1).max(40) }).strict(), presentation: { label: { pending: "Renaming", completed: "Renamed" }, icon: { glyph: "Edit" } } },
+  { name: "helm_worktrees", description: "The Git agent's view of every app's worktrees, from git itself: the human's checkout, the shared work worktree and any extra ones (the rule is two per app), each with branch, commit, uncommitted changes and the agents working there. Narrow it with `app`.", parameters: z.object({ app: z.string().min(1).max(80).optional() }).strict(), presentation: { label: { pending: "Listing worktrees", completed: "Listed worktrees" }, icon: { glyph: "GitBranch" } } },
+  {
+    name: "helm_consolidate",
+    description: "Bring an app to two worktrees: once every extra agent worktree's work is committed and on the integration branch, Helm stops those agents, removes their worktrees, creates the shared work worktree on the integration branch and starts the agents again there with a hand-over. Refuses, changing nothing, with what to fix first while anything could be lost.",
+    parameters: z.object({ app: z.string().min(1).max(80), reason: z.string().max(300).optional() }).strict(),
+    presentation: { label: { pending: "Consolidating worktrees", completed: "Consolidated worktrees" }, icon: { glyph: "GitBranch" } },
+  },
   { name: "helm_retire_agent", description: "Stop a custom agent for good (its thread is stopped and archived) when it is no longer useful or the human asks. Only custom agents can be retired.", parameters: z.object({ nodeId: z.string().min(1).max(80), reason: z.string().min(1).max(300) }).strict(), presentation: { label: { pending: "Retiring an agent", completed: "Retired an agent" }, icon: { glyph: "Archive" } } },
   {
     name: "helm_watch",
@@ -190,7 +198,9 @@ export const TOOL_DEFS: ToolDef[] = [
 export const TOOL_NAMES = TOOL_DEFS.map((t) => t.name);
 
 const TIER_NAME: Record<string, string> = {
-  helm_world: "the Orchestrator",
+  helm_world: "the Orchestrator, the Planner and the Git agent",
+  helm_worktrees: "the Git agent",
+  helm_consolidate: "the Git agent",
   helm_approve: "the Orchestrator, Managers and App Leads",
   helm_set_task: "the Orchestrator, Managers and App Leads",
   helm_direct: "the Orchestrator, Managers and App Leads",
@@ -305,6 +315,12 @@ async function dispatch(e: Engine, node: NodeInfo, name: string, p: Record<strin
       return retireAgent(e, node.runId, node, String(p.nodeId), String(p.reason));
     case "helm_world":
       return JSON.stringify(world(e, node.runId, { appsPage: p.appsPage as number | undefined }));
+    case "helm_worktrees": {
+      const app = p.app ? resolveApp(e, node.runId, String(p.app)) : undefined;
+      return worktreesText(await appWorktrees(e, node.runId, { appId: app }));
+    }
+    case "helm_consolidate":
+      return consolidate(e, node.runId, resolveApp(e, node.runId, String(p.app)), e.label(node));
     case "helm_propose_plan":
       return proposePlan(e, node, p);
     case "helm_propose_wave":
@@ -342,11 +358,20 @@ async function dispatch(e: Engine, node: NodeInfo, name: string, p: Record<strin
   return `Unknown tool ${name}.`;
 }
 
+/** An app by id or name (case-insensitive). */
+function resolveApp(e: Engine, runId: string, key: string): string {
+  const apps = e.repo.listApps(runId);
+  const k = key.trim().toLowerCase();
+  const hit = apps.find((a) => a.id === key) ?? apps.find((a) => a.name.toLowerCase() === k || a.id.toLowerCase() === k);
+  if (!hit) throw new HelmError(`No app "${key}" in this run. Apps: ${apps.map((a) => a.id).slice(0, 30).join(", ")}.`, "not_found");
+  return hit.id;
+}
+
 function message(e: Engine, from: NodeInfo, to: string, text: string, kind: string): string {
   const target = e.repo.getNode(from.runId, to);
   if (!target) return `No node ${to}. Use ids from helm_context.`;
-  // the Planner may talk to anyone; supervisors and custom agents may talk to the Planner
-  const planner = from.tier === "planner" || (target.tier === "planner" && ["orchestrator", "manager", "lead", "custom"].includes(from.tier));
+  // the Planner and the Git agent may talk to anyone; supervisors and custom agents may talk to them
+  const planner = from.tier === "planner" || from.tier === "git" || ((target.tier === "planner" || target.tier === "git") && ["orchestrator", "manager", "lead", "custom", "planner"].includes(from.tier));
   const allowed = planner || target.id === from.parentId || target.parentId === from.id || (target.parentId === from.parentId && target.appId !== null && target.appId === from.appId);
   if (!allowed) return `Rejected: you can message your parent, your children and siblings in the same app. Route cross-app traffic through ${from.parentId ?? "the Orchestrator"}.`;
   let note = "";

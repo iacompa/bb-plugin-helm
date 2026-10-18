@@ -1,8 +1,11 @@
 // Shared vocabulary for Helm: server, engine, agent tools, RPC and the app all
 // speak these types. Pure types only — no runtime imports from BB or the DB.
 
-/** planner: Amer, the run's advisor beside the Orchestrator; custom: an agent the Planner designed for this run. */
-export type Tier = "orchestrator" | "manager" | "lead" | "specialist" | "gate" | "planner" | "custom";
+/**
+ * planner: Amer, the run's advisor beside the Orchestrator; git: the Git agent beside them (worktrees,
+ * pushes); custom: an agent the Planner designed for this run.
+ */
+export type Tier = "orchestrator" | "manager" | "lead" | "specialist" | "gate" | "planner" | "git" | "custom";
 export type Role =
   | "orch"
   | "mgr"
@@ -20,6 +23,7 @@ export type Role =
   | "review"
   | "slop"
   | "planner"
+  | "git"
   | "custom";
 export type Platform = "mac" | "win" | "ios" | "and" | "web";
 
@@ -87,7 +91,8 @@ export type SlotId =
   | "research"
   | "docs"
   | "watcher"
-  | "planner";
+  | "planner"
+  | "git";
 
 export interface ModelRef {
   providerId: string;

@@ -154,6 +154,7 @@ export function briefFor(node: Pick<NodeInfo, "id" | "role" | "platform" | "brie
   if (ctx.handover) L.push("", "## Hand-over from the previous holder of this role", escapeForPrompt(ctx.handover, 1500));
   L.push("", "## Rules of engagement", ...COMMON_RULES.map((r, i) => `${i + 1}. ${r}`));
   if (node.role === "planner") L.push("", "If the human asked a question above, answer it now (call `helm_world` first). Otherwise reply with one or two short lines: your name, that you are the run's Planner, and what you can do for them. Then stop: you are idle until someone writes to you.");
+  else if (node.role === "git") L.push("", "Start now: read GIT-NOTES.md if it exists, call `helm_worktrees`, write what you found to GIT-NOTES.md, and tell the human in one or two short lines your name, that you are the run's Git agent, and whether any app has more than two worktrees. Then stop: you are idle until the human writes to you or Helm wakes you.");
   else if (node.role === "custom") L.push("", "Start now on your mission. When the first piece of work is done, report with `helm_report` (with evidence), then stop until you are woken.");
   else L.push("", "Start now. When your first unit of work is done, commit it and call `helm_report`.");
   return L.join("\n");

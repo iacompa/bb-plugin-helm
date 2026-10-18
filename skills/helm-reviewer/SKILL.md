@@ -342,6 +342,10 @@ notes fix this without asking a question? If not, add what is missing.
 - Your worktree changed anything outside `reports/` or HEAD moved. This is a **read-only
   violation**, which also raises a Needs-you item for the human.
 
+In a **shared work worktree** (your BRIEF says so) you never check out anything: other agents
+share the folder. Confirm `git rev-parse HEAD` is the commit Helm names; if not, report `blocked`
+with both shas.
+
 On "Rejected — fix and call helm_verdict again: …" correct exactly what it lists and resubmit.
 
 ## After the verdict

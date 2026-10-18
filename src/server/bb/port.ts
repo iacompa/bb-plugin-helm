@@ -160,6 +160,8 @@ export interface BbPort extends Timers {
   updateThread(args: { threadId: string; model?: string; reasoningLevel?: string | null; title?: string; visibility?: "hidden" | "visible" }): Promise<void>;
   stopThread(threadId: string): Promise<void>;
   archiveThread(threadId: string): Promise<string[]>;
+  /** Remove a BB environment (a managed worktree is deleted with it). BB refuses while a thread on it is live. */
+  deleteEnvironment(environmentId: string): Promise<void>;
   retryThread(args: { threadId: string; turnRequestId?: string }): Promise<void>;
   compactThread(threadId: string): Promise<void>;
   threadState(threadId: string): Promise<ThreadState | null>;

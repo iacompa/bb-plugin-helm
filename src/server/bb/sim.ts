@@ -441,6 +441,16 @@ export class SimBB implements BbPort {
     return e ? { environmentId: e.environmentId, hostId: e.hostId, path: e.path, branch: e.branch, status: e.status } : null;
   }
 
+  /** BB removes a managed worktree when its environment is deleted; refused while a thread on it is live. */
+  async deleteEnvironment(environmentId: string): Promise<void> {
+    const e = this.envs.get(environmentId);
+    if (!e) return;
+    const live = [...this.threads.values()].some((t) => t.environmentId === environmentId && !t.archived);
+    if (live) throw new Error("HTTP 409: environment has live threads");
+    this.envs.delete(environmentId);
+    if (e.path?.includes("/.bb-worktrees/")) this.git.removeWorktree(e.path);
+  }
+
   async threadContext(threadId: string): Promise<{ usedTokens: number; window: number; estimated: boolean } | null> {
     const t = this.threads.get(threadId);
     return t ? { usedTokens: Math.min(t.tokens, 200_000), window: 200_000, estimated: false } : null;

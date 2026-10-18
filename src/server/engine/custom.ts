@@ -51,6 +51,7 @@ export function nameOf(e: Engine, n: Pick<NodeInfo, "role"> & { name?: string | 
   if (n.name) return n.name;
   if (n.role === "orch") return e.settings.names.orchestrator;
   if (n.role === "planner") return e.settings.names.planner;
+  if (n.role === "git") return e.settings.names.git;
   return null;
 }
 
@@ -265,6 +266,38 @@ export async function ensurePlanner(e: Engine, runId: string, opts: { queue?: bo
     e.repo.updateNode(runId, n.id, { status: "queued", firstInLine: true, warning: null });
     await e.pump(runId);
     n = e.repo.getNode(runId, PLANNER_ID)!;
+  }
+  return n;
+}
+
+export const GIT_ID = "git";
+
+/** The Git agent's model: its role's model in the run, else the default in Settings, else the Orchestrator's model. */
+export function gitModel(run: RunInfo, settings: HelmSettings): ModelRef | null {
+  return run.slots.git ?? settings.defaultModels.git ?? run.slots.orchestrator ?? run.slots.lead ?? null;
+}
+
+/**
+ * Make sure the run has its Git agent (beside the Orchestrator, like the Planner): it keeps every
+ * app to two worktrees and sends work where the human says. Queued when the run is running and
+ * `queue` is set.
+ */
+export async function ensureGitAgent(e: Engine, runId: string, opts: { queue?: boolean } = {}): Promise<NodeInfo> {
+  const run = e.run(runId);
+  let n = e.repo.getNode(runId, GIT_ID);
+  if (!n) {
+    const model = gitModel(run, e.settings);
+    e.repo.tx(() => {
+      e.repo.insertNode({ runId, id: GIT_ID, appId: null, tier: "git", role: "git", platform: null, parentId: null, slot: "git", alsoLead: false, model, modelOverride: false, scopeGlobs: ROLES.git.scope, branch: null, briefMd: null, name: e.settings.names.git });
+      e.repo.event(runId, GIT_ID, "created", `the run's Git agent, on ${model ? `${model.providerId}/${model.modelId}${model.reasoning ? `:${model.reasoning}` : ""}` : "no model yet"}`);
+    });
+    n = e.repo.getNode(runId, GIT_ID)!;
+    e.emit(runId, "node.updated", n);
+  }
+  if (opts.queue && run.status === "running" && !n.threadId && (n.status === "planned" || n.status === "idle")) {
+    e.repo.updateNode(runId, n.id, { status: "queued", firstInLine: true, warning: null });
+    await e.pump(runId);
+    n = e.repo.getNode(runId, GIT_ID)!;
   }
   return n;
 }

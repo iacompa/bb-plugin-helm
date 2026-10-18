@@ -40,9 +40,10 @@ Nothing spawns until you start the plan. When the planner has made it, press **O
 
 **Helm remembers where you were.** The New run wizard keeps its draft: brief, portfolio, models, and the planning conversation. Your view, selection and inspector tab are kept too. Leave the panel, reload, or open Helm in another window, and you come back to the same place. **Close** keeps the draft (New run reopens it). **Discard** clears it, and starting a run clears it.
 
-**Talk to Amer, the Planner.** Every run has two named agents at the top:
+**Talk to Amer, the Planner.** Every run has three named agents at the top:
 - **Gestra · Orchestrator** runs the build and delegates.
 - **Amer · Planner** sits beside it on the model you choose and stays idle until you ask it something.
+- **Git Pusher · Git agent** sits beside them too. It keeps every app to two worktrees and sends work where you say (see below).
 
 Open Amer's thread in the sidebar (or run `bb helm ask "…"`) to ask about the run or change it. It can add a project, add a need such as HIPAA, or change models. It can also design **new kinds of agent** for your run: a GitHub sync agent, a storage guard that keeps work on your external SSD, a HIPAA reviewer, a workflow debugger. Amer names each one and tells you the name; rename any agent with `bb helm rename`. Custom agents report to Gestra, a manager or a lead. Events wake them (no polling), and anything leaving your machine still needs you.
 
@@ -61,7 +62,10 @@ bb helm model <agent> --model claude-sonnet-5-5 --provider claude-code --reasoni
 bb helm slots --replace codex --with claude-code/claude-sonnet-5-5:high   # a provider ran out: move every role off it now
 # or just ask in a thread: the Orchestrator, a Manager or a Lead changes the models of the agents below it
 bb helm ask "Add a HIPAA reviewer for the clinic app"   # talk to the Planner (Amer)
-bb helm agents                    # the Planner, the Orchestrator and every custom agent
+bb helm agents                    # the Planner, the Orchestrator, the Git agent and every custom agent
+bb helm git                       # open the Git agent's thread (tell it where to push)
+bb helm worktrees                 # every app's worktrees: the checkout plus one work worktree
+bb helm worktrees --consolidate <app> --yes   # bring an older app back to two
 bb helm rename planner "Nova"     # any agent; names are unique in a run
 bb helm retire <custom-agent> --yes
 bb helm stop <agent>              # bottom-up, subtree by default
@@ -88,7 +92,11 @@ It also decides each project's **needs** (database, accounts, payments, security
 
 **Apps can live anywhere on your machine.** Add a folder to an app's line:
 - `- Pebble — habit counter · iOS · ~/code/pebble` works in that folder.
-- An **existing repository** (or a linked worktree) is adopted. When the app's wave is admitted, Helm creates one `helm/<run>/<app>` branch at your HEAD and adds **no files and no commits**. Your checkout, uncommitted changes and branches are never touched, and Helm never merges. You merge the signed-off branch yourself. Agents work in their own worktrees, so they see **committed work only**: commit anything they should build on first (`bb helm plan` counts the uncommitted changes per folder). Checking folders never writes your index (`GIT_OPTIONAL_LOCKS=0`).
+- An **existing repository** (or a linked worktree) is adopted. When the app's wave is admitted, Helm creates one `helm/<run>/<app>` branch at your HEAD and adds **no files and no commits**. Your checkout, uncommitted changes and branches are never touched, and Helm never merges. You merge the signed-off branch yourself (or let the Git agent do it, below). Agents work in the app's work worktree, so they see **committed work only**: commit anything they should build on first (`bb helm plan` counts the uncommitted changes per folder). Checking folders never writes your index (`GIT_OPTIONAL_LOCKS=0`).
+
+**Two worktrees per app, on the app's own disk.** Every app has exactly two worktrees: your checkout, and one shared **work worktree** beside it at `<repository folder>/.helm-work/<repository>`, on the app's Helm branch. The lead, the builders, the gates and the app's custom agents all work there, committing only their own files. Keep apps on an external disk (the apps root, or a folder per app) and nothing grows on your internal drive. Older runs gave each agent its own BB worktree on the internal drive; `bb helm worktrees --consolidate <app> --yes` moves such an app to the two-worktree layout once that work is committed and merged (it refuses, changing nothing, until then).
+
+**The Git agent** keeps that rule. Helm checks every app's worktrees every half hour and wakes it when one has more than two; it asks the lead to commit or merge, then consolidates. When you sign a project off it pushes the Helm branch to the app's remote (or merges into main and pushes, or only reports: your setting). Tell it in its thread to send work anywhere else: GitHub or another remote, a bare repository or a folder on your Mac or an external disk. It never force-pushes, rewrites history or handles credentials; a push that needs a login comes back to you as a command to run.
 - A missing or empty folder becomes a new repository.
 - `· reads /path/a, ~/path/b` lists folders the app's agents may read but never change.
 - `--root <folder>` moves this run's folder (its new repositories and Helm's `_studio` notes), for example onto another disk. The default is `~/Projects/helm/<run>`.
@@ -115,8 +123,9 @@ Settings live under `bb plugin config helm`:
 - budget cap, in relative units;
 - wave approval (`ask` / `auto`);
 - permission mode per tier;
-- the Planner's and the Orchestrator's names (Amer and Gestra by default);
-- the default Planner and Orchestrator models and their reasoning: dropdowns that list the models of the providers you have connected, so nothing is typed (also in the panel: **Models → Default models**, or `bb helm defaults`). A newly connected provider appears after Helm reloads;
+- the Planner's, the Orchestrator's and the Git agent's names (Amer, Gestra and Git Pusher by default);
+- what the Git agent does when you sign a project off (push, merge and push, or report only);
+- the default Planner, Orchestrator and Git agent models and their reasoning: dropdowns that list the models of the providers you have connected, so nothing is typed (also in the panel: **Models → Default models**, or `bb helm defaults`). A newly connected provider appears after Helm reloads;
 - showing leads in the sidebar;
 - zero-tolerance slop categories;
 - git remotes (off);
@@ -142,7 +151,7 @@ Cost rule for development:
 - The plugin server talks to BB only through `bb.sdk`. It makes no network calls of its own, sends no telemetry, and never stores credentials.
 - Git and file work runs in Helm's host entry (`host.ts`), with no shell.
 - Helm manages only the threads it spawns. Everything else is read-only (the Observatory).
-- Repositories, branches and worktrees are never deleted. In an existing repository, Helm adds only its own branch.
+- Repositories and branches are never deleted. In an existing repository, Helm adds only its own branch and its work worktree. The only worktrees Helm removes are its own agents' BB worktrees when you consolidate an app, and only after checking they hold no uncommitted or unmerged work.
 
 ## When something goes wrong
 

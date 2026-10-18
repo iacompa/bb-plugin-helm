@@ -2,7 +2,7 @@
 // returns the updated entity; the engine emits the realtime patches.
 
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
-import { ensurePlanner } from "./engine/custom.ts";
+import { ensureGitAgent, ensurePlanner } from "./engine/custom.ts";
 import { RPC } from "../shared/protocol.ts";
 import type { SlotMap } from "../shared/types.ts";
 import type { HelmService } from "./service.ts";
@@ -41,6 +41,11 @@ export function registerRpc(bb: BbPluginApi, svc: HelmService): void {
     settings_setPermissions: (input) => svc.setPermissions(input as never),
     settings_models: () => svc.defaultModels(),
     settings_setModels: (input) => svc.setDefaultModels(input as never),
+    worktrees_list: ({ runId, app }) => svc.worktrees(runId, app),
+    git_open: async ({ runId }) => {
+      const n = await ensureGitAgent(e, runId, { queue: true });
+      return { nodeId: n.id, threadId: n.threadId, label: e.label(n) };
+    },
     run_setLimits: ({ runId, concurrency, budgetCap, autonomy }) => svc.setLimits(runId, { concurrency, budgetCap, autonomy }),
     run_start: ({ runId, dryRun }) => svc.start(runId, { dryRun }),
     run_finish: ({ runId, status }) => svc.finish(runId, status),

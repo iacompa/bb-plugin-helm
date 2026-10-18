@@ -191,14 +191,21 @@ A reviewer will find these, so check them before you report done:
 
 Pick a simulator explicitly. Never rely on "whatever is booted".
 
+**Reuse the one `helm-ios` simulator.** Every simulator costs gigabytes of disk, and every app
+and every agent share this machine. Look for an existing device named `helm-ios` first and use
+it; create it only if none exists. Never create a simulator per app, per task or per run, and
+erase (`xcrun simctl erase "$UDID"`) rather than delete-and-recreate. Keep DerivedData inside
+the app's worktree (`-derivedDataPath build/DerivedData`, git-ignored), never the global default.
+
 ```bash
 # Toolchain and runtimes
 xcodebuild -version
 xcrun simctl list runtimes
 xcrun simctl list devices available
 
-# Create a dedicated simulator once (choose a device type and runtime that exist on this machine)
-UDID=$(xcrun simctl create helm-ios "iPhone 17" "com.apple.CoreSimulator.SimRuntime.iOS-26-0")
+# Reuse the shared simulator; create it only if it does not exist yet
+UDID=$(xcrun simctl list devices available | sed -n 's/^ *helm-ios (\([0-9A-F-]*\)).*/\1/p' | head -1)
+[ -n "$UDID" ] || UDID=$(xcrun simctl create helm-ios "iPhone 17" "com.apple.CoreSimulator.SimRuntime.iOS-26-0")
 xcrun simctl boot "$UDID" && xcrun simctl bootstatus "$UDID" -b
 
 # If using XcodeGen

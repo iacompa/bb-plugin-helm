@@ -31,7 +31,7 @@ export const MODEL_REASONING = "default";
 const REASONING_ORDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "ultracode"];
 
 /** The two default-model pickers (model + reasoning) for one role, as BB select settings. */
-function modelSelects(choices: ModelChoice[], who: "Planner" | "Orchestrator", empty: string, desc: string) {
+function modelSelects(choices: ModelChoice[], who: "Planner" | "Orchestrator" | "Git agent", empty: string, desc: string) {
   const levels = [...new Set(choices.flatMap((c) => c.reasoning))].sort((a, b) => (REASONING_ORDER.indexOf(a) + 1 || 99) - (REASONING_ORDER.indexOf(b) + 1 || 99));
   return {
     model: {
@@ -57,12 +57,26 @@ function modelSelects(choices: ModelChoice[], who: "Planner" | "Orchestrator", e
 export function settingsDescriptors(choices: ModelChoice[]) {
   const pl = modelSelects(choices, "Planner", "Not set: use each run's Orchestrator model", "The Planner's (Amer's) model in runs whose Planner role has no model.");
   const or = modelSelects(choices, "Orchestrator", "Not set: choose it in each new run", "The Orchestrator's model for new runs that do not choose one.");
-  return { plannerModel: pl.model, plannerReasoning: pl.reasoning, orchestratorModel: or.model, orchestratorReasoning: or.reasoning, ...BASE_DESCRIPTORS };
+  const gt = modelSelects(choices, "Git agent", "Not set: use each run's Orchestrator model", "The Git agent's model: it keeps every app to two worktrees and sends work where you tell it.");
+  return { plannerModel: pl.model, plannerReasoning: pl.reasoning, orchestratorModel: or.model, orchestratorReasoning: or.reasoning, gitModel: gt.model, gitReasoning: gt.reasoning, ...BASE_DESCRIPTORS };
 }
 
 const BASE_DESCRIPTORS = {
   plannerName: { type: "string", label: "Planner's name", description: "What new runs call their Planner, the advisor you talk to (it can design new agents). Rename one run's Planner with bb helm rename planner <name>.", default: DEFAULT_SETTINGS.names.planner },
   orchestratorName: { type: "string", label: "Orchestrator's name", description: "What new runs call their Orchestrator. Rename one run's with bb helm rename orch <name>.", default: DEFAULT_SETTINGS.names.orchestrator },
+  gitName: { type: "string", label: "Git agent's name", description: "What new runs call their Git agent. Rename one run's with bb helm rename git <name>.", default: DEFAULT_SETTINGS.names.git },
+  gitOnSignoff: {
+    type: "select",
+    label: "When you sign a project off, the Git agent",
+    description: "It never pushes or merges before your sign-off unless you tell it to. You can always instruct it in its thread to send work anywhere: another remote, a folder on this Mac or an external disk.",
+    options: ["push", "merge-push", "report"] as string[],
+    experimental_optionLabels: {
+      push: "Pushes the project's Helm branch to its remote (GitHub)",
+      "merge-push": "Merges the Helm branch into main and pushes main and the branch",
+      report: "Only reports what is where; sends nothing",
+    },
+    default: DEFAULT_SETTINGS.gitOnSignoff,
+  },
   appsRoot: { type: "string", label: "Apps root folder", description: "Default parent folder for new app repositories: <root>/<run>/<app>. An app can also name its own folder or an existing repository anywhere (brief: \"- Name — tagline · macOS · /path/to/repo\"), and bb helm plan --root sets this per run.", default: DEFAULT_SETTINGS.appsRoot },
   concurrency: { type: "number", label: "Concurrent agents", description: `Default for new runs: how many of a run's agents may run at once (max ${LIMIT_CEILINGS.concurrency}). Change a running run with bb helm limits or the capacity chip.`, default: LIMIT_DEFAULTS.concurrency },
   maxTotalAgents: { type: "number", label: "Agent cap per run", description: `Upper bound on a plan's size (max ${LIMIT_CEILINGS.maxTotalAgents}).`, default: LIMIT_DEFAULTS.maxTotalAgents },
@@ -165,6 +179,7 @@ export function toHelmSettings(v: Values, warn: (m: string) => void = () => {}, 
     gate: perm(v.permissionGate),
     // the Planner runs like the Orchestrator, custom agents like specialists
     planner: perm(v.permissionOrchestrator),
+    git: perm(v.permissionOrchestrator),
     custom: perm(v.permissionSpecialist),
   };
   const nm = (x: unknown, d: string) => (typeof x === "string" && x.trim() ? x.trim().slice(0, 40) : d);
@@ -174,11 +189,13 @@ export function toHelmSettings(v: Values, warn: (m: string) => void = () => {}, 
     permissionMode,
     showLeadsInSidebar: v.showLeadsInSidebar === true,
     appsRoot: typeof v.appsRoot === "string" && v.appsRoot.trim() ? v.appsRoot.trim() : DEFAULT_SETTINGS.appsRoot,
-    names: { planner: nm(v.plannerName, DEFAULT_SETTINGS.names.planner), orchestrator: nm(v.orchestratorName, DEFAULT_SETTINGS.names.orchestrator) },
+    names: { planner: nm(v.plannerName, DEFAULT_SETTINGS.names.planner), orchestrator: nm(v.orchestratorName, DEFAULT_SETTINGS.names.orchestrator), git: nm(v.gitName, DEFAULT_SETTINGS.names.git) },
     defaultModels: {
       planner: withReasoning(parseModelSetting(v.plannerModel, "Default Planner model", warn), v.plannerReasoning, choices),
       orchestrator: withReasoning(parseModelSetting(v.orchestratorModel, "Default Orchestrator model", warn), v.orchestratorReasoning, choices),
+      git: withReasoning(parseModelSetting(v.gitModel, "Default Git agent model", warn), v.gitReasoning, choices),
     },
+    gitOnSignoff: v.gitOnSignoff === "merge-push" || v.gitOnSignoff === "report" ? v.gitOnSignoff : "push",
     weights,
     zeroTolerance: typeof v.zeroTolerance === "string" ? v.zeroTolerance.split(/[,\s]+/).filter((x) => /^S\d+$/.test(x)) : DEFAULT_SETTINGS.zeroTolerance,
     createRemote: v.createRemote === true,

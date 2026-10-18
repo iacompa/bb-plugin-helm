@@ -50,6 +50,21 @@ export const HOST_CONTRACT = defineRpcContract({
     input: z.object({ path: z.string().min(1), branch: z.string().min(1).max(200), files: z.array(RepoFile).max(50), message: z.string().max(200) }),
     output: z.object({ created: z.boolean(), head: z.string(), base: z.string(), userBranch: z.string().nullable() }),
   },
+  /**
+   * The app's one work worktree: `path` checked out on `branch` (created from `base` when it does
+   * not exist). Idempotent; refuses when the branch is checked out in another worktree.
+   */
+  ensureWorktree: {
+    input: z.object({ repo: z.string().min(1).max(1000), path: z.string().min(1).max(1000), branch: z.string().min(1).max(200), base: z.string().min(1).max(300) }),
+    output: z.object({ path: z.string(), branch: z.string(), head: z.string().nullable(), created: z.boolean() }),
+  },
+  /** Every worktree of a repository (the main checkout first); with `status`, each one's uncommitted-change count. */
+  worktrees: {
+    input: z.object({ repo: z.string().min(1).max(1000), status: z.boolean().optional() }),
+    output: z.object({
+      worktrees: z.array(z.object({ path: z.string(), branch: z.string().nullable(), head: z.string().nullable(), main: z.boolean(), dirty: z.number(), missing: z.boolean() })),
+    }),
+  },
   revParse: {
     input: z.object({ repo: z.string().min(1), ref: z.string().min(1).max(300) }),
     output: z.object({ sha: z.string().nullable() }),

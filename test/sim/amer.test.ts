@@ -114,7 +114,7 @@ test("only the Planner designs agents; the human renames anyone and retires cust
   assert.equal(svc.rename(runId, "planner", "Nova"), "Nova · Planner");
   assert.equal(svc.rename(runId, "Ledger", "Keel"), "Keel · GitHub Sync");
   assert.throws(() => svc.rename(runId, "Keel", "Atlas"), /already the name of Atlas · Orchestrator/);
-  assert.deepEqual(svc.agents(runId).map((a) => a.label).sort(), ["Atlas · Orchestrator", "Keel · GitHub Sync", "Nova · Planner"]);
+  assert.deepEqual(svc.agents(runId).map((a) => a.label).sort(), ["Atlas · Orchestrator", "Git Pusher · Git agent", "Keel · GitHub Sync", "Nova · Planner"]);
 
   assert.match(svc.retire(runId, lead.id, "no"), /only custom agents can be retired/);
   assert.match(svc.retire(runId, "Keel", "not needed"), /Keel · GitHub Sync retired \(not needed\)/);

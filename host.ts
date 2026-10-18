@@ -14,6 +14,8 @@ export default experimental_defineHostEntry({
     ensureRepo: (input) => ops.ensureRepo(input),
     inspectPath: (input) => ops.inspectPath(input),
     adoptRepo: (input) => ops.adoptRepo(input),
+    ensureWorktree: (input) => ops.ensureWorktree(input),
+    worktrees: (input) => ops.worktrees(input),
     revParse: (input) => ops.revParse(input),
     isAncestor: (input) => ops.isAncestor(input),
     fileAt: (input) => ops.fileAt(input),

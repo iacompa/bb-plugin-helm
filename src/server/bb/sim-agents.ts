@@ -67,6 +67,7 @@ export function createSimAgents(profileFor: (meta: HelmThreadMeta) => Profile = 
     if (role === "planner" && meta.runId === "planner") return planner(ctx, profile);
     if (role === "planner") return amer(ctx);
     if (role === "custom") return custom(ctx);
+    if (role === "git") return gitAgent(ctx, log);
     if (role === "watch") {
       // the sim Watcher restarts every agent in the packet
       const ids = [...ctx.text.matchAll(/^- id: (\S+)/gm)].map((x) => x[1]);
@@ -84,7 +85,7 @@ export function createSimAgents(profileFor: (meta: HelmThreadMeta) => Profile = 
 }
 
 async function isAlsoLead(ctx: TurnContext): Promise<boolean> {
-  return /also (its )?App Lead|you are also its App Lead/.test(ctx.text) || ctx.worktree?.includes(".bb-worktrees") === true;
+  return /also (its )?App Lead|you are also its App Lead/.test(ctx.text) || /\/\.(bb-worktrees|helm-work)\//.test(ctx.worktree ?? "");
 }
 
 async function orchestrator(ctx: TurnContext): Promise<string> {
@@ -100,6 +101,24 @@ async function orchestrator(ctx: TurnContext): Promise<string> {
 async function amer(ctx: TurnContext): Promise<string> {
   if (/From the human|Message from/.test(ctx.text)) await ctx.tool("helm_world", {});
   return "I am the run's Planner; ask me anything.";
+}
+
+/** The Git agent: looks at the worktrees on start; on a worktree alert consolidates each app named; reports. */
+async function gitAgent(ctx: TurnContext, log: string[]): Promise<string> {
+  if (ctx.first) {
+    const r = await ctx.tool("helm_worktrees", {});
+    log.push(`git: ${r.split("\n")[0]}`);
+    return "checked the worktrees";
+  }
+  if (/Helm worktree check/.test(ctx.text)) {
+    for (const m of ctx.text.matchAll(/(\S+) has \d+ worktrees/g)) {
+      const r = await ctx.tool("helm_consolidate", { app: m[1] });
+      log.push(`git consolidate ${m[1]}: ${r.split("\n")[0]}`);
+    }
+    return "consolidated";
+  }
+  if (/signed off/.test(ctx.text)) await ctx.tool("helm_report", { status: "done", summary: "Recorded the signed-off work in GIT-NOTES.md." });
+  return "idle";
 }
 
 /** A custom agent: does its mission once per wake-up and reports. */
@@ -265,7 +284,8 @@ async function gate(ctx: TurnContext, meta: HelmThreadMeta, profile: string): Pr
   if (!wt) return "no worktree";
   const sha = ctx.text.match(/Judge exactly this commit: `([0-9a-f]{7,40})`/)?.[1] ?? ctx.text.match(/Re-check commit ([0-9a-f]{7,40})/)?.[1];
   if (!sha) return "no commit to judge";
-  ctx.git.checkoutDetached(wt, sha);
+  // in the app's shared work worktree HEAD already is the commit under review: never move it
+  if (!wt.includes("/.helm-work/")) ctx.git.checkoutDetached(wt, sha);
   if (profile === "vandal") {
     const w = ctx.git.wts.get(wt)!;
     const first = [...w.work.keys()].find((p) => p.startsWith("src/"));
