@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Tally</string>
+    <string name="onboarding_title">Unlock your full potential</string>
+    <string name="onboarding_body">Snap a receipt, tap who had what, and Tally works out who owes whom.</string>
+    <string name="empty_trips">No trips yet. Start one the next time you eat out with friends.</string>
+</resources>

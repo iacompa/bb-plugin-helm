@@ -1,6 +1,6 @@
 ---
 name: helm-slop-hunter
-description: How the Helm Slop Hunter gate finds unchecked AI output (scanner, then S1 to S12 by hand, one helm_verdict quoting real lines). Use when you are a Helm Slop Hunter.
+description: How the Helm Slop Hunter gate finds unchecked AI output (coverage plan, scanner, S1 to S12 by hand, one helm_verdict quoting real lines). Use when you are a Helm Slop Hunter.
 ---
 
 # Helm Slop Hunter (gate)
@@ -58,21 +58,76 @@ waivers. Respect them, and note the exemption count in your summary.
   calls (skips `#if DEBUG` blocks and CLI entry points) · S6 known token shapes, private
   keys, `.env` files, high-entropy values in secret-named variables, history · S7
   "This function…", "Import dependencies", AI banners, comments that repeat the next line
-  · S11 skips, `expect(true).toBe(true)`-style tautologies, test files with no assertion,
-  mocking the unit under test · S12 `except: pass`, empty `catch`/`.catch`, `try?` on
-  save/write/delete.
+  · S7 stock marketing phrases ("seamless", "unlock your potential", "world-class") in
+  READMEs, store-listing text and UI string files (`S7-copy`) · S11 skips,
+  `expect(true).toBe(true)`-style tautologies, test files with no assertion, mocking the unit
+  under test · S12 `except: pass`, empty `catch`/`.catch`, `try?` on save/write/delete.
 - **Blind:** anything that needs meaning. Hard-coded success, sample data under a
   neutral name, external SDK methods that do not exist, unused exports, S8, S9 and S10
   entirely, weak assertions, catches that log and return a default, and every language
   or phrasing the regexes miss. **Spend your time here.**
 
+## Your slop-check plan (write it before you hunt)
+
+You are given a whole app at one commit, and sometimes named parts on top: your task from the
+lead, a manager or the Orchestrator ("check the new sync code", "the onboarding screens", "the
+Android shell"). Slop hides in the parts nobody planned to look at, so you plan coverage of
+**every part** before you hunt, work the plan, and account for it in your verdict.
+
+1. **Inventory.** `git ls-tree -r --name-only <sha>` and `git diff --stat <base>..<sha>`
+   (base: the previous judged sha on a re-check, else the first build commit). Leave out
+   vendored, generated and build output, and say so.
+2. **Split into areas** a person would name: each SPEC screen or flow; each core module
+   (`packages/core/<x>`); data and storage; networking and API clients; each platform shell
+   (`apps/ios`, `apps/and`, ...); tests; CI, config and manifests; user-facing copy (README,
+   store text, UI strings, onboarding); docs. **Every part your task names is its own area**,
+   word for word, even when it overlaps another.
+3. **Map each area to its rules and a method.** Use this as the default and adjust:
+
+   | Area | Rules | Method |
+   |---|---|---|
+   | Screens and flows | S1, S2, S8, S9, S12 | trace view → view model → repository → network or storage; captures for S9 |
+   | Core logic | S1, S2, S4, S10, S12 | read new and changed files whole; grep the rest |
+   | Data, storage, networking | S2, S3, S5, S6, S12 | trace error paths; typecheck and manifests for S3 |
+   | Platform shells | S3, S5, S10, S12 | SDK calls against installed typings; copy-paste across platforms |
+   | Tests | S11 | one test per main flow, apply the mutation question |
+   | CI, config, manifests | S3, S5, S6 | dependency diff, debug flags, secrets |
+   | User-facing copy | S1, S7, S8, S9 | read all of it with `reference/prose.md`; trace each promise |
+   | Docs | S7, S8 | claims sweep |
+   | History | S6 | the scanner's history pass |
+
+4. **Set depth by risk.** New and heavily changed files and anything on a main flow: read
+   whole. Unchanged or low-risk files: targeted greps and a sample. Say which.
+5. **Write `reports/slop/PLAN.md`** before your first grep:
+
+   ```markdown
+   # Slop plan: <app> @ <sha>
+   Scope: whole app at <sha>; named by the lead: "the new sync code", "onboarding copy".
+   | Area | Paths | Files (new/changed/total) | Rules | Method | Status |
+   |---|---|---|---|---|---|
+   | Named: sync code | packages/core/sync/** | 4/2/9 | S1 S2 S10 S12 | read whole | planned |
+   | Onboarding copy | apps/*/ui/onboarding/**, strings | 3/1/6 | S1 S7 S8 S9 | prose.md, trace claims | planned |
+   ```
+
+6. **Work area by area** and update Status as you go: `done`, `partial: <why>` or
+   `not checked: <why>`. After a compaction, PLAN.md tells you where you were.
+7. **Account for it.** Before the verdict, every area has a status, every file in the diff
+   stat falls in an area, and the plan lists which files you read whole. Add a `coverage`
+   check (`"ok": true` only when every area is `done`, or `partial`/`not checked` with the gap
+   also listed under `unverified`), and put the count in your summary ("12 areas, 11 done;
+   31 of 34 changed files read whole").
+
+Keep the plan in proportion: a five-file fix gets three rows, written in minutes. The plan
+serves the hunt; it does not replace it.
+
 ## Protocol
 
 1. **Pin the commit** named in your brief or Helm's "Re-check commit …" message:
    `git fetch . 2>/dev/null; git checkout --detach <sha>`. Stay there until accepted.
-2. Read `ACCEPTANCE.md` and the scanner findings in your brief ("Already found by the
-   deterministic scanner"). Call `helm_slop_scan {}` and save its output to
-   `reports/slop/scan.txt` (cite it as the `scan` check's `ref`).
+2. Read `ACCEPTANCE.md`, your task and the scanner findings in your brief ("Already found
+   by the deterministic scanner"). **Write `reports/slop/PLAN.md`** (section above). Call
+   `helm_slop_scan {}` and save its output to `reports/slop/scan.txt` (cite it as the `scan`
+   check's `ref`).
 3. **Verify the scanner items.** Do not pad your verdict with them, but Helm does **not**
    file scanner output as findings: every scanner item you confirm is real and must be
    fixed goes into your verdict once, with its exact quote. Drop false positives (say so in
@@ -83,8 +138,10 @@ waivers. Respect them, and note the exemption count in your summary.
 5. **Dependencies are real (S3).** Every dependency used exists in the manifest and
    lockfile and is used; every imported symbol exists in the installed version (typecheck
    result, or open the typings).
-6. **Claims versus code (S8).** Every sentence in `README.md`, store-listing drafts and
-   visible UI copy that promises behaviour: find the code that does it. List those with none.
+6. **Claims versus code (S8) and copy slop (S7, S9).** Every sentence in `README.md`,
+   store-listing drafts and visible UI copy that promises behaviour: find the code that does
+   it, and list those with none. Read all user-facing copy with `reference/prose.md`: name
+   the pattern, quote the line, give the fix in a few words, never rewrite it.
 7. **Fake data by another name (S2).** Trace what the main screens show back to its source.
    A literal, a `random` or a stub reaching a release build is a finding.
 8. **Tests that can fail (S11).** Sample the tests for the main flows; for each, ask what
@@ -98,7 +155,8 @@ waivers. Respect them, and note the exemption count in your summary.
     labels, domain-real sample content. **Never pass UI you could not see**. List those
     screens under `unverified`.
 12. **Quotes:** copy each from the judged commit, `git show <sha>:<path> | sed -n '<l-2>,<l+2>p'`.
-13. **Clean up, then submit.** `git status --porcelain` shows nothing outside `reports/`;
+13. **Close the plan.** Every area in PLAN.md has a status; record the `coverage` check.
+14. **Clean up, then submit.** `git status --porcelain` shows nothing outside `reports/`;
     `git rev-parse HEAD` equals the sha; do not commit. One `helm_verdict`. Prefer fewer,
     real findings over many weak ones; at most 10 nits.
 
@@ -193,7 +251,8 @@ A lead is slop only if the tell holds and no **guard** applies.
   "checks": [
     {"id": "scan",   "ok": false, "how": "helm_slop_scan on 9f2c1ab → 2 findings, 1 confirmed", "ref": "reports/slop/scan.txt"},
     {"id": "build",  "ok": true,  "how": ".helm/run-check.sh build -- swift build → exit 0",     "ref": "reports/checks/build.txt"},
-    {"id": "claims", "ok": false, "how": "traced 9 README claims to code; 1 unbacked",           "ref": "README.md:18"}
+    {"id": "claims", "ok": false, "how": "traced 9 README claims to code; 1 unbacked",           "ref": "README.md:18"},
+    {"id": "coverage", "ok": true, "how": "PLAN.md: 12 areas, 11 done, 1 not checked (Windows shell, under unverified); 31/34 changed files read whole", "ref": "reports/slop/PLAN.md"}
   ],
   "findings": [
     {"id": "F-1", "rule": "S6", "severity": "blocker", "path": "Sources/Upload/Client.swift", "line": 41,
@@ -264,9 +323,9 @@ could not verify under `unverified` and judge the rest.
 
 ## Context hygiene
 
-Read the diff, the scanner output and the files on the main flows, not the whole tree.
+Read the diff, the scanner output and the files your plan says to read, not the whole tree.
 Keep notes in `reports/slop/`. After a compaction re-read your BRIEF and `ACCEPTANCE.md`,
-call `helm_context`, and confirm HEAD still equals the judged sha.
+call `helm_context`, confirm HEAD still equals the judged sha, and continue from PLAN.md.
 
 ## Never
 
@@ -276,6 +335,8 @@ call `helm_context`, and confirm HEAD still equals the judged sha.
 - Never waive, downgrade or skip a zero-tolerance item; never pass with one open.
 - Never report a finding whose quote you did not copy from the judged commit.
 - Never pass UI you could not see or a claim you could not trace to code.
+- Never pass with an area of your plan unaccounted for, and never say or imply that a line
+  was written by AI: name the pattern instead.
 - Never write outside your own worktree's `reports/**`, and never touch the human's own
   checkout or a read-only folder. Judge only the app's own repository at the judged commit.
 - Never message the human outside `helm_need`; never spawn threads yourself.
@@ -284,3 +345,5 @@ call `helm_context`, and confirm HEAD still equals the judged sha.
 ## Sources
 
 Synthesised, not copied: Google eng-practices code review guide; the package-hallucination ("slopsquatting") study (Spracklen et al., 2025); "Investigating the Smells of LLM Generated Code" (arXiv 2510.03029); the test smell catalogue; OWASP Mobile Top 10 (2024).
+
+`reference/prose.md` and the scanner's `S7-copy` word list are adapted from Peter Yang's no-ai-slop skill (MIT, Copyright (c) 2026 Peter Yang): Helm kept only the detect job, applied it to app copy and mapped it to S7, S8 and S9. See THIRD_PARTY_NOTICES.md.

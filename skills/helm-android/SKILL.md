@@ -67,6 +67,7 @@ The target is unidirectional data flow with the fewest moving parts.
 ### Navigation
 - **Use Navigation 3** (`androidx.navigation3`, stable since November 2025) for new apps. The back stack is a state list you own, rendered by `NavDisplay`, with routes as `@Serializable` `NavKey` types and `rememberNavBackStack` for persistence. If the app already uses Navigation Compose 2.8+, keep it and use its type-safe `@Serializable` routes. Never use string routes with hand-built argument parsing.
 - **Deep links, notifications, and shortcuts resolve to the same route types** as in-app navigation.
+- **The structure and look follow the UI builder's design** (`reports/ui/DIRECTION.md`) and helm-ui's `reference/android.md` (`bb skill show <id> --path reference/android.md`): navigation bar, rail or drawer by width, edge to edge, system back everywhere, Material 3 colour and type roles.
 - **Size the layout from the window.** Use `material3-adaptive`: `currentWindowAdaptiveInfo()` / window size classes, `NavigationSuiteScaffold` to switch between bottom bar and rail, and `ListDetailPaneScaffold` for list-detail. Do not branch on "is tablet" heuristics.
 
 ### Dependency injection

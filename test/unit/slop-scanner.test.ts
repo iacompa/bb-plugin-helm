@@ -72,6 +72,7 @@ test("§8 fixture layout: every planted fixture has expectations and every expec
     "s3-invented-import",
     "s5-debug-logging",
     "s6-live-key",
+    "s7-generic-copy",
     "s7-narration",
   ]);
   assert.deepEqual(fixtureNames("control"), ["clean-android", "clean-ios", "clean-ts"]);
@@ -209,6 +210,15 @@ test("control look-alikes are shielded by context, not by luck", () => {
   const r3 = scan({ files: ios.files.map((f) => (f === log ? noDebug : f)), loggers: ios.loggers });
   assert.ok(!r3.findings.some((f) => f.rule === "S5" && f.path === log.path));
   assert.equal(r3.exempted, 2);
+});
+
+test("S7 stock copy is flagged only in text people read: READMEs, store listings and UI strings", () => {
+  const line = "Sync your notes seamlessly across devices.";
+  const paths = ["README.md", "apps/ios/README.md", "fastlane/metadata/en-US/description.txt", "app/src/main/res/values-de/strings.xml", "Sources/App/en.lproj/Localizable.strings", "lib/l10n/app_en.arb", "docs/notes.md", "src/sync.ts", "tests/README.md", "node_modules/x/README.md"];
+  const res = scan({ files: paths.map((path) => ({ path, content: path.endsWith(".ts") ? `// ${line}` : line })) });
+  const hit = res.findings.filter((f) => f.ruleId === "S7-copy").map((f) => f.path).sort();
+  assert.deepEqual(hit, paths.slice(0, 6).sort());
+  assert.ok(!scan({ files: [{ path: "README.md", content: "Snap a receipt and Tally works out who owes whom." }] }).findings.length);
 });
 
 test("S6 entropy rule: credential-like literals are flagged; interpolations and cache keys are not", () => {

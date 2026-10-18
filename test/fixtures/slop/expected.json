@@ -31,6 +31,13 @@
     { "rule": "S6", "path": "test/uploads.test.ts", "line": 8 },
     { "rule": "S6", "path": "src/config.ts", "line": 0 }
   ],
+  "s7-generic-copy": [
+    { "rule": "S7", "path": "README.md", "line": 3 },
+    { "rule": "S7", "path": "README.md", "line": 8 },
+    { "rule": "S7", "path": "README.md", "line": 11 },
+    { "rule": "S7", "path": "app/src/main/res/values/strings.xml", "line": 4 },
+    { "rule": "S7", "path": "Sources/Tally/Resources/en.lproj/Localizable.strings", "line": 3 }
+  ],
   "s7-narration": [
     { "rule": "S7", "path": "src/cart.ts", "line": 1 },
     { "rule": "S7", "path": "src/cart.ts", "line": 2 },

@@ -72,6 +72,9 @@ test("a phone app's UI builder is told to capture every page on the devices the 
   assert.match(brief, /## Screenshots on these phones \(set by the human\)\nCapture every page of the app on each of these devices \(the human picked them in Screens\): iPhone 18 Pro, iPhone Air, Pixel 9\./, "an iOS and Android app: its platforms' devices, in Helm's order; unknown names dropped");
   assert.match(brief, /Android: one emulator per model/);
   assert.match(brief, /home--default--iphone-18-pro--light\.png/);
+  assert.match(brief, /## Native design \(iOS and Android\)\nThis app gets two native designs that share one identity/, "the UI builder is sent to the native references for its platforms");
+  assert.match(brief, /`reference\/ios\.md` and `reference\/android\.md`/);
+  assert.match(brief, /reports\/ui\/AUDIT\.md/);
   const lead = h.repo.listNodes(runId).find((n) => n.role === "lead");
   if (lead) assert.doesNotMatch(h.engine.buildBrief(h.engine.run(runId), lead), /## Screenshots on these phones/);
 });

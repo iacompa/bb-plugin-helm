@@ -29,6 +29,14 @@ const isComment = (line: string) => /^\s*(\/\/|#|\/\*|\*|<!--)/.test(line);
 /** A comment that explains *why* (reasons, constraints, references) is never narration. */
 export const WHY_SIGNAL = /\b(because|since|so that|so we|otherwise|avoid|avoids|must|never|until|instead|workaround|caveat|note|NB|see|why|unless|rather than|in order to|required by|expected)\b|https?:|#\d+|:\s/i;
 export const USER_DATA = /\b(email|e-mail|password|passwd|token|ssn|phone|address|user(name)?|creditcard|card(number)?|dob|birth)/i;
+/** Stock phrases of generated marketing copy (adapted from the no-ai-slop word list, MIT; see THIRD_PARTY_NOTICES.md). */
+export const GENERIC_COPY =
+  /\b(delv(e|es|ing) into|tapestry|seamless(ly)?|cutting[- ]edge|game[- ]chang(er|ers|ing)|supercharg(e|es|ed|ing)|unlock(s|ing)? (your|the|its) (full |true )?(potential|power)|elevate (your|the)|empower(s|ing)? (you|users|teams|people|creators|businesses)|revolutioni[sz](e|es|ing)|next[- ]level|best[- ]in[- ]class|world[- ]class|harness(es|ing)? the power|in today['’]?s (fast-paced|digital|modern) world|look no further|effortless(ly)?|blazing(ly)?[- ]fast|paradigm shift|ever[- ]evolving|it['’]?s worth noting|let['’]?s dive in)\b/i;
+/** Text people read: READMEs, store-listing text and UI string resources, outside tests, fixtures and vendored code. */
+export function isUserCopy(path: string): boolean {
+  if (/(^|\/)(tests?|__tests__|fixtures|examples|node_modules|Pods|vendor|build|dist|\.build)\//.test(path)) return false;
+  return /(^|\/)README(\.[\w-]+)?\.md$|(^|\/)fastlane\/metadata\/.+\.txt$|\.(strings|stringsdict|arb|xcstrings)$|(^|\/)res\/values[^/]*\/strings\.xml$/i.test(path);
+}
 
 export const LINE_RULES: LineRule[] = [
   // ── S1 placeholders ──
@@ -196,6 +204,18 @@ export const LINE_RULES: LineRule[] = [
     languages: "any",
     why: "Auto-generated banner.",
     fix: "Remove the banner.",
+  },
+  {
+    id: "S7-copy",
+    rule: "S7",
+    severity: "nit",
+    appliesTo: "all",
+    // only in text people read (READMEs, store listings, UI strings), never in code
+    regex: GENERIC_COPY,
+    languages: "any",
+    why: "Stock phrase that would fit any product; the reader learns nothing about this one.",
+    fix: "Say what this app does instead: the action, the number, the mechanism.",
+    excludeIf: (_line, path) => !isUserCopy(path),
   },
   // ── S11 skipped tests (test files) ──
   {

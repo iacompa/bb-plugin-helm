@@ -8,6 +8,8 @@ Orchestrator → Managers (only when apps > 4) → App Leads → Specialists + G
 
 You get a plan from a plain-language brief, models chosen every run, a graph and board of every agent, directives that reach the whole chain of command with receipts, one Needs-you inbox, and Ready gated on verified evidence.
 
+Every agent loads the skills for its role by default (`skills/`). The UI builder designs natively for iOS and Android (a direction contract, a visual target per screen, captures on your devices, compare-and-fix, and a native self-audit). The Slop Hunter writes a coverage plan for every part of the app it is given before it hunts, and checks user-facing copy for stock phrasing and unbacked claims. The Reviewer reviews design first, then line by line, and says what is solid as well as what must change.
+
 The full brief and the UI contract are in [spec/](spec/). How the design is built is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). What was proven on this machine is in [docs/VERIFY.md](docs/VERIFY.md). Every default and deviation is in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Requirements
@@ -169,4 +171,4 @@ It records what failed and where, never the contents of your brief or messages. 
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). Some agent skills adapt open-source guidance (Uizze and Impeccable, platform-design-skills, no-ai-slop, code-review-excellence); their licences and what Helm changed are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

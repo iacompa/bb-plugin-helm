@@ -223,8 +223,8 @@ export function deviceFor(platforms: string[]): Device {
   return "any";
 }
 
-/** Folders of agents' proof, not the app's pages. */
-const EVIDENCE_DIR = /(^|\/)(evidence|reviews?|slop|audit|security|compliance|tests?|checks|debug|probes?|repro|diffs?|baselines?|failures?|tmp|temp|old|archive|before|after)\//i;
+/** Folders of agents' proof and design targets, not the app's pages. */
+const EVIDENCE_DIR = /(^|\/)(evidence|reviews?|slop|audit|security|compliance|tests?|checks|debug|probes?|repro|diffs?|baselines?|targets?|compare|comparisons?|failures?|tmp|temp|old|archive|before|after)\//i;
 /** File names of debug captures: before/after shots, probes, or a commit or a time in the name. */
 const DEBUG_WORD = /^(before|after|probe|stuck|debug|repro|worktree|reload|persisted|unresolved|crash|failed?|failure|diff|wip|tmp|temp|old|test|broken|bug)$/i;
 const DEBUG_TOKEN = /^(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}$|^\d{3,4}z$|^\d{8}(t\d{4,6}z?)?$|^\d{10,13}$/i;

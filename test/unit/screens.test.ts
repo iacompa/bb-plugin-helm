@@ -70,6 +70,8 @@ test("evidence and debug captures are never pages: before/after shots, probes, a
     "reports/ui/web-stuck-wasm-unresolved.png",
     "screenshots/daw-review-2026-09-30-layout.png",
     "reports/ui/debug/home.png",
+    "reports/ui/targets/home--iphone-18-pro.png",
+    "reports/ui/evidence/home--compare--iphone-18-pro.png",
   ])
     assert.ok(debugCapture(rel), rel);
   for (const rel of ["reports/ui/home--default--phone--light.png", "reports/ios/screens/01-settings.png", "reports/ui/room-detail--empty--phone--dark.png", "reports/ui/add-photos.png"]) assert.ok(!debugCapture(rel), rel);

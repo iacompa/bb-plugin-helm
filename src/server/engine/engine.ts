@@ -1061,6 +1061,11 @@ export class Engine {
       if (run.autoAdvance === "ask" && !this.autonomous(run)) lines.push("## Waves\nWhen apps wait in Intake and capacity frees up, Helm asks the human to approve the next wave. Use `helm_propose_wave` if you want to suggest a different set.");
     }
     if (this.autonomous(run)) lines.push(`## Autonomy\n${autonomyText(n.role === "orch")}`);
+    if (app && app.kind !== "review" && (n.role === "ui" || (this.isLeadNode(n) && app.shape === "solo"))) {
+      const native = [app.platforms.includes("ios") ? ["iOS", "reference/ios.md"] : null, app.platforms.includes("and") ? ["Android", "reference/android.md"] : null].filter((x): x is string[] => !!x);
+      if (native.length)
+        lines.push(`## Native design (${native.map((x) => x[0]).join(" and ")})\n${native.length > 1 ? "This app gets two native designs that share one identity, never one design forced onto both." : `This app is a native ${native[0][0]} app.`} Before you design, read helm-ui's ${native.map((x) => `\`${x[1]}\``).join(" and ")} (in the skill's folder, or \`bb skill show <id> --path ${native[0][1]}\`). Write the direction in \`reports/ui/DIRECTION.md\` first, and before you report done run helm-ui's \`reference/native-audit.md\` and write \`reports/ui/AUDIT.md\`.`);
+    }
     if (app && (n.role === "ui" || (n.role === "platform" && (n.platform === "ios" || n.platform === "and"))) && app.platforms.some((p) => p === "ios" || p === "and")) lines.push(`## Screenshots on these phones (set by the human)\n${phoneCaptureText(devicesForPlatforms(this.screenDevices(), app.platforms))}`);
     else if (app && (n.role === "ui" || (n.role === "platform" && (n.platform === "mac" || n.platform === "win" || n.platform === "web"))) && app.platforms.some((p) => p === "mac" || p === "win" || p === "web")) lines.push(`## Screenshots at these window sizes\n${computerCaptureText(app.platforms)}`);
     if (n.tier !== "git") {

@@ -126,6 +126,10 @@ reason (for example "SPEC: CLI only, no UI surface"), then stop. Your lead relea
 Your BRIEF names your role and exact scope globs (they win if they differ from below).
 
 ### UI builder — `apps/*/ui/**`, `packages/design-system/**`, `reports/ui/**`
+- Follow helm-ui's loop: direction (`reports/ui/DIRECTION.md`), a visual target per key
+  screen, tokens, components, screens, captures on the human's devices, compare and fix,
+  then the native audit (`reports/ui/AUDIT.md`) with no P0 or P1 open. Phone apps are
+  designed natively for each platform (helm-ui `reference/ios.md`, `reference/android.md`).
 - Design tokens (colour, type scale, spacing scale, radii, elevation, motion), components,
   then every screen in SPEC with **loading, empty, error, offline and permission-denied**
   states, light and dark, accessibility (labels, AA contrast, large type, 44 pt targets).

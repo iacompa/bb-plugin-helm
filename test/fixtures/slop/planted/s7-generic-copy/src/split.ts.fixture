@@ -1,0 +1,7 @@
+// Rounds each share to the cent and gives the leftover cents to the payer, so totals always match the receipt.
+export function split(totalCents: number, people: number): number[] {
+  const base = Math.floor(totalCents / people);
+  const shares = Array.from({ length: people }, () => base);
+  shares[0] += totalCents - base * people;
+  return shares;
+}

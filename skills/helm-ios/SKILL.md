@@ -72,6 +72,7 @@ The aim is the least architecture that keeps views dumb, state testable, and Cor
 - **Hold routes in an enum.** Deep links and App Intents then push the same `Route` values, so there is one way to reach each screen.
 - **For tabs, use `TabView` with the `Tab` type** (iOS 18+), not `.tabItem`. Drive sheets with `.sheet(item:)` from optional state, not with a pile of booleans.
 - **Dismiss with `@Environment(\.dismiss)`.** `presentationMode` is deprecated.
+- **The structure and look follow the UI builder's design** (`reports/ui/DIRECTION.md`) and helm-ui's `reference/ios.md` (`bb skill show <id> --path reference/ios.md`): tab bar for places, stack for hierarchy, sheets for tasks, never a custom back button that breaks the edge swipe, no opaque bars painted over the system's.
 
 ### Dependency injection
 - **Compose dependencies by hand in the composition root.** `AppMain.swift` builds Core's entry points and your services once, then injects them with `.environment(...)` or initialiser parameters. Do not add a DI framework.

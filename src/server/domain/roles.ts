@@ -458,6 +458,8 @@ export function skillsFor(n: { role: Role; platform: Platform | null; alsoLead: 
   if (tools.includes("unreal") && (leads || n.role === "code" || n.role === "platform")) out.push("helm-unreal");
   if (leads && solo && app) {
     for (const p of app.platforms.slice(0, 2)) out.push(PLATFORM_SKILL[p]);
+    // a solo lead is its own UI builder
+    if (kind === "app" || kind === "web") out.push("helm-ui");
     if (kind !== "app" && kind !== "review") out.push(CORE_SKILL[kind]);
     if (kind === "app" && needs.some((x) => SERVER_NEEDS.includes(x))) out.push("helm-backend");
     if (has("database")) out.push("helm-data");
