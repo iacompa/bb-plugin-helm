@@ -32,7 +32,7 @@ interface Row {
 }
 interface Branch {
   name: string;
-  kind: "main" | "work" | "lane" | "agent" | "other";
+  kind: "main" | "work" | "lane" | "helm" | "agent" | "other";
   worktree: string | null;
 }
 interface App {
@@ -76,11 +76,12 @@ const ROLE_HINT: Record<Role, string> = {
   extra: "Not one of Helm's: an older per-agent worktree, or one made by a person or a tool.",
 };
 const STATE: Record<State, string> = { running: "Running", editing: "Being edited", idle: "Idle", missing: "Missing on disk" };
-const KIND: Record<Branch["kind"], string> = { main: "main", work: "work branch", lane: "lane", agent: "agent branch", other: "yours" };
+const KIND: Record<Branch["kind"], string> = { main: "main", work: "work branch", lane: "lane", helm: "Helm branch", agent: "agent branch", other: "yours" };
 const KIND_HINT: Record<Branch["kind"], string> = {
   main: "The project's main branch: work reaches it when you sign off.",
   work: "Where every agent of the project commits.",
   lane: "A branch the Git agent made for parallel work, within this run's limit.",
+  helm: "A live Helm run's Helm branch or work branch (this run's or another's): kept, never deleted, not part of the limit.",
   agent: "Left by an agent's own worktree; the Git agent deletes it once it is merged.",
   other: "Yours or another tool's: counted, never touched, not part of the limit.",
 };

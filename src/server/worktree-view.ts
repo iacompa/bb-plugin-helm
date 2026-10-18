@@ -47,7 +47,7 @@ export interface WtViewRow {
 
 export interface WtViewBranch {
   name: string;
-  kind: "main" | "work" | "lane" | "agent" | "other";
+  kind: "main" | "work" | "lane" | "helm" | "agent" | "other";
   /** The worktree that has it checked out, if any. */
   worktree: string | null;
 }
@@ -250,7 +250,7 @@ export class WorktreesView {
     // never read yet: the run's apps, with nothing known about them
     const list: AppWorktrees[] =
       snap?.list ??
-      apps.map((a) => ({ appId: a.id, name: a.name, repo: a.repoPath, work: this.e.workTree(runId, a.id), branch: this.e.repo.appExtra(runId, a.id).integrationBranch, worktrees: [], extra: 0, cap: lim.worktrees, branchCap: lim.branches, overBranches: 0, laneBranches: [], mainBranch: a.userBranch ?? "main", legacy: false, extraBranches: [], otherBranches: [], error: null }));
+      apps.map((a) => ({ appId: a.id, name: a.name, repo: a.repoPath, work: this.e.workTree(runId, a.id), branch: this.e.repo.appExtra(runId, a.id).integrationBranch, worktrees: [], extra: 0, cap: lim.worktrees, branchCap: lim.branches, overBranches: 0, laneBranches: [], mainBranch: a.userBranch ?? "main", legacy: false, helmBranches: [], extraBranches: [], otherBranches: [], error: null }));
     const storeOwners = new Map<string, string[]>();
     for (const a of list) {
       const g = a.repo ? m?.stores.get(a.repo)?.gitDir : null;
@@ -284,6 +284,7 @@ export class WorktreesView {
             { name: mainBranch, kind: "main" as const, worktree: at(mainBranch) },
             ...(a.branch && a.branch !== mainBranch ? [{ name: a.branch, kind: "work" as const, worktree: at(a.branch) }] : []),
             ...(a.laneBranches ?? []).map((b) => ({ name: b, kind: "lane" as const, worktree: at(b) })),
+            ...(a.helmBranches ?? []).map((b) => ({ name: b, kind: "helm" as const, worktree: at(b) })),
             ...a.extraBranches.map((b) => ({ name: b, kind: "agent" as const, worktree: at(b) })),
             ...a.otherBranches.filter((b) => b !== mainBranch).map((b) => ({ name: b, kind: "other" as const, worktree: at(b) })),
           ];

@@ -36,7 +36,10 @@ and `helm_worktrees` say the numbers, and Helm tells you when the human changes 
    (`git branch -d`). With a limit of two, lanes stay detached on the work branch instead.
 
 Branches the human or another tool made (`handoff/…`, `spec/…`) are counted in the view but are not
-part of the limit, and you never touch them. Agent branches (`bb/…`, `helm/…`, left by agents or by
+part of the limit, and you never touch them. **Helm branches** (`helm_worktrees` lists them as kept)
+are the branches a live run records: each app's Helm branch (`helm/<run>/<app>`, what its work
+started from) and the work branches of other runs that share the repository. Keep them: never delete
+or move one, even when it is merged. Agent branches (`bb/…`, `helm/…`, left by agents or by
 older Helm runs; Helm's own work branch is always `<app>-work`) are: delete each once it is merged
 into the work branch.
 
@@ -150,7 +153,9 @@ A worktree listed as **missing on disk** is only a stale record: `git -C <repo> 
 ## Extra branches
 
 `helm_worktrees` also lists **agent branches** (`bb/…`, `helm/…`) besides main and the work branch.
-They are left over from agents that made their own. For each one:
+They are left over from agents that made their own. Delete only what it lists as an agent branch:
+never a Helm branch it lists as kept (a run's Helm branch or another run's work branch), even when
+merged. For each agent branch:
 
 1. If its commits are already on the work branch (`git -C <repo> branch --merged <work-branch>`),
    delete it: `git -C <repo> branch -d <branch>` (never `-D`).

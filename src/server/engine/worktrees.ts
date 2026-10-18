@@ -58,6 +58,8 @@ export interface AppWorktrees {
   mainBranch: string;
   /** One worktree per agent and no shared work worktree (an app started before the rule). */
   legacy: boolean;
+  /** Branches a live Helm run records for this repository (an app's Helm branch, another run's work branch): kept, never deleted, not counted in the limit. */
+  helmBranches: string[];
   /** Branches besides main and the work branch that Helm's agents made (bb/…, helm/…): the Git agent removes them once merged. */
   extraBranches: string[];
   /** Other branches (the human's or another tool's): reported, never touched. */
@@ -67,6 +69,20 @@ export interface AppWorktrees {
 
 /** Branches Helm's agents make (BB worktree branches, older Helm branches). */
 const AGENT_BRANCH = /^(bb|helm)\//;
+
+/** Every branch a live run records for a repository: each app's Helm branch (its base) and work branch, in this run and every other one that shares the repository. */
+function recordedBranches(e: Engine, repo: string): Set<string> {
+  const norm = (p: string) => p.replace(/\/+$/, "");
+  const out = new Set<string>();
+  for (const r of e.repo.listRuns()) {
+    if (r.status === "done" || r.status === "cancelled") continue;
+    for (const a of e.repo.listApps(r.id)) {
+      if (!a.repoPath || norm(a.repoPath) !== norm(repo) || a.stage === "cancelled") continue;
+      for (const b of [a.helmBranch, e.repo.appExtra(r.id, a.id).integrationBranch]) if (b) out.add(b);
+    }
+  }
+  return out;
+}
 
 /** Which agents work in which folder (from their BB environments). */
 async function agentsByPath(e: Engine, nodes: NodeInfo[]): Promise<Map<string, string[]>> {
@@ -92,7 +108,7 @@ export async function appWorktrees(e: Engine, runId: string, opts: { appId?: str
     const cap = worktreeCap(e, runId);
     const bCap = branchCap(e, runId);
     const mainBranch = app.userBranch ?? "main";
-    const row: AppWorktrees = { appId: app.id, name: app.name, repo: app.repoPath, work, branch, worktrees: [], extra: 0, cap, branchCap: bCap, overBranches: 0, laneBranches: [], mainBranch, legacy: false, extraBranches: [], otherBranches: [], error: null };
+    const row: AppWorktrees = { appId: app.id, name: app.name, repo: app.repoPath, work, branch, worktrees: [], extra: 0, cap, branchCap: bCap, overBranches: 0, laneBranches: [], mainBranch, legacy: false, helmBranches: [], extraBranches: [], otherBranches: [], error: null };
     out.push(row);
     if (!app.repoPath) continue;
     try {
@@ -104,11 +120,15 @@ export async function appWorktrees(e: Engine, runId: string, opts: { appId?: str
       row.legacy = !work && row.worktrees.length > MAX_WORKTREES;
       const all = res.branches ?? [];
       const keep = new Set([branch, mainBranch, "main", "master"].filter(Boolean));
+      const recorded = recordedBranches(e, app.repoPath);
       const rest = all.filter((b) => !keep.has(b));
       row.laneBranches = branch ? rest.filter((b) => b.startsWith(`${branch}--`)) : [];
-      row.extraBranches = rest.filter((b) => !row.laneBranches.includes(b) && AGENT_BRANCH.test(b));
-      row.otherBranches = rest.filter((b) => !row.laneBranches.includes(b) && !AGENT_BRANCH.test(b));
-      // Helm's branches: main, the work branch, lanes, agent branches (the human's own are not counted)
+      // a branch a live run records (this app's Helm branch, another run's work branch) is never an extra one
+      const free = rest.filter((b) => !row.laneBranches.includes(b) && !recorded.has(b));
+      row.helmBranches = rest.filter((b) => !row.laneBranches.includes(b) && recorded.has(b));
+      row.extraBranches = free.filter((b) => AGENT_BRANCH.test(b));
+      row.otherBranches = free.filter((b) => !AGENT_BRANCH.test(b));
+      // Helm's branches: main, the work branch, lanes, agent branches (the human's own and recorded Helm branches are not counted)
       const helm = (all.includes(mainBranch) ? 1 : 0) + (branch && branch !== mainBranch && all.includes(branch) ? 1 : 0) + row.laneBranches.length + row.extraBranches.length;
       row.overBranches = Math.max(0, helm - bCap);
     } catch (err) {
@@ -139,6 +159,7 @@ export function worktreesText(list: AppWorktrees[]): string {
     for (const w of a.worktrees) lines.push(`  - ${w.role.padEnd(8)} ${w.path} · ${w.branch ?? "detached"} @ ${w.head?.slice(0, 9) ?? "?"}${w.missing ? " · MISSING on disk (git worktree prune)" : w.statusUnknown ? " · status unknown (git status failed; check it before removing anything)" : w.dirty ? ` · ${w.dirty} uncommitted` : " · clean"}${w.agents.length ? ` · agents: ${w.agents.join(", ")}` : ""}`);
     if (a.laneBranches.length) lines.push(`  lane branches (yours, within the limit of ${a.branchCap}): ${a.laneBranches.join(", ")}`);
     if (a.overBranches > 0) lines.push(`  ${a.overBranches} branch(es) over the limit of ${a.branchCap}`);
+    if (a.helmBranches.length) lines.push(`  Helm branches a live run records (Helm branches and other runs' work branches; keep them, never delete): ${a.helmBranches.join(", ")}`);
     if (a.extraBranches.length) lines.push(`  agent branches to remove once merged into the work branch (git branch -d, never -D): ${a.extraBranches.slice(0, 30).join(", ")}${a.extraBranches.length > 30 ? " …" : ""}`);
     if (a.otherBranches.length) lines.push(`  other branches (the human's; leave them): ${a.otherBranches.slice(0, 20).join(", ")}${a.otherBranches.length > 20 ? " …" : ""}`);
   }
@@ -169,7 +190,7 @@ export async function auditWorktrees(e: Engine, runId: string): Promise<string[]
     ]
       .filter(Boolean)
       .join("; ");
-  e.sendFromHelm(runId, GIT_ID, `Helm worktree check: ${over.map(what).join("; ")} (this run's rule: ${branchCap(e, runId) <= 2 ? "two branches, main and the work branch" : `at most ${branchCap(e, runId)} branches, main, the work branch and lane branches you made`}; worktrees: the checkout, the shared work worktree and any lanes you made, at most ${worktreeCap(e, runId)} per project). Call helm_worktrees, then: helm_consolidate an app that uses one worktree per agent once that work is committed and on the work branch; remove lanes that are merged and idle to get under the limit; \`git branch -d\` agent branches already merged into the work branch. Your instructions on git are binding on every agent. Tell the human what you did.`, { key: `wt-alert:${runId}:${sig}` });
+  e.sendFromHelm(runId, GIT_ID, `Helm worktree check: ${over.map(what).join("; ")} (this run's rule: ${branchCap(e, runId) <= 2 ? "two branches, main and the work branch" : `at most ${branchCap(e, runId)} branches, main, the work branch and lane branches you made`}; worktrees: the checkout, the shared work worktree and any lanes you made, at most ${worktreeCap(e, runId)} per project). Call helm_worktrees, then: helm_consolidate an app that uses one worktree per agent once that work is committed and on the work branch; remove lanes that are merged and idle to get under the limit; \`git branch -d\` agent branches already merged into the work branch (only those helm_worktrees lists as agent branches: never a Helm branch a live run records, never the human's). Your instructions on git are binding on every agent. Tell the human what you did.`, { key: `wt-alert:${runId}:${sig}` });
   return over.map((a) => a.appId);
 }
 

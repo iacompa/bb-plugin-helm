@@ -118,6 +118,38 @@ test("the audit flags agent branches beside main and the work branch, and leaves
   assert.ok(sentTo(h, runId, GIT_ID, /Helm worktree check: Alpha has 1 agent branch\(es\) besides main and alpha-work.*git branch -d/s));
 });
 
+test("a run's Helm branch and another live run's work branch on the same repository are kept, not agent branches", async () => {
+  const { h, runId } = await run();
+  const repo = h.repo.getApp(runId, "alpha")!.repoPath!;
+  const refs = h.sim.git.repos.get(repo)!.refs;
+  const tip = h.sim.git.resolve(repo, "alpha-work")!;
+  // this run's Helm branch (where the app's work started), merged long ago
+  refs.set("helm/two/alpha", tip);
+  h.repo.updateApp(runId, "alpha", { helmBranch: "helm/two/alpha" });
+  // a second live run working on the same repository from its own lead's branch
+  const other = h.engine.createRun({ name: "Other", brief: "x", portfolio: pf("Alpha"), slots: CHEAP, limits: { concurrency: 4, autonomy: "high" } }).runId;
+  refs.set("bb/alpha-app-lead-thr_other", tip);
+  h.repo.updateApp(other, "alpha", { repoPath: repo, integrationBranch: "bb/alpha-app-lead-thr_other", helmBranch: "helm/other/alpha" });
+  await h.clock.advance(H);
+  let [a] = await appWorktrees(h.engine, runId, { appId: "alpha" });
+  assert.deepEqual(a.helmBranches.sort(), ["bb/alpha-app-lead-thr_other", "helm/two/alpha"]);
+  assert.deepEqual(a.extraBranches, []);
+  assert.equal(a.overBranches, 0, "recorded Helm branches are not counted in the limit");
+  assert.deepEqual(await auditWorktrees(h.engine, runId), [], "nothing for the Git agent to delete");
+  // a real leftover is still flagged, and the alert says which branches may go
+  refs.set("bb/alpha-builder-thr_x", tip);
+  await h.clock.advance(H);
+  [a] = await appWorktrees(h.engine, runId, { appId: "alpha" });
+  assert.deepEqual(a.extraBranches, ["bb/alpha-builder-thr_x"]);
+  assert.deepEqual(await auditWorktrees(h.engine, runId), ["alpha"]);
+  assert.ok(sentTo(h, runId, GIT_ID, /1 agent branch\(es\).*never a Helm branch a live run records/s));
+  // once the other run is cancelled its work branch is an ordinary leftover again
+  h.repo.updateRun(other, { status: "cancelled" });
+  [a] = await appWorktrees(h.engine, runId, { appId: "alpha" });
+  assert.deepEqual(a.helmBranches, ["helm/two/alpha"]);
+  assert.deepEqual(a.extraBranches.sort(), ["bb/alpha-app-lead-thr_other", "bb/alpha-builder-thr_x"]);
+});
+
 test("the Git agent's evidence is checked in the Studio and the apps' repositories", async () => {
   const { h, runId } = await run();
   const git = h.repo.getNode(runId, GIT_ID)!;
