@@ -8,7 +8,7 @@ import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { migrate, Repo, type SqlDb } from "./src/server/db/repo.ts";
 import { RealBB } from "./src/server/bb/real.ts";
 import { runDoctor } from "./src/server/bb/doctor.ts";
-import { Engine } from "./src/server/engine/engine.ts";
+import { Engine, MODEL_CHOICES_KEY } from "./src/server/engine/engine.ts";
 import { installEventHandler, reconcile } from "./src/server/engine/events.ts";
 import { callTool, TOOL_DEFS } from "./src/server/agent/tools.ts";
 import { PLANNER_TOOLS, skillsFor, toolsForNode } from "./src/server/domain/roles.ts";
@@ -21,7 +21,7 @@ import { HelmService } from "./src/server/service.ts";
 import { buildCli } from "./src/server/cli.ts";
 import { registerRpc } from "./src/server/rpc.ts";
 import { Coalescer } from "./src/server/realtime.ts";
-import { bindSettings } from "./src/server/settings.ts";
+import { bindSettings, type ModelChoice } from "./src/server/settings.ts";
 import { PLANNER_CHANNEL, RUNS_CHANNEL } from "./src/shared/protocol.ts";
 import type { NodeInfo } from "./src/shared/types.ts";
 import { journaledHandlers, type RpcHandler } from "./src/server/journal.ts";
@@ -46,7 +46,15 @@ export default async function plugin(bb: BbPluginApi) {
     warn: (m: string) => (bb.log.warn(m), journal("warn", m)),
     error: (m: string) => (bb.log.error(m), journal("error", m)),
   };
-  const settings = await bindSettings(bb);
+  // the default-model settings offer the models of connected providers (the last catalog Helm saw)
+  const choices = (() => {
+    try {
+      return JSON.parse(repo.getMeta(MODEL_CHOICES_KEY) ?? "[]") as ModelChoice[];
+    } catch {
+      return [];
+    }
+  })();
+  const settings = await bindSettings(bb, choices);
   const port = new RealBB(bb, { log: log.warn });
   port.install();
 

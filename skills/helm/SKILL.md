@@ -145,7 +145,11 @@ bb helm retire <agent> --yes [--reason "<why>"]
   model the user chooses: the run's `planner` slot, else the **Default Planner model** setting,
   else the Orchestrator's model. It never picks a model by itself. It is idle until asked, so it
   uses no capacity while waiting. Defaults for new runs: Helm panel → Models → Default models,
-  or the `plannerModel` and `orchestratorModel` settings (`provider/model:reasoning`).
+  or the Settings dropdowns `plannerModel` / `plannerReasoning` and `orchestratorModel` /
+  `orchestratorReasoning`. The model dropdowns list the connected providers' models
+  (`provider/model`), saved from the last catalog Helm read; a newly connected provider shows
+  after `bb plugin reload helm`. On the graph the Planner sits just below the Orchestrator with
+  no line to it: it reports to nobody and sees the whole run.
 - `ask` sends the question to the Planner's thread (it is visible in the sidebar; the user
   can also just type there). It is not a directive and steers nobody. The Planner answers from
   live world state and, when asked for a change, makes it:

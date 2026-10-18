@@ -45,6 +45,7 @@ function nowFallback(n: SnapNode): string {
 }
 
 function agentTitle(n: SnapNode): string {
+  if (n.role === "planner" || n.role === "custom") return n.label;
   if (n.role === "platform" && n.platform) return `${PLAT[n.platform] ?? n.platform} builder`;
   return ROLE_LABEL[n.role] ?? n.label;
 }
@@ -190,6 +191,7 @@ export function GraphView({ active }: { active: boolean }) {
       collapsed: ui.collapsed,
       expanded: ui.expanded,
       members: der.members,
+      side: data.nodeOrder.map((id) => data.nodes[id]).filter((n) => n.role === "planner" || (n.role === "custom" && !n.appId && n.status !== "done")).sort((a, b) => Number(b.role === "planner") - Number(a.role === "planner")).map((n) => ({ id: n.id, parentId: n.role === "planner" ? null : n.parentId })),
       ghosts: ghosts.map((g) => GHOST + g.threadId),
       ghostLabel: ghosts.length ? `Outside this run · ${plural(ghosts.length, "thread")} · read-only` : undefined,
     });

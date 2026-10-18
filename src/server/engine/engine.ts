@@ -96,6 +96,9 @@ export function autonomyText(orchestrator: boolean): string {
 /** BB's refusal when a provider cannot run the requested permission mode. */
 const PERMISSION_REFUSED = /only supports .*permission mode/i;
 
+/** Meta key: the models Settings offers (connected providers, last catalog). */
+export const MODEL_CHOICES_KEY = "settings:model-choices";
+
 export class Engine {
   readonly repo: Repo;
   readonly port: BbPort;
@@ -402,7 +405,17 @@ export class Engine {
       if (cm) cat.models.push(cm);
     }
     this.catalogs.set(key, cat);
+    if (hostId === null) this.saveModelChoices(cat);
     return cat;
+  }
+
+  /** Remember the models of connected providers, so Settings can offer them as choices on the next start. */
+  private saveModelChoices(cat: Catalog): void {
+    const live = cat.models.filter((m) => !m.hidden && cat.providers.find((p) => p.id === m.providerId)?.available);
+    if (!live.length) return;
+    const choices = live.map((m) => ({ value: `${m.providerId}/${m.modelId}`, label: `${m.name} · ${m.providerLabel}`, reasoning: m.reasoning, defaultReasoning: m.defaultReasoning }));
+    const text = JSON.stringify(choices);
+    if (this.repo.getMeta(MODEL_CHOICES_KEY) !== text) this.repo.setMeta(MODEL_CHOICES_KEY, text);
   }
 
   /** Mark every catalog model as seen (wizard open), keeping NEW flags for this response. */

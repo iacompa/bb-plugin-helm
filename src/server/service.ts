@@ -4,7 +4,7 @@
 import { ScreensView } from "./screens.ts";
 import { refreshRun } from "./engine/refresh.ts";
 import type { Autonomy, DirectiveInfo, ModelRef, NodeInfo, PermissionMode, Portfolio, RunInfo, SlotId, SlotMap, Tier } from "../shared/types.ts";
-import { PERMISSION_KEYS, modelSettingText, type SettingsWriter } from "./settings.ts";
+import { MODEL_REASONING, NO_MODEL, PERMISSION_KEYS, modelSettingText, type SettingsWriter } from "./settings.ts";
 import { SLOT_IDS, SEED_PRESETS, modelName, validateRef } from "./domain/models.ts";
 import { ORCH_ID } from "./domain/topology.ts";
 import { ensurePlanner, nameOf, renameNode, retireAgent } from "./engine/custom.ts";
@@ -39,6 +39,8 @@ export function parseSlotArg(s: string): [SlotId, ModelRef] {
   if (!SLOT_IDS.includes(slot)) throw new HelmError(`No slot named ${slot}.`, "invalid_value", `Slots: ${SLOT_IDS.join(", ")}`);
   return [slot, { providerId: m[2], modelId: m[3], reasoning: m[4] ?? null }];
 }
+
+const errText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 200);
 
 export class HelmService {
   private portfolioTimers = new Map<string, () => void>();
@@ -227,9 +229,17 @@ export class HelmService {
         const p = validateRef(cat, ref);
         if (p) throw new HelmError(`${key === "planner" ? "Planner" : "Orchestrator"}: ${p.message}`, "invalid_value");
       }
-      values[key === "planner" ? "plannerModel" : "orchestratorModel"] = modelSettingText(ref);
+      values[key === "planner" ? "plannerModel" : "orchestratorModel"] = ref ? `${ref.providerId}/${ref.modelId}` : NO_MODEL;
+      values[key === "planner" ? "plannerReasoning" : "orchestratorReasoning"] = ref?.reasoning ?? MODEL_REASONING;
     }
-    if (Object.keys(values).length) await this.writeSettings(values);
+    if (Object.keys(values).length) {
+      try {
+        await this.writeSettings(values);
+      } catch (err) {
+        // Settings lists the models it saw when Helm started; a newly connected provider needs a restart
+        throw new HelmError(`Settings does not list that model yet (${errText(err)}). Reload Helm (bb plugin reload helm) so the list picks up newly connected providers, then save again.`, "invalid_value");
+      }
+    }
     const moved: string[] = [];
     if (input.applyToPlanners && input.planner) {
       for (const run of this.repo.listRuns().filter((r) => r.status === "running" || r.status === "paused")) {

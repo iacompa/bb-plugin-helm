@@ -133,3 +133,16 @@ test("formatting never shows dollars and tokens are raw counts", () => {
   assert.deepEqual(allowedTypes({ tier: "specialist", status: "planned", threadId: null }), ["tell", "model", "scope", "priority", "spawn"]);
   assert.ok(allowedTypes({ tier: "gate", status: "running", threadId: "t" }).includes("waive"));
 });
+
+test("the Planner sits beside the Orchestrator, unconnected; custom agents with no app below it, linked to their supervisor", () => {
+  const L = portfolioLayout(bigInput({ side: [{ id: "planner", parentId: null }, { id: "c1", parentId: "m1" }, { id: "c2", parentId: "orch" }] }));
+  const o = L.rects.orch;
+  const p = L.rects.planner;
+  assert.ok(p && p.x === o.x && p.y >= o.y + o.h, "same column, just below the Orchestrator");
+  assert.ok(p.y - (o.y + o.h) < 60, "close to it, not up top");
+  assert.equal(L.edges.some((e) => e.from === "planner" || e.to === "planner"), false, "no line to the Planner");
+  assert.ok(L.edges.some((e) => e.from === "m1" && e.to === "c1"));
+  assert.equal(L.edges.some((e) => e.to === "c2"), false, "the Orchestrator's own column needs no line");
+  const all = Object.entries(L.rects);
+  for (const id of ["planner", "c1", "c2"]) for (const [other, r] of all) if (other !== id) assert.equal(intersects(L.rects[id], r), false, `${id} overlaps ${other}`);
+});

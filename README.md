@@ -116,7 +116,7 @@ Settings live under `bb plugin config helm`:
 - wave approval (`ask` / `auto`);
 - permission mode per tier;
 - the Planner's and the Orchestrator's names (Amer and Gestra by default);
-- the default Planner and Orchestrator models (also in the panel: **Models → Default models**, or `bb helm defaults`);
+- the default Planner and Orchestrator models and their reasoning: dropdowns that list the models of the providers you have connected, so nothing is typed (also in the panel: **Models → Default models**, or `bb helm defaults`). A newly connected provider appears after Helm reloads;
 - showing leads in the sidebar;
 - zero-tolerance slop categories;
 - git remotes (off);

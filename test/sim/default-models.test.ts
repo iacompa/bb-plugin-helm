@@ -4,7 +4,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHarness, CHEAP } from "../helpers/harness.ts";
 import { HelmService } from "../../src/server/service.ts";
-import { parseModelSetting, toHelmSettings } from "../../src/server/settings.ts";
+import { parseModelSetting, settingsDescriptors, toHelmSettings, type ModelChoice } from "../../src/server/settings.ts";
+import { MODEL_CHOICES_KEY } from "../../src/server/engine/engine.ts";
 import { parseBrief, SAMPLE_BRIEF } from "../../src/server/domain/brief.ts";
 import type { Portfolio } from "../../src/shared/types.ts";
 
@@ -42,16 +43,45 @@ test("saving a default Planner model can move every running run's Planner to it 
   await h.engine.startRun(runId);
   await h.clock.runUntil(h.clock.now() + 6 * 3600_000, { stopWhen: () => !!h.repo.getNode(runId, "planner")?.threadId });
   const svc = new HelmService(h.engine);
+  let written: Record<string, unknown> = {};
   svc.writeSettings = async (v) => {
-    Object.assign(h.settings, { defaultModels: toHelmSettings({ plannerModel: v.plannerModel ?? "", orchestratorModel: v.orchestratorModel ?? "" }).defaultModels });
+    written = v;
+    Object.assign(h.settings, { defaultModels: toHelmSettings({ plannerModel: v.plannerModel ?? "", plannerReasoning: v.plannerReasoning ?? "", orchestratorModel: v.orchestratorModel ?? "", orchestratorReasoning: v.orchestratorReasoning ?? "" }).defaultModels });
   };
   const r = await svc.setDefaultModels({ planner: SONNET, applyToPlanners: true });
   assert.deepEqual(r.moved, ["Live"]);
   assert.equal(r.text.planner, "claude-code/claude-sonnet-5-5:medium");
+  assert.deepEqual(written, { plannerModel: "claude-code/claude-sonnet-5-5", plannerReasoning: "medium" }, "the model and the reasoning are separate pickers");
   assert.deepEqual(h.engine.run(runId).slots.planner, SONNET);
   assert.equal(h.engine.effectiveModel(h.engine.run(runId), h.repo.getNode(runId, "planner")!)?.modelId, "claude-sonnet-5-5");
   assert.equal(h.repo.listDirectives(runId, 5)[0].type, "slots", "on the record");
   const again = await svc.setDefaultModels({ planner: SONNET, applyToPlanners: true });
   assert.deepEqual(again.moved, [], "nothing to move twice");
   await assert.rejects(svc.setDefaultModels({ planner: { providerId: "claude-code", modelId: "no-such-model", reasoning: null } }), /no-such-model|No model|not offered|unknown/i);
+});
+
+test("the pickers list the models of connected providers, with names, so nothing is typed", async () => {
+  const h = await createHarness();
+  await h.engine.catalog(null);
+  const choices = JSON.parse(h.repo.getMeta(MODEL_CHOICES_KEY) ?? "[]") as ModelChoice[];
+  assert.ok(choices.length > 0, "the catalog saved the choices for Settings");
+  assert.ok(choices.every((c) => /^[^/]+\/[^/]+$/.test(c.value) && c.label.length > 0));
+  const d = settingsDescriptors(choices);
+  assert.equal(d.plannerModel.type, "select");
+  assert.deepEqual(d.plannerModel.options, ["none", ...choices.map((c) => c.value)]);
+  assert.equal(d.plannerModel.experimental_optionLabels[choices[0].value], choices[0].label);
+  assert.match(d.plannerModel.experimental_optionLabels.none, /Not set/);
+  assert.equal(d.orchestratorModel.options.length, choices.length + 1);
+  assert.equal(d.plannerReasoning.options[0], "default");
+  // with no catalog yet, the pickers still exist (only "Not set")
+  assert.deepEqual(settingsDescriptors([]).plannerModel.options, ["none"]);
+});
+
+test("the reasoning picker applies only when the chosen model offers that level", () => {
+  const choices: ModelChoice[] = [{ value: "claude-code/claude-sonnet-5-5", label: "Sonnet 5.5", reasoning: ["low", "medium", "high"], defaultReasoning: "medium" }];
+  const pick = (r: string) => toHelmSettings({ plannerModel: "claude-code/claude-sonnet-5-5", plannerReasoning: r }, () => {}, choices).defaultModels.planner;
+  assert.equal(pick("high")?.reasoning, "high");
+  assert.equal(pick("ultracode")?.reasoning, "medium", "falls back to the model's default");
+  assert.equal(pick("default")?.reasoning, "medium");
+  assert.equal(toHelmSettings({ plannerModel: "none", plannerReasoning: "high" }, () => {}, choices).defaultModels.planner, null);
 });

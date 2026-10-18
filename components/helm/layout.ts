@@ -62,6 +62,8 @@ export interface PortfolioInput {
   expanded: ReadonlySet<string>;
   /** member node ids per app (lead first) */
   members: Record<string, string[]>;
+  /** Agents beside the Orchestrator in its column: the Planner (no edge) and custom agents with no app (an edge from their supervisor). */
+  side?: Array<{ id: string; parentId: string | null }>;
   /** Observatory ghost ids */
   ghosts?: string[];
   ghostLabel?: string;
@@ -161,6 +163,14 @@ export function portfolioLayout(input: PortfolioInput): Layout {
   const height = Math.max(total, D.orch.h);
   out.rects[input.orchId] = { x: 0, y: height / 2 - D.orch.h / 2, w: D.orch.w, h: D.orch.h, mode: "orch" };
   let h = height;
+  // the Planner sits right below the Orchestrator, unconnected; custom agents with no app below it
+  let sy = height / 2 + D.orch.h / 2 + 28;
+  for (const s of input.side ?? []) {
+    out.rects[s.id] = { x: 0, y: sy, w: D.orch.w, h: D.nh, mode: "agent" };
+    if (s.parentId && s.parentId !== input.orchId) out.edges.push({ from: s.parentId, to: s.id, kind: "direct" });
+    sy += D.nh + 14;
+  }
+  h = Math.max(h, sy);
   const ghosts = input.ghosts ?? [];
   if (ghosts.length) {
     const oy = height + 54;
