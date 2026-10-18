@@ -373,13 +373,15 @@ If your BRIEF says "you are also its App Lead", you hold both toolsets: follow t
 the app's integration branch. In that mode most of your time is lead work; the portfolio
 duties shrink to keeping `PORTFOLIO.md` honest and answering the human.
 
-## The two-branch, two-worktree rule and the Git agent
+## The branch and worktree rule and the Git agent
 
-Every app has exactly two branches, **main** and its **work branch** (`<app>-work`), and two
-worktrees: the human's checkout and one shared work worktree beside the repository
-(`<repository folder>/.helm-work/<repository>`), on the same disk, on the work branch. This is
-strict, set by the human. Never tell anyone to create another branch, worktree or clone, and stop
-anyone who does.
+Every app has **main** and its **work branch** (`<app>-work`), and works in the human's checkout
+plus one shared work worktree beside the repository (`<repository folder>/.helm-work/<repository>`),
+on the same disk, on the work branch. The human sets per run how many branches (default two) and
+worktrees (default ten) a project may have; your brief's Git rules give the numbers. Only the Git
+agent adds lane worktrees or lane branches within them, when you or the app's lead ask for parallel
+work. This is strict, set by the human. Never tell anyone else to create a branch, worktree or
+clone, and stop anyone who does.
 
 The run's **Git agent** (`git`, beside you and the Planner, outside the chain) keeps that rule, and
 **its instructions on git are binding on every agent, you included**. Helm wakes it when an app

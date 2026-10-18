@@ -13,6 +13,7 @@ import { nodeWorktree } from "./gates.ts";
 import { expirePrompts, getPrompt, rerouteOpenPrompts, routePrompt } from "./prompts.ts";
 import { sweep } from "./watch.ts";
 import { auditWorktrees } from "./worktrees.ts";
+import { worktreesViewFor } from "../worktree-view.ts";
 
 const TERMINAL = new Set(["done", "failed"]);
 const COMPACT_AT = 0.7;
@@ -281,8 +282,12 @@ export async function watchdog(e: Engine): Promise<{ nudged: string[]; stalled: 
     if (expirePrompts(e, run.id, (n, i, note) => raiseInteractionNeed(e, n, i, note))) e.emit(run.id, "run.updated", { id: run.id });
     e.proposeNextWave(run.id);
   }
-  // the two-worktree rule: the Git agent hears about any app with more (throttled, host calls)
-  for (const run of e.repo.activeRuns()) await auditWorktrees(e, run.id).catch((err) => e.log.warn(`worktree check for ${run.id} failed: ${err instanceof Error ? err.message : String(err)}`));
+  // the worktree rule: the Git agent hears about any app over the limits (throttled, host calls);
+  // the Worktrees view is read again in the background (git every 30 min, sizes every 2 h)
+  for (const run of e.repo.activeRuns()) {
+    await auditWorktrees(e, run.id).catch((err) => e.log.warn(`worktree check for ${run.id} failed: ${err instanceof Error ? err.message : String(err)}`));
+    void worktreesViewFor(e).refreshIfStale(run.id).catch(() => {});
+  }
   e.outbox.kick();
   return { nudged, stalled };
 }

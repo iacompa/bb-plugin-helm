@@ -75,6 +75,11 @@ export const HOST_CONTRACT = defineRpcContract({
       repos: z.array(z.object({ repo: z.string(), gitDir: z.string().nullable(), bytes: z.number().nullable() })),
     }),
   },
+  /** Show a folder in the file manager (Finder, Explorer, the Files app); a folder that is gone opens its nearest parent. */
+  reveal: {
+    input: z.object({ path: z.string().min(1).max(1000) }),
+    output: z.object({ ok: z.boolean(), shown: z.string().nullable() }),
+  },
   revParse: {
     input: z.object({ repo: z.string().min(1), ref: z.string().min(1).max(300) }),
     output: z.object({ sha: z.string().nullable() }),

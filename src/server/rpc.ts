@@ -3,6 +3,8 @@
 
 import { needLook } from "./look.ts";
 import { worktreesViewFor } from "./worktree-view.ts";
+import { setGitLimits } from "./engine/worktrees.ts";
+import { cleanDevices, devicesForPlatforms, DEVICE_CATALOG, MAX_DEVICES } from "../shared/devices.ts";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { ensureGitAgent, ensurePlanner } from "./engine/custom.ts";
 import { RPC } from "../shared/protocol.ts";
@@ -11,7 +13,7 @@ import type { HelmService } from "./service.ts";
 import { appMove, moveTask, startAppNow } from "./engine/direct.ts";
 import { validateRef } from "./domain/models.ts";
 import type { TaskCol } from "./domain/stages.ts";
-import { HelmError } from "./engine/engine.ts";
+import { HelmError, SCREEN_DEVICES_KEY } from "./engine/engine.ts";
 import { noticeFor, type NoticeDirective } from "./domain/directives.ts";
 import { modelName } from "./domain/models.ts";
 import { hhmm, pad4 } from "./engine/context.ts";
@@ -37,14 +39,27 @@ export function registerRpc(bb: BbPluginApi, svc: HelmService): void {
     screens_list: async ({ runId, appId, fresh }) => {
       const apps = svc.screens.apps(runId);
       const id = appId && apps.some((a) => a.id === appId) ? appId : apps[0]?.id ?? null;
-      return { apps, appId: id, map: id ? await svc.screens.list(runId, id, !!fresh) : null };
+      const app = apps.find((a) => a.id === id);
+      const picked = e.screenDevices();
+      return { apps, appId: id, map: id ? await svc.screens.list(runId, id, !!fresh) : null, devices: { catalog: DEVICE_CATALOG, picked, forApp: app ? devicesForPlatforms(picked, app.platforms) : [], max: MAX_DEVICES } };
     },
     screens_image: ({ runId, appId, path }) => svc.screens.image(runId, appId, path),
     settings_setPermissions: (input) => svc.setPermissions(input as never),
     settings_models: () => svc.defaultModels(),
     settings_setModels: (input) => svc.setDefaultModels(input as never),
     worktrees_list: ({ runId, app }) => svc.worktrees(runId, app),
-    worktrees_view: ({ runId, measure, fresh }) => worktreesViewFor(e).view(runId, { measure: !!measure, fresh: !!fresh }),
+    worktrees_view: ({ runId, refresh }) => worktreesViewFor(e).view(runId, { refresh }),
+    worktrees_reveal: ({ runId, path }) => worktreesViewFor(e).reveal(runId, path),
+    git_setLimits: ({ runId, branches, worktrees }) => {
+      const limits = setGitLimits(e, runId, { branches, worktrees });
+      return { limits, view: worktreesViewFor(e).view(runId) };
+    },
+    screens_setDevices: ({ devices }) => {
+      const picked = cleanDevices(devices);
+      svc.repo.setMeta(SCREEN_DEVICES_KEY, JSON.stringify(picked));
+      svc.screens.forget();
+      return { picked };
+    },
     git_open: async ({ runId }) => {
       const n = await ensureGitAgent(e, runId, { queue: true });
       return { nodeId: n.id, threadId: n.threadId, label: e.label(n) };

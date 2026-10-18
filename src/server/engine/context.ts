@@ -26,8 +26,8 @@ export interface HelmSettings {
   gitOnSignoff: "push" | "merge-push" | "report";
   /** The most worktrees an app may have: the checkout, the shared work worktree and lanes the Git agent makes. */
   worktreesPerApp: number;
-  /** The phones each page of a phone app is captured on, in order (simulator or emulator model names). */
-  screenDevices: string[];
+  /** The most branches a project may have by default (main, the work branch, and branches the Git agent adds for parallel work); a run can set its own. */
+  branchesPerApp: number;
 }
 
 export const DEFAULT_SETTINGS: HelmSettings = {
@@ -37,7 +37,7 @@ export const DEFAULT_SETTINGS: HelmSettings = {
   defaultModels: { planner: null, orchestrator: null, git: null },
   gitOnSignoff: "merge-push",
   worktreesPerApp: 10,
-  screenDevices: ["iPhone 18 Pro", "iPhone 17 Pro Max", "iPhone Air"],
+  branchesPerApp: 2,
   showLeadsInSidebar: false,
   appsRoot: "~/Projects/helm",
   weights: SEED_WEIGHTS,

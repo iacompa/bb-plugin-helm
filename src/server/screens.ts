@@ -6,6 +6,7 @@ import type { Engine } from "./engine/engine.ts";
 import { nodeWorktree } from "./engine/gates.ts";
 import { HelmError } from "./engine/engine.ts";
 import { buildScreenMap, type ScreenMap } from "./domain/screens.ts";
+import { devicesForPlatforms } from "../shared/devices.ts";
 
 const TTL = 15_000;
 
@@ -13,6 +14,11 @@ export class ScreensView {
   private cache = new Map<string, { at: number; map: ScreenMap; paths: Set<string> }>();
 
   constructor(private readonly e: Engine) {}
+
+  /** Drop what is kept (the human picked other devices). */
+  forget(): void {
+    this.cache.clear();
+  }
 
   /** The run's apps that are not cancelled, for the app picker. */
   apps(runId: string) {
@@ -56,7 +62,7 @@ export class ScreensView {
     const roots = await this.roots(runId, appId);
     const { files, maps } = roots.length ? await this.e.host(runId).screensScan({ roots }) : { files: [], maps: [] };
     const app = this.e.repo.getApp(runId, appId)!;
-    const map = buildScreenMap(files, maps, { name: app.name, platforms: app.platforms, devices: this.e.settings.screenDevices ?? [] });
+    const map = buildScreenMap(files, maps, { name: app.name, platforms: app.platforms, devices: devicesForPlatforms(this.e.screenDevices(), app.platforms) });
     this.cache.set(key, { at: this.e.now(), map, paths: new Set(map.screens.flatMap((s) => s.variants.map((v) => v.path))) });
     return map;
   }

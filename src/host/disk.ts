@@ -5,7 +5,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { lstat, readdir, statfs } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 export interface DiskSize {
   path: string;
@@ -85,8 +85,31 @@ function gitCommonDir(repo: string): Promise<string | null> {
   });
 }
 
+/** Open the file manager on a folder (selected in its parent where the platform can). */
+function openInFileManager(path: string, select: boolean): Promise<boolean> {
+  const [cmd, args] =
+    process.platform === "darwin" ? ["open", select ? ["-R", path] : [path]] : process.platform === "win32" ? ["explorer.exe", select ? [`/select,${path}`] : [path]] : ["xdg-open", [select ? dirname(path) : path]];
+  return new Promise((res) => {
+    // explorer.exe exits 1 even when it opened the window
+    execFile(cmd as string, args as string[], { timeout: 15_000 }, (err) => res(!err || process.platform === "win32"));
+  });
+}
+
 export function createDiskOps() {
   return {
+    /** Show a folder in Finder (Explorer, the Files app); a folder that is gone opens its nearest existing parent. */
+    async reveal({ path }: { path: string }) {
+      if (!isAbsolute(path)) return { ok: false, shown: null };
+      let p = resolve(path);
+      let exact = true;
+      while (!existsSync(p)) {
+        const up = dirname(p);
+        if (up === p) return { ok: false, shown: null };
+        p = up;
+        exact = false;
+      }
+      return { ok: await openInFileManager(p, exact), shown: p };
+    },
     /** Size of each folder (with `measure`), its disk's free and total space, and each repository's git storage. */
     async diskUsage({ paths, repos, measure: doMeasure }: { paths: string[]; repos?: string[]; measure?: boolean }) {
       const one = async (path: string): Promise<DiskSize> => {

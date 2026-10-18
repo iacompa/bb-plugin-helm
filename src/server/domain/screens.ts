@@ -7,6 +7,7 @@
 // and for a phone app, never a capture shaped like a computer screen.
 
 import { z } from "zod";
+import { DEVICE_CATALOG } from "../../shared/devices.ts";
 
 export const SCREEN_MAP_PATH = "reports/screens/screens.json";
 
@@ -127,16 +128,18 @@ export function isScreenFile(rel: string): boolean {
   return IMAGE_FILE.test(r) && (SCREEN_DIR.test(r) || OTHER_SCREEN_DIR.test(r)) && !/\/reports\/(review|slop|audit|security|compliance|tests?)\//.test(`/${r}`);
 }
 
-const DEVICE_START = /^(iphone|ipad|pixel|galaxy|nexus|oneplus)$/i;
-const DEVICE_PART = /^(\d{1,2}(e|a)?|pro|max|plus|mini|air|se|ultra|fold\d*|flip\d*|xl|lite|fe|s\d{1,2}|z|(1st|2nd|3rd|\d+th)|generation|inch|\d{2}(in)?)$/i;
+const DEVICE_START = /^(iphone|ipad|pixel|galaxy|samsung|nexus|oneplus)$/i;
+const DEVICE_PART = /^(\d{1,2}(e|a)?|pro|max|plus|mini|air|se|ultra|fold\d*|flip\d*|xl|lite|fe|s\d{1,2}|z|galaxy|tablet|tab|m\d|a\d{2}|(1st|2nd|3rd|\d+th)|generation|inch|\d{2}(in)?)$/i;
 
 /** "iPhone 17 Pro Max" or "iphone-17-pro-max" → "iphone-17-pro-max". */
 export function deviceSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
-/** "iphone-17-pro-max" → "iPhone 17 Pro Max". */
+/** "iphone-17-pro-max" → "iPhone 17 Pro Max" (a device in Helm's list keeps its exact name: "iPhone SE (3rd generation)"). */
 export function deviceName(slug: string): string {
+  const known = DEVICE_CATALOG.find((d) => deviceSlug(d.name) === slug);
+  if (known) return known.name;
   return slug
     .split("-")
     .filter(Boolean)

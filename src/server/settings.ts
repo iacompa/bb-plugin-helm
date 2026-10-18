@@ -80,14 +80,14 @@ const BASE_DESCRIPTORS = {
   worktreesPerApp: {
     type: "number",
     label: "Worktrees per project (most)",
-    description: "The most worktrees one project may have (2 to 32): your checkout, the shared work worktree every agent uses, and extra lanes the Git agent makes when a project needs parallel work (several UI designs at once, say). Above this the Git agent is told to bring it back down. The Git agent's Worktrees view shows each project's worktrees and the space they take.",
+    description: "The most worktrees one project may have (2 to 32; each run can have its own in the Git agent's Worktrees view): your checkout, the shared work worktree every agent uses, and extra lanes the Git agent makes when a project needs parallel work (several UI designs at once, say). Above this the Git agent is told to bring it back down. The Git agent's Worktrees view shows each project's worktrees and the space they take.",
     default: DEFAULT_SETTINGS.worktreesPerApp,
   },
-  screenDevices: {
-    type: "string",
-    label: "Phones for screenshots",
-    description: "Comma-separated phone models every page of an iOS or Android app is captured on, for the Screens view (pick one there, or see them side by side). Use simulator names as Xcode lists them (iPhone 18 Pro, iPhone 17 Pro Max, iPhone Air, iPhone 17e…) or Android emulator models (Pixel 9…). A model not installed is replaced by the closest one, and the builder says so. At most 6.",
-    default: DEFAULT_SETTINGS.screenDevices.join(", "),
+  branchesPerApp: {
+    type: "number",
+    label: "Branches per project (most)",
+    description: "The most branches one project may have (2 to 12): main and its work branch, plus branches only the Git agent creates when a project needs parallel work. Each run can have its own limit: set it in the Git agent's Worktrees view (two for one run, more for another).",
+    default: DEFAULT_SETTINGS.branchesPerApp,
   },
   appsRoot: { type: "string", label: "Apps root folder", description: "Default parent folder for new app repositories: <root>/<run>/<app>. An app can also name its own folder or an existing repository anywhere (brief: \"- Name — tagline · macOS · /path/to/repo\"), and bb helm plan --root sets this per run.", default: DEFAULT_SETTINGS.appsRoot },
   concurrency: { type: "number", label: "Concurrent agents", description: `Default for new runs: how many of a run's agents may run at once (max ${LIMIT_CEILINGS.concurrency}). Change a running run with bb helm limits or the capacity chip.`, default: LIMIT_DEFAULTS.concurrency },
@@ -128,13 +128,6 @@ const BASE_DESCRIPTORS = {
 export const SETTINGS_DESCRIPTORS = settingsDescriptors([]);
 
 type Values = Record<string, string | number | boolean | undefined>;
-
-/** "iPhone 18 Pro, iPhone Air" → the list (at most 6, each a plain model name); empty → the default. */
-export function parseDevices(v: unknown): string[] {
-  if (typeof v !== "string") return [...DEFAULT_SETTINGS.screenDevices];
-  const list = [...new Set(v.split(/[,\n]/).map((x) => x.trim().replace(/\s+/g, " ")).filter((x) => /^[\w ().+-]{2,40}$/.test(x)))].slice(0, 6);
-  return list.length ? list : [...DEFAULT_SETTINGS.screenDevices];
-}
 
 const clampInt = (v: unknown, min: number, max: number, dflt: number) => {
   const n = Math.round(Number(v));
@@ -216,7 +209,7 @@ export function toHelmSettings(v: Values, warn: (m: string) => void = () => {}, 
     },
     gitOnSignoff: v.gitOnSignoff === "push" || v.gitOnSignoff === "report" ? v.gitOnSignoff : "merge-push",
     worktreesPerApp: clampInt(v.worktreesPerApp, 2, 32, DEFAULT_SETTINGS.worktreesPerApp),
-    screenDevices: parseDevices(v.screenDevices),
+    branchesPerApp: clampInt(v.branchesPerApp, 2, 12, DEFAULT_SETTINGS.branchesPerApp),
     weights,
     zeroTolerance: typeof v.zeroTolerance === "string" ? v.zeroTolerance.split(/[,\s]+/).filter((x) => /^S\d+$/.test(x)) : DEFAULT_SETTINGS.zeroTolerance,
     createRemote: v.createRemote === true,

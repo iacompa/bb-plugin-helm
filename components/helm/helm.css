@@ -705,6 +705,16 @@
 .helm .scr-addr { flex: 1; min-width: 120px; padding: 5px 10px; border-radius: 999px; background: var(--h-surface-2); font-size: 12.5px; color: var(--h-fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .helm .scr-addr b { color: var(--h-fg); font-weight: 600; }
 .helm .scr-bar .btn.on { border-color: var(--h-accent); color: var(--h-accent); }
+.helm .scr-pickwrap { position: relative; display: inline-flex; }
+.helm .scr-devpick { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 330px; max-height: 520px; overflow: auto; padding: 12px; border: 1px solid var(--h-line); border-radius: 12px; background: var(--h-surface); box-shadow: var(--h-shadow-pop); display: flex; flex-direction: column; gap: 10px; font-size: 12.5px; }
+.helm .scr-devpick-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.helm .scr-devpick-note { margin: 0; font-size: 11.5px; line-height: 1.45; }
+.helm .scr-devgroup { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.helm .scr-devgroup legend { padding: 0 0 4px; font-size: 11px; font-weight: 600; color: var(--h-fg-3); text-transform: uppercase; letter-spacing: .04em; }
+.helm .scr-devopt { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; cursor: pointer; }
+.helm .scr-devopt:hover { background: var(--h-surface-2); }
+.helm .scr-devopt.on { background: color-mix(in oklab, var(--h-accent) 10%, var(--h-surface)); }
+.helm .scr-devpick-f { display: flex; justify-content: flex-end; gap: 8px; }
 .helm .scr-stage { flex: 1; min-height: 0; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 20px; background: var(--h-bg); }
 .helm .scr-shot { position: relative; display: inline-block; line-height: 0; }
 .helm .scr-shot img { display: block; max-width: 100%; max-height: min(640px, calc(100vh - 260px)); border-radius: 6px; user-select: none; }

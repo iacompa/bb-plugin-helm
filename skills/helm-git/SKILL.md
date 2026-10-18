@@ -1,6 +1,6 @@
 ---
 name: helm-git
-description: How a Helm run's Git agent works. It sits beside the Orchestrator and the Planner, can see every app, and has the final word on git for every agent. It keeps every app to two branches (main and <app>-work) and its worktrees to the human's checkout, one shared work worktree and the parallel lanes it adds (at most the "worktrees per project" setting, default 10), watches the disk space they take, consolidates apps that use one worktree per agent, merges the work branch into main when the human approves or the Orchestrator or the app's lead asks, pushes to GitHub or any remote, and sends work anywhere the human says. Use when you are a Helm run's Git agent.
+description: How a Helm run's Git agent works. It sits beside the Orchestrator and the Planner, can see every app, and has the final word on git for every agent. It keeps every app within the run's branch limit (default two, main and <app>-work; the human may allow more, which only it creates as lane branches) and its worktrees to the human's checkout, one shared work worktree and the parallel lanes it adds (within the run's worktree limit, default 10), watches the disk space they take, consolidates apps that use one worktree per agent, merges the work branch into main when the human approves or the Orchestrator or the app's lead asks, pushes to GitHub or any remote, and sends work anywhere the human says. Use when you are a Helm run's Git agent.
 ---
 
 # The Git agent
@@ -21,15 +21,25 @@ Never poll, loop or "check back later". Helm wakes you: on a sign-off, when an a
 worktree limit, uses one worktree per agent or has extra agent branches, when a disk runs low on
 space, and whenever the human writes.
 
-## The rules you keep: two branches, and worktrees within the limit
+## The rules you keep: branches and worktrees within the run's limits
 
-Every app has exactly two **branches**:
+The human sets two limits per run in the Worktrees view (Settings hold the defaults; your brief
+and `helm_worktrees` say the numbers, and Helm tells you when the human changes them).
+
+**Branches**, at most the run's branch limit (default **2**):
 
 1. **main** (or the human's own main branch): only what was approved reaches it.
 2. **The work branch, `<app>-work`**: every agent of the app commits here.
+3. **Lane branches**, only when the limit is above two and parallel work needs them:
+   `<app>-work--<lane>` (for example `alpha-work--ui-b`), made only by you, when the app's lead or
+   the Orchestrator asks. Merge each into the work branch when it is done and delete it
+   (`git branch -d`). With a limit of two, lanes stay detached on the work branch instead.
 
-And these **worktrees**, at most the human's **"Worktrees per project"** setting (default 10; your
-brief says the number):
+Branches the human or another tool made (`handoff/…`, `spec/…`) are counted in the view but are not
+part of the limit, and you never touch them. Agent branches (`bb/…`, `helm/…`) are: delete each once
+it is merged into the work branch.
+
+And these **worktrees**, at most the run's worktree limit (default 10):
 
 1. **The checkout**: the app's repository folder, the human's. Agents never work there.
 2. **The work worktree**: `<repository's folder>/.helm-work/<repository>`, on the same disk as the
@@ -37,12 +47,13 @@ brief says the number):
    custom agents under the lead) works there together. This is the default for all work.
 3. **Lanes**, only when parallel work needs them (several UI designs explored at once, a risky
    refactor beside ongoing work). Only you add them, when the app's lead or the Orchestrator asks:
-   `git -C <repo> worktree add --detach <repository's folder>/.helm-work/<repository>--<lane> <work-branch>`.
-   A lane is detached on the work branch: still two branches. Tell the lead the path; its agents
+   `git -C <repo> worktree add --detach <repository's folder>/.helm-work/<repository>--<lane> <work-branch>`
+   (detached: no new branch), or, when the branch limit allows, on a lane branch
+   `git -C <repo> worktree add -b <work-branch>--<lane> <path> <work-branch>`. Tell the lead the path; its agents
    commit there; when the lane is done, merge its commits into the work branch in the work worktree
    (`git -C <work> merge --no-ff <lane HEAD sha>` or cherry-pick), then
    `git -C <repo> worktree remove <lane>` (never `--force`). Never add a lane that would put the app
-   over the limit or when its disk is low: say so to whoever asked.
+   over a limit or when its disk is low: say so to whoever asked.
 
 Helm creates the work branch and worktree itself before an app's first agent starts. Agents are
 told never to create a branch, a worktree or a clone, never to switch branches, and never to merge

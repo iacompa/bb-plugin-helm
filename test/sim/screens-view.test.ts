@@ -5,6 +5,7 @@ import { createHarness, CHEAP } from "../helpers/harness.ts";
 import { HelmService } from "../../src/server/service.ts";
 import { parseBrief, SAMPLE_BRIEF } from "../../src/server/domain/brief.ts";
 import { nodeWorktree } from "../../src/server/engine/gates.ts";
+import { SCREEN_DEVICES_KEY } from "../../src/server/engine/engine.ts";
 
 test("an app's screens come from its builders' worktrees; only listed images can be read", async () => {
   const h = await createHarness();
@@ -58,8 +59,9 @@ test("an agent whose worktree is another repository (a host app, another project
   assert.deepEqual(map.screens.map((s) => s.id), ["home"], JSON.stringify(map.screens.map((s) => s.variants.map((v) => v.path))));
 });
 
-test("a phone app's UI builder is told to capture every page on the human's phones", async () => {
-  const h = await createHarness({ settings: { screenDevices: ["iPhone 18 Pro", "iPhone Air"] } });
+test("a phone app's UI builder is told to capture every page on the devices the human picked (its platform's only)", async () => {
+  const h = await createHarness();
+  h.repo.setMeta(SCREEN_DEVICES_KEY, JSON.stringify(["iPhone 18 Pro", "Pixel 9", "iPhone Air", "Not A Phone"]));
   const p = parseBrief(SAMPLE_BRIEF).portfolio;
   const apps = p.apps.filter((a) => a.platforms.includes("ios")).slice(0, 1).map((a) => ({ ...a, group: null }));
   assert.ok(apps.length, "the sample brief has an iOS app");
@@ -67,7 +69,8 @@ test("a phone app's UI builder is told to capture every page on the human's phon
   const ui = h.repo.listNodes(runId).find((n) => n.role === "ui");
   assert.ok(ui, "a UI builder");
   const brief = h.engine.buildBrief(h.engine.run(runId), ui!);
-  assert.match(brief, /## Screenshots on these phones \(set by the human\)\nCapture every page of the app on each of these phones: iPhone 18 Pro, iPhone Air\./);
+  assert.match(brief, /## Screenshots on these phones \(set by the human\)\nCapture every page of the app on each of these devices \(the human picked them in Screens\): iPhone 18 Pro, iPhone Air, Pixel 9\./, "an iOS and Android app: its platforms' devices, in Helm's order; unknown names dropped");
+  assert.match(brief, /Android: one emulator per model/);
   assert.match(brief, /home--default--iphone-18-pro--light\.png/);
   const lead = h.repo.listNodes(runId).find((n) => n.role === "lead");
   if (lead) assert.doesNotMatch(h.engine.buildBrief(h.engine.run(runId), lead), /## Screenshots on these phones/);

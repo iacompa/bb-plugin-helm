@@ -325,6 +325,7 @@ export function createHostOps(): HostOps {
     },
 
     async worktrees({ repo, status }) {
+      if (!existsSync(resolve(repo))) throw new Error(`the repository folder is missing: ${repo}`);
       const list = await listWorktrees(resolve(repo));
       const out = [];
       for (const [i, w] of list.slice(0, 100).entries()) {

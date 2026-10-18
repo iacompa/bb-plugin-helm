@@ -44,6 +44,8 @@ export class FakeGit {
   wts = new Map<string, FWorktree>();
   /** Free bytes on the simulated disk (tests lower it to see the low-space alert). */
   diskFree = 200e9;
+  /** Folders shown in the file manager (the Worktrees view's Show in Finder). */
+  revealed: string[] = [];
   loose = new Map<string, string>();
   /** Plain (non-git) folders tests place on the simulated disk: path → has files. */
   dirs = new Map<string, boolean>();
@@ -350,6 +352,10 @@ export class FakeGit {
         }),
         repos: (repos ?? []).map((repo) => ({ repo, gitDir: this.repoFor(repo) ? `${this.repoFor(repo)!.root}/.git` : null, bytes: this.repoFor(repo) && measure !== false ? 1_000_000 : null })),
       }),
+      reveal: async ({ path }: { path: string }) => {
+        this.revealed.push(path);
+        return { ok: true, shown: path };
+      },
       screenImage: async ({ path }: { path: string }) => {
         const w = this.wtFor(path);
         const content = w ? w.wt.work.get(w.rel) : undefined;

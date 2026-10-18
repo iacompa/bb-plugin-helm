@@ -291,8 +291,10 @@ test("the Worktrees view: each worktree's state and own size, the git storage, t
   const view = worktreesViewFor(h.engine);
   const work = h.engine.workTree(runId, "alpha")!;
   h.sim.git.wts.get(work)!.work.set("src/wip.swift", "x".repeat(5000));
-  const first = await view.view(runId, { measure: true });
-  assert.equal(first.measuring, true, "sizes are measured in the background");
+  const first = view.view(runId, { refresh: "open" });
+  assert.equal(first.checking, true, "git is read in the background; the view answers at once");
+  assert.equal(first.checkedAt, null);
+  assert.deepEqual(first.apps.map((a) => a.name).slice(0, 2), ["Alpha", "Beta"], "the apps are listed before git is read");
   const v = await view.measureAndWait(runId);
   const a = v.apps.find((x) => x.appId === "alpha")!;
   const w = a.worktrees.find((x) => x.role === "work")!;
@@ -316,5 +318,89 @@ test("the Worktrees view: each worktree's state and own size, the git storage, t
   // the Git agent's tool measures too
   const git = h.repo.getNode(runId, GIT_ID)!;
   const r = await callTool(h.engine, "helm_worktrees", git.threadId!, { sizes: true });
-  assert.match(r.text, /## Space[\s\S]*Disk with Alpha, Beta: 8\.0 GB free/);
+  assert.match(r.text, /## Space[\s\S]*Disk the computer's own disk \(Alpha, Beta\): 8\.0 GB free/);
+});
+
+test("the Worktrees view opens at once from what Helm kept (even after a restart), lists each app's branches and disk, and shows only its own folders in Finder", async () => {
+  const { h, runId } = await run();
+  const { worktreesViewFor, WorktreesView, diskOf } = await import("../../src/server/worktree-view.ts");
+  await worktreesViewFor(h.engine).measureAndWait(runId);
+  // a fresh view (a restart) answers from the database without reading git
+  const fresh = new WorktreesView(h.engine);
+  const v = fresh.view(runId);
+  assert.ok(v.checkedAt, "what was read before is shown at once");
+  assert.equal(v.checking, false, "nothing is read again without being asked");
+  const a = v.apps.find((x) => x.appId === "alpha")!;
+  assert.equal(a.branches.filter((b) => b.kind === "main" || b.kind === "work").length, 2);
+  assert.equal(a.overBranches, 0);
+  assert.ok(a.where.length >= 1 && a.where.every((d) => d.bytes !== null), JSON.stringify(a.where));
+  // opening reads git again only when what is kept is a few minutes old
+  assert.equal(fresh.view(runId, { refresh: "open" }).checking, false);
+  await h.clock.advance(10 * 60_000);
+  assert.equal(fresh.view(runId, { refresh: "open" }).checking, true);
+  // Show in Finder: only folders of the view
+  await fresh.reveal(runId, a.repo!);
+  assert.deepEqual(h.sim.git.revealed, [a.repo]);
+  await assert.rejects(fresh.reveal(runId, "/etc"), /not one of this run's worktrees/);
+  // disks from paths
+  assert.deepEqual(diskOf("/Volumes/My SSD/apps/x"), { name: "My SSD", external: true });
+  assert.deepEqual(diskOf("/Users/me/Projects/x"), { name: "internal", external: false });
+  assert.deepEqual(diskOf("/media/me/Backup/x"), { name: "Backup", external: true });
+  assert.deepEqual(diskOf("D:\\apps\\x"), { name: "D: drive", external: true });
+});
+
+test("a repository folder that is gone says so plainly, with no branches", async () => {
+  const { h, runId } = await run();
+  const gone = h.repo.getApp(runId, "beta")!.repoPath!;
+  const ops = h.sim.git.hostOps.bind(h.sim.git);
+  h.sim.git.hostOps = () => {
+    const o = ops();
+    return {
+      ...o,
+      worktrees: async (input: { repo: string; status?: boolean }) => {
+        if (input.repo === gone) throw new Error(`the repository folder is missing: ${input.repo}`);
+        return o.worktrees(input);
+      },
+    };
+  };
+  const [b] = await appWorktrees(h.engine, runId, { appId: "beta" });
+  assert.match(b.error ?? "", /^the repository folder is missing: /);
+  const { worktreesViewFor } = await import("../../src/server/worktree-view.ts");
+  const v = await worktreesViewFor(h.engine).measureAndWait(runId);
+  const beta = v.apps.find((x) => x.appId === "beta")!;
+  assert.equal(beta.branches.length, 0);
+  assert.equal(beta.store, null);
+  assert.equal(beta.total, null);
+});
+
+test("the human sets a run's branch and worktree limits: the Git agent is told, briefs and the audit follow", async () => {
+  const { h, runId } = await run();
+  const { setGitLimits } = await import("../../src/server/engine/worktrees.ts");
+  assert.deepEqual(h.engine.gitLimits(runId), { branches: 2, worktrees: 10, own: false });
+  const lead = () => h.repo.listNodes(runId).find((n) => n.appId === "alpha" && n.tier === "lead")!;
+  assert.match(h.engine.buildBrief(h.engine.run(runId), lead()), /exactly two branches/);
+  setGitLimits(h.engine, runId, { branches: 4 });
+  assert.deepEqual(h.engine.gitLimits(runId), { branches: 4, worktrees: 10, own: true });
+  assert.ok(sentTo(h, runId, GIT_ID, /Git rule from the human: from now on each project of this run may have at most 4 branches/));
+  assert.match(h.engine.buildBrief(h.engine.run(runId), lead()), /at most 4 branches: its main branch, its work branch \(`alpha-work`\), and up to 2 more that only the Git agent creates/);
+  const git = h.repo.getNode(runId, GIT_ID)!;
+  assert.match(h.engine.buildBrief(h.engine.run(runId), git), /now \*\*4 branches per project\*\*/);
+  // lane branches the Git agent made count toward the limit; within it they are no problem
+  const repo = h.repo.getApp(runId, "alpha")!.repoPath!;
+  const refs = h.sim.git.repos.get(repo)!.refs;
+  const head = [...refs.values()][0];
+  refs.set("alpha-work--ui-a", head);
+  refs.set("alpha-work--ui-b", head);
+  let [a] = await appWorktrees(h.engine, runId, { appId: "alpha" });
+  assert.deepEqual(a.laneBranches.sort(), ["alpha-work--ui-a", "alpha-work--ui-b"]);
+  assert.equal(a.overBranches, 0);
+  setGitLimits(h.engine, runId, { branches: 3 });
+  [a] = await appWorktrees(h.engine, runId, { appId: "alpha" });
+  assert.equal(a.overBranches, 1);
+  await h.clock.advance(H);
+  assert.ok((await auditWorktrees(h.engine, runId)).includes("alpha"));
+  assert.ok(sentTo(h, runId, GIT_ID, /Alpha has 1 branch\(es\) over the limit of 3/));
+  // back to the settings
+  setGitLimits(h.engine, runId, { branches: null, worktrees: null });
+  assert.deepEqual(h.engine.gitLimits(runId), { branches: 2, worktrees: 10, own: false });
 });

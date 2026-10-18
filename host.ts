@@ -29,5 +29,6 @@ export default experimental_defineHostEntry({
     screensScan: (input) => ops.screensScan(input),
     screenImage: (input) => ops.screenImage(input),
     diskUsage: (input) => ops.diskUsage(input),
+    reveal: (input) => ops.reveal(input),
   },
 });

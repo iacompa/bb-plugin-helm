@@ -44,8 +44,8 @@ behaves. If something isn't covered here or in `bb helm <command> --help`, say y
   merges. The user merges a signed-off branch themselves.
 - **Each project works in one shared worktree**: besides the user's checkout, one shared work worktree
   beside the repository, `<repository folder>/.helm-work/<repository>`, on that branch and on the same
-  disk, plus only the lanes the Git agent adds for parallel work (at most the "Worktrees per project"
-  setting, default 10). Every agent of the project works there, so they see **committed work only**.
+  disk, plus only the lanes the Git agent adds for parallel work (within the run's worktree limit, default
+  10, and branch limit, default 2; the human sets both per run in the Worktrees view). Every agent of the project works there, so they see **committed work only**.
   Keep `appsRoot` on a disk with room; the run's **Git agent** keeps the rule, watches disk space
   and pushes signed-off work.
   If the user has uncommitted work the agents should build on, they must commit it before that wave is

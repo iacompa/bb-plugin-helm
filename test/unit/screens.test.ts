@@ -144,7 +144,7 @@ test("the phone a page was captured on comes from its file name, and pages follo
   assert.equal(v("reports/ui/home--default--phone--light.png").variant.device, null);
   assert.equal(v("reports/ui/home--default--iphone-air--light.png").variant.form, "phone", "a phone without pixel sizes is still a phone");
   assert.equal(deviceSlug("iPhone 18 Pro"), "iphone-18-pro");
-  assert.equal(deviceName("iphone-se-3rd-generation"), "iPhone SE 3rd Generation");
+  assert.equal(deviceName("iphone-se-3rd-generation"), "iPhone SE (3rd generation)", "a device in Helm's list keeps its exact name");
   const m = buildScreenMap(
     [f("reports/ui/home--default--iphone-air--light.png"), f("reports/ui/home--default--iphone-17-pro-max--light.png"), f("reports/ui/home--default--iphone-18-pro--light.png"), f("reports/ui/home--default--pixel-9--light.png")],
     [],
@@ -152,4 +152,21 @@ test("the phone a page was captured on comes from its file name, and pages follo
   );
   assert.deepEqual(m.devices, ["iPhone 18 Pro", "iPhone 17 Pro Max", "iPhone Air", "Pixel 9"]);
   assert.deepEqual(m.screens[0].variants.map((x) => x.device), ["iPhone 18 Pro", "iPhone 17 Pro Max", "iPhone Air", "Pixel 9"]);
+});
+
+test("devices: the human picks from Helm's list; each app gets its platform's; file names map to the exact model", async () => {
+  const { cleanDevices, devicesForPlatforms, DEFAULT_DEVICES } = await import("../../src/shared/devices.ts");
+  assert.equal(DEFAULT_DEVICES.length, 6);
+  assert.deepEqual(cleanDevices(["pixel 9", "iPhone Air", "iPhone 99 Ultra"]), ["iPhone Air", "Pixel 9"], "catalog order, unknown names dropped");
+  assert.deepEqual(cleanDevices([]), DEFAULT_DEVICES);
+  assert.deepEqual(devicesForPlatforms(["iPhone Air", "Pixel 9", "iPad mini (A17 Pro)"], ["ios"]), ["iPhone Air", "iPad mini (A17 Pro)"]);
+  assert.deepEqual(devicesForPlatforms(["iPhone Air"], ["and"]), ["Pixel 9", "Samsung Galaxy S25"], "none picked for Android: its default phones");
+  assert.deepEqual(devicesForPlatforms(["iPhone Air"], ["mac"]), []);
+  assert.equal(deviceName("iphone-se-3rd-generation"), "iPhone SE (3rd generation)");
+  assert.equal(parseScreenFile(f("reports/ui/home--default--samsung-galaxy-s25--light.png"))!.variant.device, "Samsung Galaxy S25");
+  assert.equal(parseScreenFile(f("reports/ui/home--default--ipad-pro-11-inch-m5--light.png"))!.variant.device, "iPad Pro 11-inch (M5)");
+  assert.equal(parseScreenFile(f("reports/ui/home--default--ipad-pro-11-inch-m5--light.png"))!.variant.form, "tablet");
+  const desk = parseScreenFile(f("reports/ui/home--default--1440x900--light.png"))!;
+  assert.equal(desk.variant.size, "1440x900");
+  assert.equal(desk.variant.device, null);
 });

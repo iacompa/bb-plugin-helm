@@ -48,10 +48,24 @@ interface AppRow {
   id: string;
   name: string;
 }
+interface DeviceSpec {
+  name: string;
+  os: "ios" | "android";
+  form: "phone" | "tablet";
+  w: number;
+  h: number;
+}
+interface Devices {
+  catalog: DeviceSpec[];
+  picked: string[];
+  forApp: string[];
+  max: number;
+}
 interface ListResult {
   apps: AppRow[];
   appId: string | null;
   map: ScreenMap | null;
+  devices?: Devices;
 }
 
 const PLATFORM: Record<string, string> = { ui: "Design", ios: "iOS", and: "Android", mac: "macOS", win: "Windows", web: "Web", unreal: "Unreal", game: "Game" };
@@ -74,6 +88,7 @@ function ScreensInner() {
   const [pref, setPref] = useState<{ platform: string | null; theme: string | null; size: string | null; device: string | null }>({ platform: null, theme: null, size: null, device: null });
   const [allPhones, setAllPhones] = useState(false);
   const [showAreas, setShowAreas] = useState(false);
+  const [picking, setPicking] = useState(false);
   const images = useRef(new Map<string, string | null>());
   const [, bump] = useState(0);
 
@@ -153,8 +168,9 @@ function ScreensInner() {
     const data = h.data;
     const lead = data && appId ? leadOf(data, appId) ?? data.nodes["orch"] ?? null : null;
     if (!runId || !lead) return;
-    const phonesText = map?.devices.length ? map.devices.join(", ") : "the phones in the human's setting";
-    const text = `The human wants to see ${appName || "the app"} in Screens: capture every page again, on each phone (${phonesText} and any others in your brief's "Screenshots on these phones"), upright, both themes, named reports/ui/<screen>--<state>--<phone>--<theme>.png, and update reports/screens/screens.json with every page and its links. Have the UI or platform builder do it, then check it with bb helm screens --app ${appId}.`;
+    const picked = res?.devices?.forApp ?? [];
+    const phonesText = picked.length ? picked.join(", ") : map?.devices.length ? map.devices.join(", ") : "the devices in your brief";
+    const text = `The human wants to see ${appName || "the app"} in Screens: capture every page again, on each of these devices the human picked (${phonesText}), upright, both themes, named reports/ui/<screen>--<state>--<phone>--<theme>.png, and update reports/screens/screens.json with every page and its links. Have the UI or platform builder do it, then check it with bb helm screens --app ${appId}.`;
     if (!(await askConfirm({ title: `Ask for fresh screens of ${appName || "this app"}?`, body: `${data?.nodes[lead.id] ? "The app lead" : "The lead"} is told:\n\n${text}`, ok: "Ask the lead" }))) return;
     try {
       await h.rpc.call("directive_create", { runId, directive: { type: "tell", target: lead.id, mode: "queue", text } });
@@ -278,6 +294,31 @@ function ScreensInner() {
                   </option>
                 ))}
               </select>
+            ) : null}
+            {res?.devices ? (
+              <span className="scr-pickwrap">
+                <button type="button" className={cx("btn sm", picking && "on")} aria-expanded={picking} onClick={() => setPicking((x) => !x)} title="Pick the phones and tablets every page is captured on">
+                  <Ic name="SlidersHorizontal" size="sm" />
+                  <span className="btn-lbl"> Devices</span>
+                </button>
+                {picking ? (
+                  <DevicePicker
+                    devices={res.devices}
+                    phoneApp={map?.device === "phone"}
+                    onClose={() => setPicking(false)}
+                    onSave={async (list) => {
+                      try {
+                        await h.rpc.call("screens_setDevices", { devices: list });
+                        setPicking(false);
+                        await load(appId, true);
+                        toast.success("Saved. Press the camera to ask for captures on them now.");
+                      } catch (e) {
+                        toast.error(errMsg(e));
+                      }
+                    }}
+                  />
+                ) : null}
+              </span>
             ) : null}
             {(map?.devices.length ?? 0) > 1 ? (
               <button type="button" className={cx("btn sm", allPhones && "on")} aria-pressed={allPhones} onClick={() => setAllPhones((x) => !x)} title="This page on every phone, side by side">
@@ -407,5 +448,85 @@ function Facet({ label, values, value, names, onPick }: { label: string; values:
         </option>
       ))}
     </select>
+  );
+}
+
+const GROUPS: Array<{ title: string; test: (d: DeviceSpec) => boolean }> = [
+  { title: "iPhone", test: (d) => d.os === "ios" && d.form === "phone" },
+  { title: "Android phones", test: (d) => d.os === "android" && d.form === "phone" },
+  { title: "Tablets", test: (d) => d.form === "tablet" },
+];
+
+/** Pick the devices from a list (no typing, so a model name is never wrong). */
+function DevicePicker({ devices, phoneApp, onClose, onSave }: { devices: Devices; phoneApp: boolean; onClose: () => void; onSave: (list: string[]) => Promise<void> }) {
+  const [sel, setSel] = useState<Set<string>>(new Set(devices.picked));
+  const [busy, setBusy] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node) && !(e.target as HTMLElement).closest?.(".scr-pickwrap")) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [onClose]);
+  const flip = (name: string) =>
+    setSel((s) => {
+      const n = new Set(s);
+      if (n.has(name)) n.delete(name);
+      else if (n.size < devices.max) n.add(name);
+      return n;
+    });
+  const changed = sel.size !== devices.picked.length || devices.picked.some((d) => !sel.has(d));
+  return (
+    <div ref={ref} className="scr-devpick" role="dialog" aria-label="Devices for screenshots">
+      <div className="scr-devpick-h">
+        <b>Devices for screenshots</b>
+        <span className="faint">
+          {sel.size} of at most {devices.max}
+        </span>
+      </div>
+      {!phoneApp ? <p className="faint scr-devpick-note">This app runs on a computer: Helm captures its pages at 1440×900 (laptop) and 1920×1080 (desktop), and a web app also at a phone's width. These devices are for phone and tablet apps.</p> : null}
+      {GROUPS.map((g) => (
+        <fieldset key={g.title} className="scr-devgroup">
+          <legend>{g.title}</legend>
+          {devices.catalog.filter(g.test).map((d) => (
+            <label key={d.name} className={cx("scr-devopt", sel.has(d.name) && "on")}>
+              <input type="checkbox" checked={sel.has(d.name)} disabled={!sel.has(d.name) && sel.size >= devices.max} onChange={() => flip(d.name)} />
+              <span className="grow">{d.name}</span>
+              <span className="faint">
+                {d.w}×{d.h}
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      ))}
+      <p className="faint scr-devpick-note">An iOS app is captured on the Apple devices you pick, an Android app on the Android ones. Builders use them from their next capture.</p>
+      <div className="scr-devpick-f">
+        <button type="button" className="btn sm" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn sm primary"
+          disabled={!sel.size || !changed || busy}
+          onClick={() => {
+            setBusy(true);
+            void onSave(devices.catalog.filter((d) => sel.has(d.name)).map((d) => d.name)).finally(() => setBusy(false));
+          }}
+        >
+          Save
+        </button>
+      </div>
+    </div>
   );
 }

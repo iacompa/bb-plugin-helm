@@ -255,20 +255,27 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
   another repository an agent works in), no evidence or debug captures (before/after, probes,
   a commit or time in the name), no captures for platforms the app does not target, and for a
   phone app nothing shaped like a computer screen. The CLI's "Left out" line says what was
-  hidden and why. For a phone app, each page is captured on every phone in the **Phones for
-  screenshots** setting (`screenDevices`, default iPhone 18 Pro, iPhone 17 Pro Max, iPhone Air;
-  simulator or emulator model names): Screens has a phone picker and an **All phones** view that
-  shows one page on each phone side by side, and the camera button asks the app's lead for fresh
-  captures of every page. If an app shows no screens, or the wrong ones, tell the lead with `bb helm tell`.
+  hidden and why. For a phone app, each page is captured on the devices the user ticks in Screens →
+  **Devices** (a list, nothing typed: iPhone 18 Pro, 18 Pro Max, Air, 17, 17 Pro Max, 17e, SE;
+  Pixel 9, Pixel 9 Pro XL, Galaxy S25, S25 Ultra; iPad Pro 11-inch, iPad Air 11-inch, iPad mini,
+  Pixel Tablet; default the six common phones iPhone 18 Pro, 18 Pro Max, Air, SE, Pixel 9, Galaxy
+  S25). An iOS app gets the Apple ones, an Android app the Android ones. Computer and web apps need
+  no picking: Helm has their pages captured at 1440×900 and 1920×1080 (a web app also at 390 wide).
+  Screens has a device picker and an **All phones** view that shows one page on each device side by
+  side, and the camera button asks the app's lead for fresh captures of every page. If an app shows no screens, or the wrong ones, tell the lead with `bb helm tell`.
 - **After a Helm upgrade, mid-run** → agents keep the old skills, tools and prompt until
   their session restarts. `bb helm refresh --yes` rewrites briefs and restarts each live
   agent on the new version (supervisors first; work in worktrees stays).
 - **Disk space / too many worktrees** → every project has the user's checkout and one shared work
   worktree at `<repository folder>/.helm-work/<repository>`, on the same disk, plus only the lanes
-  the Git agent adds for parallel work, at most the **Worktrees per project** setting
-  (`worktreesPerApp`, 2 to 32, default 10). The **Worktrees** button on the Git agent's card shows
-  every app's worktrees and branches, what each is doing (running, being edited, idle) and the
-  space each takes, the app's total and each disk's free space. `bb helm worktrees` lists them per
+  the Git agent adds for parallel work. Each run has a branch limit (default 2: main and the work
+  branch; settings `branchesPerApp`, 2 to 12) and a worktree limit (default 10; `worktreesPerApp`,
+  2 to 32), set per run in the Worktrees view. The **Worktrees** button on the Git agent's card
+  opens at once with what Helm last read (git is read again in the background on open when a few
+  minutes old, every 30 minutes, or with **Check now**): one row per app with its number of
+  branches and worktrees, its size, the disk it is on (an external SSD by name, or This Mac) and
+  **Show in Finder**; click an app for each worktree (state, branch, agents, disk, size) and branch,
+  and its git storage. A row whose repository folder was moved or deleted says so. `bb helm worktrees` lists them per
   app (`--app <name>` for one). Apps from older runs may still have one BB worktree per agent on the
   internal drive; `bb helm worktrees --consolidate <app> --yes` moves one onto the shared worktree
   (refused while any of them holds uncommitted or unmerged work). The Git agent is told when a disk
