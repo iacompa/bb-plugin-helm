@@ -179,6 +179,11 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
   `bb helm ledger --limit 5` to confirm the receipt reaches `ack`.
 - **"Make all gates use model X"** → `bb helm models` to confirm the id, then
   `bb helm slots --slot review=… --slot slop=…` (or a `--slot` at plan time).
+- **Or ask a supervisor in its thread.** The Orchestrator, Managers and Leads change the models of
+  the agents below them (`helm_set_model`): "change all the Slop Hunters to Opus", "manager 1 on
+  Opus and manager 2 on Sonnet", "the Reviewer of Tide only". The Orchestrator can change anyone;
+  a Manager only its own leads and their squads; a Lead only its squad and gates. Each change is
+  a directive in `bb helm ledger`, marked with who made it.
 - **Stuck agents / the Watcher**: with a `watcher` slot (a light model such as Haiku low),
   Helm sends agents that look stuck to the Watcher. It nudges, restarts, or escalates them to
   the nearest active supervisor; only what nobody can fix reaches the user. Add one mid-run

@@ -175,7 +175,7 @@ export function LedgerRow({ d, data, open, onToggle }: { d: DirectiveInfo; data:
           {d.implicit ? <span className="pill" style={{ marginLeft: 6 }} title="Typed directly in the agent's thread">typed in thread</span> : null}
           {d.actor === "system" ? <span className="pill" style={{ marginLeft: 6 }}>system</span> : null}
           {d.byNode ? (
-            <span className="pill acc" style={{ marginLeft: 6 }} title="Sent by a supervisor with helm_direct">
+            <span className="pill acc" style={{ marginLeft: 6 }} title="Sent by a supervisor (helm_direct or helm_set_model)">
               by {trailLabel(data.nodes[d.byNode], data.apps) || d.byNode}
             </span>
           ) : null}

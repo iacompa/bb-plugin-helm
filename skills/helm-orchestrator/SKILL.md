@@ -26,6 +26,8 @@ reached its audience, or answers from memory.
 | `helm_set_priority {appId \| nodeId, priority, reason}` | `low` / `normal` / `high`. Give exactly one of `appId` or `nodeId`, and a reason. |
 | `helm_set_task {nodeId, task}` | Write or replace the task of an agent under you: your managers, and leads that report to you directly. ≤ 6,000 chars; aim for 150–600 words. It becomes part of the target's system prompt (about the first 2,200 chars) and of its BRIEF under "## Your task (from <you>, binding until they change it)". A running target is messaged and its brief file rewritten; a target not yet started starts with it. Refused for anyone outside your org. See *Writing tasks*. |
 | `helm_direct {to, action, text?, priority?, urgent?}` | Steer **anyone below you**, at any depth (never gates): `tell` (binding instruction), `pause`, `resume`, `priority`. The target must `helm_ack`; everyone between you and it, and above you, sees one FYI line; you get the ack as FYI. See *Steering your team*. |
+| `helm_models {}` | The models this machine offers (`provider/model:reasoning`) and the model, role and status of every agent below you. |
+| `helm_set_model {changes:[{nodes? \| role?, app?, under?, platform?, model}], reason?}` | Change models below you. Anyone below you: managers, leads, builders, Reviewers and Slop Hunters. See *Changing models*. |
 | `helm_message {to, text, kind}` | Your children only (the managers; leads if the run has no managers). Use ids from `helm_context`. `kind: info` is a non-waking FYI read on their next turn; `ask` / `handoff` wake them. |
 | `helm_report {status, summary, evidence?, blockers?, next?}` | You have no parent node (the human is above you); use it to record the final portfolio summary. |
 | `helm_ack {directiveId, note}` | Acknowledge a binding human change. |
@@ -354,6 +356,27 @@ A good `tell` reads: *what to do · why · what done looks like · what not to t
 request to tide.lead and continue on `apps/ios/**`. Done when your branch has no core
 changes." Prefer steering the manager first; go deeper only when the manager has not acted
 or it cannot wait.
+
+## Changing models
+
+You can change **anyone** in the run: every manager, lead, builder, Reviewer and Slop Hunter.
+
+- **When.** The human asks you to (in your thread, or relayed by your supervisor), or an agent keeps failing on
+  its model and a comparable model is available. Do not change models on your own to save or spend money.
+- **How.** Read `helm_models` for the exact `provider/model:reasoning` names and the ids below you, then call
+  `helm_set_model` once with every change. Select with `nodes` (ids), or with `role` (manager, lead, ui, code,
+  platform, security, test, research, docs, data, compliance, assets, reviewer, slop, gates, specialists, all)
+  narrowed by `app`, `under` (one of your reports) or `platform`. Provider and reasoning may be left out when
+  the model name is unambiguous.
+- "Change all the Slop Hunters to Opus" → `{changes:[{role:"slop", model:"claude-code/claude-opus-5-5:high"}]}`.
+- "Manager 1 on Opus, manager 2 on Sonnet" → two changes in one call: `{nodes:["<mgr-1 id>"], model:…}` and `{nodes:["<mgr-2 id>"], model:…}`.
+- "The Slop Hunter of Tide only" → `{role:"slop", app:"tide", model:…}`. "Everything under manager 2" → `{role:"all", under:"<mgr-2 id>", model:…}`.
+- When you move **every** agent of a role (all Slop Hunters, all managers), future agents of that role use the new model too.
+- **What happens.** Nobody is interrupted. An agent on the same provider switches at its next turn; one moved to
+  another provider gets a new thread that continues its work with a hand-over; a failed agent retries on the
+  new model. Every change is a directive in the ledger, and the chain above sees one FYI line.
+- If one change is invalid (an unknown model, an agent not below you), Helm rejects the whole call and says
+  why; fix it and call again. Tell the human what you changed, quoting the directive ids.
 
 ## Detecting and unsticking stalled work
 

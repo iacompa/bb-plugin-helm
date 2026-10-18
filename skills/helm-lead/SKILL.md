@@ -35,6 +35,8 @@ for each builder, and merging early and often.
 | `helm_existing_docs {docs?, checks?, reason?}` | **Existing repositories only.** `docs`: `{spec, architecture, contract, acceptance}` → repo-relative paths of committed files that already serve that purpose; `checks`: `{name: {command, tier?, category?, timeoutSec?}}` → the repository's real commands. Helm verifies each file is committed on the integration branch and then counts them for the spec stage, and uses the checks instead of `.helm/checks.json`. Refused in a new repository, for a missing file, or for a check that runs nothing real (`echo`, `true`). |
 | `helm_slop_scan {paths?}` | Deterministic scanner on the integration branch (with history). With no `paths` on the integration HEAD it also records the `slop-scan` check. |
 | `helm_direct {to, action, text?, priority?, urgent?}` | Steer **your squad members** (never gates): `tell` (binding instruction), `pause`, `resume`, `priority`. The target must `helm_ack`; everyone between you and it, and above you, sees one FYI line; you get the ack as FYI. See *Steering your team*. |
+| `helm_models {}` | The models this machine offers (`provider/model:reasoning`) and the model, role and status of every agent below you. |
+| `helm_set_model {changes:[{nodes? \| role?, app?, under?, platform?, model}], reason?}` | Change models below you. Your squad and your gates (Reviewer, Slop Hunter). Never your supervisors or another app's agents. See *Changing models*. |
 | `helm_report`, `helm_message`, `helm_ack`, `helm_need`, `helm_context` | As in every Helm role. `helm_message` reaches your parent, your squad and gates (your children); text ≤ 2,000 chars. |
 
 **Evidence refs** (`helm_stage`, `helm_report`): `{kind, ref, branch?}`, at most 20.
@@ -442,6 +444,25 @@ your direct reports.
   or re-word a human instruction. Helm rejects the first three.
 - FYI lines (digests, acks, reports) ride along with your next Helm tool result. You do not
   need to poll for them.
+
+## Changing models
+
+You can change **your squad and your gates** (Reviewer, Slop Hunter). Helm refuses your manager, the Orchestrator and other apps' agents: pass those requests up to your parent with `helm_message`.
+
+- **When.** The human asks you to (in your thread, or relayed by your supervisor), or an agent keeps failing on
+  its model and a comparable model is available. Do not change models on your own to save or spend money.
+- **How.** Read `helm_models` for the exact `provider/model:reasoning` names and the ids below you, then call
+  `helm_set_model` once with every change. Select with `nodes` (ids), or with `role` (manager, lead, ui, code,
+  platform, security, test, research, docs, data, compliance, assets, reviewer, slop, gates, specialists, all)
+  narrowed by `app`, `under` (one of your reports) or `platform`. Provider and reasoning may be left out when
+  the model name is unambiguous.
+- "Our Slop Hunter on Opus" → `{changes:[{role:"slop", model:"claude-code/claude-opus-5-5:high"}]}`.
+- "The Core builder on GPT, the UI builder on Sonnet" → two changes in one call, `{role:"code", model:…}` and `{role:"ui", model:…}`.
+- **What happens.** Nobody is interrupted. An agent on the same provider switches at its next turn; one moved to
+  another provider gets a new thread that continues its work with a hand-over; a failed agent retries on the
+  new model. Every change is a directive in the ledger, and the chain above sees one FYI line.
+- If one change is invalid (an unknown model, an agent not below you), Helm rejects the whole call and says
+  why; fix it and call again. Tell the human what you changed, quoting the directive ids.
 
 ## Context hygiene
 

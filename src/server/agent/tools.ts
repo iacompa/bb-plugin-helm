@@ -14,7 +14,7 @@ import { HUMAN_ONLY, PROJECT_NEEDS, type NodeInfo, type ProjectNeed } from "../.
 import { toolsForNode, PLANNER_TOOLS } from "../domain/roles.ts";
 import { KindLooseSchema, PortfolioSchema, normalizePortfolio } from "../domain/brief.ts";
 import { VerdictSchema } from "../domain/verdict.ts";
-import { ack, agentDirect, resolveNeed } from "../engine/direct.ts";
+import { ack, agentDirect, agentModels, agentSetModel, resolveNeed, type ModelChange } from "../engine/direct.ts";
 import { assignFix, declareExisting, publishContract, recordCheck, releaseSquadMembers, report, slopScan, spawnSquad, stageRequest, verdict } from "../engine/gates.ts";
 import { context, digest, world } from "../engine/world.ts";
 import { validateDelta, type ProfileChange } from "../engine/delta.ts";
@@ -74,6 +74,33 @@ export const TOOL_DEFS: ToolDef[] = [
       "Steer anyone below you (your reports and their teams, never gates): tell (a binding instruction), pause, resume, or priority low|normal|high. The target must helm_ack; everyone between you and it, and above you, gets one FYI line; you get its ack as FYI. urgent (default true) interrupts its current turn, false waits for it. The human's directives win: you cannot resume what the human paused or override a priority the human set. Batch instructions: at most 3 per agent and 12 in total per 10 minutes.",
     parameters: z.object({ to: z.string().min(1).max(80), action: z.enum(["tell", "pause", "resume", "priority"]), text: z.string().max(1500).optional(), priority: z.enum(["low", "normal", "high"]).optional(), urgent: z.boolean().optional() }).strict(),
     presentation: { label: { pending: "Steering a report", completed: "Steered a report" }, icon: { glyph: "Sent" } },
+  },
+  { name: "helm_models", description: "The models this machine offers (provider/model:reasoning) and the model, role and status of every agent below you. Read it before helm_set_model.", parameters: z.object({}).strict(), presentation: { label: { pending: "Reading models", completed: "Read models" }, icon: { glyph: "AiBrain01" } } },
+  {
+    name: "helm_set_model",
+    description:
+      "Change the model of agents below you: the Orchestrator can change anyone, a Manager its Leads and their teams, a Lead its squad and gates. Use it when the human asks (directly, or relayed by your supervisor), or to move an agent off a model that keeps failing. Each change picks agents by `nodes` (ids), or by `role` (manager, lead, ui, code, platform, security, test, research, docs, data, compliance, assets, reviewer, slop = Slop Hunter, gates, specialists, all) narrowed by `app`, `under` one of your reports, or `platform`; `model` is provider/model:reasoning from helm_models (provider and reasoning may be left out when unambiguous). Several changes in one call, e.g. one manager to one model and another to a different one. Same provider: it switches at its next turn. Another provider: it moves to a new thread with a hand-over. A failed agent retries on the new model. When the Orchestrator moves every agent of a role, future agents of that role follow.",
+    parameters: z
+      .object({
+        changes: z
+          .array(
+            z
+              .object({
+                nodes: z.array(z.string().min(1).max(80)).min(1).max(60).optional(),
+                role: z.string().min(1).max(40).optional(),
+                app: z.string().min(1).max(80).optional(),
+                under: z.string().min(1).max(80).optional(),
+                platform: z.string().min(1).max(20).optional(),
+                model: z.string().min(1).max(120),
+              })
+              .strict(),
+          )
+          .min(1)
+          .max(10),
+        reason: z.string().max(300).optional(),
+      })
+      .strict(),
+    presentation: { label: { pending: "Changing models", completed: "Changed models" }, icon: { glyph: "SlidersHorizontal" } },
   },
   {
     name: "helm_watch",
@@ -143,6 +170,8 @@ const TIER_NAME: Record<string, string> = {
   helm_approve: "the Orchestrator, Managers and App Leads",
   helm_set_task: "the Orchestrator, Managers and App Leads",
   helm_direct: "the Orchestrator, Managers and App Leads",
+  helm_models: "the Orchestrator, Managers and App Leads",
+  helm_set_model: "the Orchestrator, Managers and App Leads",
   helm_propose_plan: "the Orchestrator",
   helm_propose_wave: "the Orchestrator",
   helm_set_priority: "the Orchestrator and Managers",
@@ -237,6 +266,10 @@ async function dispatch(e: Engine, node: NodeInfo, name: string, p: Record<strin
       return message(e, node, String(p.to), String(p.text), String(p.kind ?? "info"));
     case "helm_direct":
       return agentDirect(e, node, p as never);
+    case "helm_models":
+      return agentModels(e, node);
+    case "helm_set_model":
+      return agentSetModel(e, node, p.changes as ModelChange[], String(p.reason ?? ""));
     case "helm_world":
       return JSON.stringify(world(e, node.runId, { appsPage: p.appsPage as number | undefined }));
     case "helm_propose_plan":

@@ -40,6 +40,8 @@ you cannot message, steer, prioritize or write tasks for other managers' leads o
 | `helm_digest {}` | Rolled-up state of your apps plus FYI lines you have not read. **Read this first, every time.** |
 | `helm_context {}` | Your node, parent, children (lead ids and status), policies, unacked directives, capacity. |
 | `helm_direct {to, action, text?, priority?, urgent?}` | Steer **anyone below you**, at any depth (never gates): `tell` (binding instruction), `pause`, `resume`, `priority`. The target must `helm_ack`; everyone between you and it, and above you, sees one FYI line; you get the ack as FYI. See *Steering your team*. |
+| `helm_models {}` | The models this machine offers (`provider/model:reasoning`) and the model, role and status of every agent below you. |
+| `helm_set_model {changes:[{nodes? \| role?, app?, under?, platform?, model}], reason?}` | Change models below you. Your leads and everyone in their squads, gates included. Never the Orchestrator, yourself or another manager's group. See *Changing models*. |
 | `helm_message {to, text, kind}` | Allowed targets: your parent (the Orchestrator) and your children (your leads). Not other managers, not other groups' leads, not specialists. `info` = non-waking FYI; `ask` / `handoff` wake the recipient. Text ≤ 2,000 chars. |
 | `helm_set_priority {appId \| nodeId, priority, reason}` | Only apps/nodes **in your group**; anything else is rejected. One of `appId` / `nodeId`, plus a reason. |
 | `helm_set_task {nodeId, task}` | Write or replace the task of one of **your leads**. ≤ 6,000 chars; aim for 150–600 words. It becomes part of the lead's system prompt (about the first 2,200 chars) and of its BRIEF under "## Your task (from <you>, binding until they change it)". A running lead is messaged and its brief file rewritten; a lead not yet started starts with it. Refused for anyone outside your org. See *Writing tasks for your leads*. |
@@ -236,6 +238,25 @@ your direct reports.
 
 Steer a lead first; go past a lead to its builders only when the lead is absent, stalled, or
 the problem cannot wait.
+
+## Changing models
+
+You can change your **leads and everyone in their squads**, Reviewers and Slop Hunters included. Helm refuses the Orchestrator, yourself, other managers and other groups' agents: pass those requests up to the Orchestrator with `helm_message`.
+
+- **When.** The human asks you to (in your thread, or relayed by your supervisor), or an agent keeps failing on
+  its model and a comparable model is available. Do not change models on your own to save or spend money.
+- **How.** Read `helm_models` for the exact `provider/model:reasoning` names and the ids below you, then call
+  `helm_set_model` once with every change. Select with `nodes` (ids), or with `role` (manager, lead, ui, code,
+  platform, security, test, research, docs, data, compliance, assets, reviewer, slop, gates, specialists, all)
+  narrowed by `app`, `under` (one of your reports) or `platform`. Provider and reasoning may be left out when
+  the model name is unambiguous.
+- "Change the Slop Hunters in my group to Opus" → `{changes:[{role:"slop", model:"claude-code/claude-opus-5-5:high"}]}` (only your group is ever selected).
+- "Tide's lead on Sonnet" → `{role:"lead", app:"tide", model:…}`, or `{nodes:["<lead id>"], model:…}`.
+- **What happens.** Nobody is interrupted. An agent on the same provider switches at its next turn; one moved to
+  another provider gets a new thread that continues its work with a hand-over; a failed agent retries on the
+  new model. Every change is a directive in the ledger, and the chain above sees one FYI line.
+- If one change is invalid (an unknown model, an agent not below you), Helm rejects the whole call and says
+  why; fix it and call again. Tell the human what you changed, quoting the directive ids.
 
 ## Detecting and unsticking stalled work
 

@@ -2,9 +2,11 @@
 // applied and fanned out to every recipient in ONE transaction, so the
 // Orchestrator's world state can never be stale about what the human changed.
 
-import type { Cascade, DirectiveInfo, DirectiveType, ModelRef, NodeInfo, PermissionMode, SlotId, SlotMap } from "../../shared/types.ts";
+import type { Cascade, Catalog, DirectiveInfo, DirectiveType, ModelRef, NodeInfo, PermissionMode, Role, SlotId, SlotMap, Tier } from "../../shared/types.ts";
+import { PlatformLooseSchema } from "../domain/brief.ts";
+import { PLATFORM_LABEL } from "../domain/roles.ts";
 import { HelmError, type Engine } from "./engine.ts";
-import { AGENT_ACTIONS, agentNoticeText, agentSummary, bottomUp, buildAgentRecipients, buildRecipients, deliveryModeFor, directiveSummary, noticeFor, resolveCascade, steerProblem, touches, type AgentAction, type NoticeDirective } from "../domain/directives.ts";
+import { AGENT_ACTIONS, agentNoticeText, agentSummary, bottomUp, buildAgentModelRecipients, buildAgentRecipients, buildRecipients, descendants, deliveryModeFor, directiveSummary, noticeFor, resolveCascade, steerProblem, touches, type AgentAction, type NoticeDirective } from "../domain/directives.ts";
 import { modelName, validateRef } from "../domain/models.ts";
 import { hhmm, pad4 } from "./context.ts";
 import { waiverProblem } from "../domain/verdict.ts";
@@ -33,6 +35,10 @@ export interface DirectiveInput {
   rotatedConfirmed?: boolean;
   /** A supervisor steering someone below it (helm_direct); validated by agentDirect. */
   byNode?: string;
+  /** A supervisor's model change (helm_set_model): exactly these nodes, validated by agentSetModel. */
+  affectedIds?: string[];
+  /** How the ledger names a multi-agent selection ("3 Slop Hunters under Manager 1"). */
+  targetLabel?: string;
 }
 
 const SELF_ONLY: DirectiveType[] = ["approve", "deny", "answer", "plan", "signoff", "sendback", "waive", "slots", "spawn"];
@@ -101,9 +107,10 @@ export async function createDirective(e: Engine, runId: string, input: Directive
   const mname = (r: ModelRef | null | undefined) => modelName(cat, r);
   // BB cannot move a thread to another provider: read each affected thread's real provider first
   const threadProvider = new Map<string, string | null>();
+  const explicit = by && type === "model" && input.affectedIds?.length ? input.affectedIds : null;
   if (type === "model" || (type === "slots" && input.slotsScope === "all")) {
     const changedSlots = Object.keys(input.slots ?? {});
-    const ids = type === "model" ? new Set(resolveCascade(e.tree(runId), target.id, cascade)) : null;
+    const ids = type === "model" ? new Set(explicit ?? resolveCascade(e.tree(runId), target.id, cascade)) : null;
     const live = e.repo.listNodes(runId).filter((n) => n.threadId && n.status !== "done" && (ids ? ids.has(n.id) : changedSlots.includes(n.slot)));
     await Promise.all(live.map(async (n) => threadProvider.set(n.id, (await e.port.threadState(n.threadId!).catch(() => null))?.providerId ?? null)));
   }
@@ -113,8 +120,8 @@ export async function createDirective(e: Engine, runId: string, input: Directive
     const id = `D-${pad4(seq)}`;
     const ts = e.now();
     const tree = e.tree(runId);
-    const affected = resolveCascade(tree, target.id, cascade);
-    const recipients = by ? buildAgentRecipients(tree, by.id, target.id) : buildRecipients(tree, affected);
+    const affected = explicit ? [...explicit] : resolveCascade(tree, target.id, cascade);
+    const recipients = by ? (type === "model" ? buildAgentModelRecipients(tree, by.id, affected) : buildAgentRecipients(tree, by.id, target.id)) : buildRecipients(tree, affected);
     const nodes = new Map(e.repo.listNodes(runId).map((n) => [n.id, n]));
     let modelFrom: ModelRef | null = null;
     let briefVersion = target.briefVersion;
@@ -140,12 +147,23 @@ export async function createDirective(e: Engine, runId: string, input: Directive
     // ── effects ──
     switch (type) {
       case "model": {
-        modelFrom = target.model;
+        modelFrom = affected.length === 1 ? nodes.get(affected[0])?.model ?? null : target.model;
         for (const nid of affected) {
           const n = nodes.get(nid)!;
-          switchModel(n, input.modelTo!, true);
+          const r = switchModel(n, input.modelTo!, true);
           e.repo.event(runId, nid, "model", `${mname(n.model)} → ${mname(input.modelTo)}`, id);
+          // a supervisor moving a failed agent to a working model: it retries on the new one
+          if (by && n.status === "failed") {
+            if (!n.threadId) e.repo.updateNode(runId, nid, { status: "queued", firstInLine: true, warning: null });
+            else if (r === "updated") {
+              e.repo.updateNode(runId, nid, { status: "running", endedAt: null, lastActivityAt: ts, nudgedAt: null, warning: null });
+              e.repo.enqueue({ id: e.oid(), runId, kind: "retry", nodeId: nid, payload: {}, idemKey: `${id}:retry:${nid}` });
+              for (const need of e.repo.openNeedsFor(runId, nid)) if (need.kind === "failed") e.repo.resolveNeed(runId, need.id, { action: "retry", text: "retried on the new model" });
+            }
+          }
         }
+        // the Orchestrator moved every agent of a role: future agents of that role follow
+        if (by && input.slots && Object.keys(input.slots).length) e.repo.updateRun(runId, { slots: { ...run.slots, ...input.slots } });
         break;
       }
       case "scope": {
@@ -267,7 +285,7 @@ export async function createDirective(e: Engine, runId: string, input: Directive
     const touchedCount = Number((e.repo.db.prepare("SELECT COUNT(*) AS c FROM nodes WHERE run_id = ? AND touched = 1").get(runId) as { c: number }).c);
 
     const nd: NoticeDirective = { id, type, cascade, text, value: input.value, modelFrom, modelTo: input.modelTo ?? null, implicit: input.implicit, ts };
-    const ctx = { targetName: e.label(target), briefVersion, modelName: mname, touchedCount, clock: hhmm(ts) };
+    const ctx = { targetName: input.targetLabel ?? e.label(target), briefVersion, modelName: mname, touchedCount, clock: hhmm(ts) };
     const actx = by ? { ...ctx, byName: e.label(by), byId: by.id } : null;
     const summary = actx ? agentSummary(nd as NoticeDirective & { type: AgentAction }, actx) : directiveSummary(nd, ctx);
     e.repo.insertDirective({ id, runId, ts, type, targetNodeId: target.id, cascade, mode: humanMode, policy: !!input.policy || type === "policy", text, value: { value: input.value ?? null, needId: input.needId ?? null, findingIds: input.findingIds ?? null, slots: input.slots ?? null, slotsScope: input.slotsScope ?? null }, modelFrom, modelTo: input.modelTo ?? null, affected, actor, byNode: by?.id ?? null, implicit: !!input.implicit, summary });
@@ -276,7 +294,12 @@ export async function createDirective(e: Engine, runId: string, input: Directive
     const need = input.needId ? e.repo.getNeed(runId, input.needId) : null;
     for (const r of recipients) {
       const n = nodes.get(r.id)!;
-      const notice = actx ? agentNoticeText(nd as NoticeDirective & { type: AgentAction }, r.level, actx) : noticeFor(nd, r, ctx);
+      const notice =
+        actx && type === "model" && affected.includes(r.id)
+          ? `${id} · ${actx.byName} (${actx.byId}) changed your model to ${mname(input.modelTo)}${text ? `: ${text}` : ""}. It applies from your next turn; carry on with your work.`
+          : actx
+            ? agentNoticeText(nd as NoticeDirective & { type: AgentAction }, r.level, actx)
+            : noticeFor(nd, r, ctx);
       let state: "queued" | "delivered" | "rec" = "queued";
       let outboxId: string | null = null;
       if (r.level === "digest") {
@@ -313,7 +336,7 @@ export async function createDirective(e: Engine, runId: string, input: Directive
   e.emit(runId, "directive.created", out);
   for (const nid of out.affected) e.emit(runId, "node.updated", e.repo.getNode(runId, nid));
   e.outbox.kick();
-  if (["resume", "retry", "spawn", "stop", "pause", "slots", "priority"].includes(type)) await e.pump(runId);
+  if (["resume", "retry", "spawn", "stop", "pause", "slots", "priority"].includes(type) || (by && type === "model")) await e.pump(runId);
   return out;
 }
 
@@ -385,6 +408,205 @@ export async function agentDirect(e: Engine, by: NodeInfo, p: { to: string; acti
   const told = d.recipients.filter((r) => r.level === "digest").length;
   const when = target.threadId ? (TERMINAL.has(target.status) ? "it was not woken; it reads this when it next starts" : "delivered now") : "it reads this when it starts";
   return `${d.id} sent to ${e.label(target)} (${when}). ${told ? `${told} above ${told === 1 ? "it sees" : "them see"} one FYI line. ` : ""}You will get its acknowledgement as FYI.`;
+}
+
+// ───────────────────────────── supervisor model changes (helm_set_model) ─────────────────────────────
+
+const MODEL_PER_SUPERVISOR = 10;
+
+/** Role words a supervisor may use for a selection ("slop hunters", "reviewers", "managers", "gates"). */
+const ROLE_WORDS: Record<string, { roles?: Role[]; tiers?: Tier[]; label: string }> = {
+  manager: { roles: ["mgr"], label: "Manager" },
+  mgr: { roles: ["mgr"], label: "Manager" },
+  lead: { roles: ["lead"], label: "Lead" },
+  app_lead: { roles: ["lead"], label: "Lead" },
+  ui: { roles: ["ui"], label: "UI builder" },
+  code: { roles: ["code"], label: "Core builder" },
+  core: { roles: ["code"], label: "Core builder" },
+  platform: { roles: ["platform"], label: "platform builder" },
+  security: { roles: ["security"], label: "Security agent" },
+  test: { roles: ["test"], label: "Test agent" },
+  research: { roles: ["research"], label: "Research agent" },
+  docs: { roles: ["docs"], label: "Docs agent" },
+  data: { roles: ["data"], label: "Data builder" },
+  compliance: { roles: ["compliance"], label: "Compliance agent" },
+  assets: { roles: ["assets"], label: "Asset builder" },
+  asset: { roles: ["assets"], label: "Asset builder" },
+  review: { roles: ["review"], label: "Reviewer" },
+  reviewer: { roles: ["review"], label: "Reviewer" },
+  slop: { roles: ["slop"], label: "Slop Hunter" },
+  slop_hunter: { roles: ["slop"], label: "Slop Hunter" },
+  slophunter: { roles: ["slop"], label: "Slop Hunter" },
+  gate: { tiers: ["gate"], label: "gate" },
+  specialist: { tiers: ["specialist"], label: "specialist" },
+  builder: { tiers: ["specialist"], label: "specialist" },
+  all: { label: "agent" },
+  everyone: { label: "agent" },
+};
+
+export function roleWord(s: string): { roles?: Role[]; tiers?: Tier[]; label: string } | null {
+  const k = s.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return ROLE_WORDS[k] ?? ROLE_WORDS[k.replace(/s$/, "")] ?? ROLE_WORDS[k.replace(/_builders?$|_agents?$/, "")] ?? null;
+}
+
+/** "provider/model:reasoning", "model:reasoning" or "model" → a model on this machine's catalog. */
+export function resolveModelWord(cat: Catalog, s: string): { ref: ModelRef } | { problem: string } {
+  const m = s.trim().match(/^(?:([A-Za-z0-9._-]+)\/)?([A-Za-z0-9._\-\[\]]+?)(?::([A-Za-z0-9_-]+))?$/);
+  if (!m) return { problem: `Cannot read the model "${s}". Write it as provider/model:reasoning, from helm_models.` };
+  const [, providerId, modelId, reasoning] = m;
+  const hits = cat.models.filter((x) => x.modelId === modelId && (!providerId || x.providerId === providerId));
+  if (!hits.length) return { problem: `No model ${providerId ? `${providerId}/` : ""}${modelId} on this machine. Call helm_models for the list.` };
+  const live = hits.filter((x) => cat.providers.find((p) => p.id === x.providerId)?.available);
+  if (live.length > 1) return { problem: `${modelId} is offered by ${live.map((x) => x.providerId).join(" and ")}; name the provider (provider/${modelId}).` };
+  const hit = live[0] ?? hits[0];
+  const ref: ModelRef = { providerId: hit.providerId, modelId: hit.modelId, reasoning: reasoning ?? hit.defaultReasoning ?? null };
+  const p = validateRef(cat, ref);
+  return p ? { problem: p.message } : { ref };
+}
+
+export interface ModelChange {
+  nodes?: string[];
+  role?: string;
+  app?: string;
+  under?: string;
+  platform?: string;
+  model: string;
+}
+
+/**
+ * A supervisor changes the models of agents below it: the Orchestrator anyone, a Manager its
+ * Leads and their teams, a Lead its squad and gates. One directive per change; nobody is woken.
+ */
+export async function agentSetModel(e: Engine, by: NodeInfo, changes: ModelChange[], reason: string): Promise<string> {
+  const runId = by.runId;
+  const since = e.now() - STEER_WINDOW_MS;
+  const recent = e.repo.listDirectives(runId, 200).filter((d) => d.byNode === by.id && d.type === "model" && d.ts >= since).length;
+  if (recent + changes.length > MODEL_PER_SUPERVISOR) return `Rejected: at most ${MODEL_PER_SUPERVISOR} model changes per 10 minutes (you made ${recent}). Select by role to change many agents in one change.`;
+  const cat = await e.catalog(e.repo.runHost(runId));
+  const tree = e.tree(runId);
+  const all = e.repo.listNodes(runId);
+  const byId = new Map(all.map((n) => [n.id, n]));
+  const below = new Set(descendants(tree, by.id));
+  const apps = e.repo.listApps(runId);
+
+  // validate everything first: either every change applies or none does
+  const planned: Array<{ ids: string[]; ref: ModelRef; label: string; target: string; slots?: SlotMap; skipped: string[] }> = [];
+  for (const [i, c] of changes.entries()) {
+    const tag = changes.length > 1 ? `Change ${i + 1}: ` : "";
+    const res = resolveModelWord(cat, c.model);
+    if ("problem" in res) return `Rejected: ${tag}${res.problem}`;
+    let ids: string[];
+    let label: string;
+    let target = by.id;
+    if (c.nodes?.length) {
+      if (c.role || c.app || c.under || c.platform) return `Rejected: ${tag}name agents by nodes, or select them by role/app/under/platform, not both.`;
+      const bad = c.nodes.filter((id) => !byId.has(id));
+      if (bad.length) return `Rejected: ${tag}no agent ${bad.join(", ")}. Use ids from helm_models or helm_context.`;
+      const outside = c.nodes.filter((id) => !below.has(id));
+      if (outside.length) return `Rejected: ${tag}${outside.map((id) => (id === by.id ? "yourself" : id)).join(", ")} ${outside.length === 1 ? "is" : "are"} not below you. You can change the models of agents below you only; ask ${by.parentId ?? "the human"} for anything else.`;
+      ids = [...new Set(c.nodes)];
+      label = ids.length === 1 ? e.label(byId.get(ids[0])!) : `${ids.length} agents`;
+      if (ids.length === 1) target = ids[0];
+    } else {
+      if (!c.role && !c.app && !c.under && !c.platform) return `Rejected: ${tag}say who: nodes, or a role (e.g. slop, reviewer, lead, manager), an app, or under one of your reports.`;
+      let pool = [...below];
+      let where = "";
+      if (c.under) {
+        const u = byId.get(c.under);
+        if (!u) return `Rejected: ${tag}no agent ${c.under}.`;
+        if (!below.has(u.id)) return `Rejected: ${tag}${u.id === by.id ? "under yourself is the default; leave under out" : `${u.id} is not below you`}.`;
+        pool = [u.id, ...descendants(tree, u.id)];
+        target = u.id;
+        where = ` under ${e.label(u)}`;
+      }
+      if (c.app) {
+        const want = c.app.trim().toLowerCase();
+        const app = apps.find((a) => a.id === want || a.name.toLowerCase() === want);
+        if (!app) return `Rejected: ${tag}no app ${c.app}. Apps: ${apps.map((a) => a.id).slice(0, 30).join(", ")}.`;
+        pool = pool.filter((id) => byId.get(id)!.appId === app.id);
+        where += ` in ${app.name}`;
+      }
+      let what = "agent";
+      if (c.role) {
+        const w = roleWord(c.role);
+        if (!w) return `Rejected: ${tag}unknown role "${c.role}". Use manager, lead, ui, code, platform, security, test, research, docs, data, compliance, assets, reviewer, slop (Slop Hunter), gates, specialists or all.`;
+        pool = pool.filter((id) => {
+          const n = byId.get(id)!;
+          return (!w.roles || w.roles.includes(n.role)) && (!w.tiers || w.tiers.includes(n.tier));
+        });
+        what = w.label;
+      }
+      if (c.platform) {
+        const pl = PlatformLooseSchema.safeParse(c.platform);
+        if (!pl.success) return `Rejected: ${tag}unknown platform "${c.platform}".`;
+        pool = pool.filter((id) => byId.get(id)!.platform === pl.data);
+        if (!c.role) what = `${PLATFORM_LABEL[pl.data]} builder`;
+      }
+      ids = pool;
+      label = `${ids.length === 1 ? e.label(byId.get(ids[0])!) : `${ids.length} ${what}s`}${where}`;
+      if (!ids.length) return `Rejected: ${tag}no ${what} below you${where}. Call helm_models to see who is below you.`;
+    }
+    const skipped = ids.filter((id) => byId.get(id)!.status === "done").map((id) => e.label(byId.get(id)!));
+    ids = ids.filter((id) => byId.get(id)!.status !== "done");
+    const same = (r: ModelRef | null) => !!r && r.providerId === res.ref.providerId && r.modelId === res.ref.modelId && (r.reasoning ?? null) === (res.ref.reasoning ?? null);
+    ids = ids.filter((id) => !same(byId.get(id)!.model));
+    // the Orchestrator moving every agent that uses a slot moves that slot's default too
+    let slots: SlotMap | undefined;
+    if (by.id === ORCH_ID && ids.length) {
+      const chosen = new Set(ids);
+      for (const slot of new Set(ids.map((id) => byId.get(id)!.slot))) {
+        const users = all.filter((n) => n.slot === slot && n.status !== "done" && n.id !== ORCH_ID);
+        if (users.every((n) => chosen.has(n.id) || same(n.model))) slots = { ...(slots ?? {}), [slot]: res.ref };
+      }
+    }
+    planned.push({ ids, ref: res.ref, label, target, slots, skipped });
+  }
+
+  const lines: string[] = [];
+  for (const p of planned) {
+    if (!p.ids.length) {
+      lines.push(`${p.label}: already on ${modelName(cat, p.ref)}; nothing changed.`);
+      continue;
+    }
+    const humanSet = p.ids.filter((id) => e.repo.directivesTouching(runId, id).find((d) => d.type === "model" && d.affected.includes(id))?.actor === "human");
+    const d = await createDirective(e, runId, { type: "model", target: p.target, modelTo: p.ref, byNode: by.id, affectedIds: p.ids, targetLabel: p.label, text: reason, slots: p.slots });
+    const moved = p.ids.filter((id) => {
+      const n = e.repo.getNode(runId, id);
+      return n && byId.get(id)!.threadId && n.threadId !== byId.get(id)!.threadId;
+    }).length;
+    const names = p.ids.length <= 8 ? ` (${p.ids.join(", ")})` : "";
+    lines.push(
+      `${d.id}: ${p.label}${names} → ${modelName(cat, p.ref)} [${p.ref.providerId}/${p.ref.modelId}${p.ref.reasoning ? `:${p.ref.reasoning}` : ""}].` +
+        (moved ? ` ${moved} moved to a new thread on ${p.ref.providerId} with a hand-over.` : "") +
+        (p.slots ? ` Future ${Object.keys(p.slots).join(", ")} agents use it too.` : "") +
+        (p.skipped.length ? ` Skipped (done): ${p.skipped.join(", ")}.` : "") +
+        (humanSet.length ? ` Note: the human had chosen the model of ${humanSet.map((id) => e.label(byId.get(id)!)).join(", ")}; change it only because the human asked.` : ""),
+    );
+  }
+  return `${lines.join("\n")}\nAgents on the same provider switch at their next turn; nobody was interrupted.`;
+}
+
+/** The models this machine offers, and which model each agent below the caller uses. Bounded. */
+export async function agentModels(e: Engine, by: NodeInfo): Promise<string> {
+  const runId = by.runId;
+  const cat = await e.catalog(e.repo.runHost(runId)).catch(() => null);
+  const out: string[] = ["Models on this machine (write them as provider/model:reasoning):"];
+  if (!cat) out.push("  (the catalog could not be read right now)");
+  else
+    for (const p of cat.providers.filter((x) => x.available)) {
+      for (const m of cat.models.filter((x) => x.providerId === p.id && !x.hidden).slice(0, 20))
+        out.push(`  ${p.id}/${m.modelId}  ${m.name}  reasoning: ${m.reasoning.join("/") || "—"}${m.defaultReasoning ? ` (default ${m.defaultReasoning})` : ""}`);
+    }
+  const tree = e.tree(runId);
+  const below = descendants(tree, by.id)
+    .map((id) => e.repo.getNode(runId, id)!)
+    .filter((n) => n && n.status !== "done");
+  out.push("", below.length ? `Agents below you (${below.length}): id · role · model · status` : "Nobody is below you.");
+  const fmt = (r: ModelRef | null) => (r ? `${r.providerId}/${r.modelId}${r.reasoning ? `:${r.reasoning}` : ""}` : "(none)");
+  for (const n of below.slice(0, 80)) out.push(`  ${n.id} · ${e.label(n)} · ${fmt(n.model ?? e.run(runId).slots[n.slot] ?? null)}${n.modelOverride ? " (set individually)" : ""} · ${n.status}`);
+  if (below.length > 80) out.push(`  … and ${below.length - 80} more; select them by role, app or under.`);
+  out.push("", "Change them with helm_set_model: by nodes, or by role (manager, lead, ui, code, platform, security, test, data, compliance, assets, reviewer, slop, gates, specialists, all), optionally in one app or under one of your reports.");
+  return out.join("\n").slice(0, 12_000);
 }
 
 /** One reminder for unacked direct/full notices when the node goes idle (§6.4). */
