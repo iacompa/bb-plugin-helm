@@ -95,7 +95,7 @@ Check the app's **deployment target** before using any API below, and the curren
 
 ```bash
 xcrun simctl list devicetypes | grep -i iphone          # exact model names
-xcrun simctl create helm-iphone-18-pro "iPhone 18 Pro"  # once per model; reuse it after
+xcrun simctl create helm-iphone-18-pro "iPhone 18 Pro"  # once per model; reuse it after (refused if no installed runtime runs it: use the closest model it accepts)
 xcrun simctl boot helm-iphone-18-pro
 xcrun simctl install helm-iphone-18-pro path/to/App.app
 xcrun simctl launch helm-iphone-18-pro <bundle id>

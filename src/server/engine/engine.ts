@@ -124,7 +124,7 @@ export function phoneCaptureText(devices: string[], folder = "ui"): string {
     `Capture every page of the app on each of these devices (the human picked them in Screens): ${list.join(", ")}. The human looks at them in the Screens view, one device at a time or side by side.`,
     ios ? `iOS: \`xcrun simctl list devicetypes\` names the installed models. Make one simulator per model once (\`xcrun simctl create helm-${slug(ios)} "${ios}"\`), reuse it, boot it only to capture (\`xcrun simctl io helm-${slug(ios)} screenshot …\`) and shut it down afterwards.` : "",
     android ? `Android: one emulator per model (\`avdmanager list device\` names the hardware profiles; ${android} has its own or use the closest size), made once and reused, started only to capture (\`adb exec-out screencap -p\`) and stopped afterwards.` : "",
-    `A model that is not installed: use the closest one installed and say which in reports/${folder}/INDEX.md.`,
+    `A model that is not installed, or that \`simctl create\` refuses (Xcode can list models no installed runtime runs, such as a newer iPhone): use the closest one it accepts (an iPhone 18 Pro becomes the iPhone 17 Pro) and say which in reports/${folder}/INDEX.md. Never download a simulator runtime yourself.`,
     `Name each file \`reports/${folder}/<screen>--<state>--<device>--<theme>.png\`, the device as a slug (\`home--default--${slug(list[0])}--light.png\`), so Screens knows the device. Upright captures only. The screen map's \`image\` is the first device's light capture.`,
   ]
     .filter(Boolean)

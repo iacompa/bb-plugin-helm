@@ -257,7 +257,7 @@ reports/ui/home--default--1440x900--light.png
 
 **How.**
 - Capture from the running app on its own platform: the iOS simulator (`xcrun simctl io <simulator> screenshot reports/ui/<name>.png`), the Android emulator (`adb exec-out screencap -p > reports/ui/<name>.png`), or automated snapshot tests (swift-snapshot-testing, Paparazzi or Roborazzi, Playwright), never mockups. Automated capture doubles as a regression test. `reference/ios.md` and `reference/android.md` give the commands for themes, text size and a clean status bar.
-- One simulator or emulator per device model, made once and reused (`xcrun simctl create helm-<phone> "<model>"`), booted only to capture and shut down after. A model that is not installed: use the closest installed one and name it in `reports/ui/INDEX.md`.
+- One simulator or emulator per device model, made once and reused (`xcrun simctl create helm-<phone> "<model>"`), booted only to capture and shut down after. A model that is not installed, or that `simctl create` refuses (no installed runtime runs it): use the closest one it accepts and name it in `reports/ui/INDEX.md`. Never download a runtime yourself.
 - A phone app is never captured as a web build in a desktop browser. If a web preview is the only way to run it, use a 390x844 viewport, save it as a phone capture, and say in INDEX.md that it is not native evidence.
 - **A plugin or extension:** only its own window or panel, cropped to it; never the host app around it.
 - **A website:** the page itself at each size, without browser toolbars.
