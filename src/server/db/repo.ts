@@ -566,7 +566,12 @@ export class Repo {
     return b(this.get1("SELECT reminded FROM directive_recipients WHERE run_id = ? AND directive_id = ? AND node_id = ?", runId, directiveId, nodeId)?.reminded);
   }
   unackedFor(runId: string, nodeId: string): RecipientInfo[] {
-    return this.all("SELECT * FROM directive_recipients WHERE run_id = ? AND node_id = ? AND level IN ('direct','full') AND state IN ('queued','delivered') ORDER BY directive_id", runId, nodeId).map((r) => this.toRecipient(r));
+    // only the agent a directive is for owes an ack: supervisors get an FYI, and a message the human typed in the agent's own thread is answered there
+    return this.all(
+      "SELECT r.* FROM directive_recipients r LEFT JOIN directives d ON d.run_id = r.run_id AND d.id = r.directive_id WHERE r.run_id = ? AND r.node_id = ? AND r.level = 'direct' AND r.state IN ('queued','delivered') AND COALESCE(d.implicit, 0) = 0 ORDER BY r.directive_id",
+      runId,
+      nodeId,
+    ).map((r) => this.toRecipient(r));
   }
   queuedForNode(runId: string, nodeId: string): Array<RecipientInfo> {
     return this.all("SELECT * FROM directive_recipients WHERE run_id = ? AND node_id = ? AND state = 'queued' AND outbox_id IS NULL", runId, nodeId).map((r) => this.toRecipient(r));

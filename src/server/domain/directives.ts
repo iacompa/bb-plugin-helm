@@ -228,13 +228,17 @@ export function noticeText(d: NoticeDirective, kind: NoticeKind, ctx: NoticeCont
           ? " Stop after the current step and wait."
           : d.type === "scope"
             ? " Re-read BRIEF.md and stay inside the new scope."
-            : d.type === "tell" || d.type === "policy"
-              ? " Treat this as binding; adapt your plan."
-              : "";
+            : d.type === "tell"
+              ? " Do it now: the human's word outranks every supervisor's task, hold and standing rule, and needs nobody's approval. Do not ask your supervisor; Helm has told them."
+              : d.type === "policy"
+                ? " It is a standing rule from the human and outranks your supervisors' rules; adapt your plan."
+                : "";
     return `${lead} (${d.id})${implicitNote(d)}: ${base}.${tail}${sn}`;
   }
   if (kind === "full")
-    return `Your direct report ${ctx.targetName} was changed by the human (${d.id})${implicitNote(d)} — ${base}.${sn} This is binding: do not undo it; adjust your plan and reply with helm_ack ${d.id}.`;
+    return d.type === "tell" || d.type === "policy"
+      ? `FYI: the human told your direct report ${ctx.targetName} directly (${d.id})${implicitNote(d)} — ${base}.${sn} ${ctx.targetName} acts on it now, without your approval. Do not re-issue it, hold it, add conditions or countermand it; fit your own plan around it. No reply needed.`
+      : `FYI: the human changed your direct report ${ctx.targetName} (${d.id})${implicitNote(d)} — ${base}.${sn} Do not undo it; fit your own plan around it. No reply needed.`;
   const digest = `${d.id} · ${ctx.targetName} — ${base} (by human${d.implicit ? ", typed directly in the agent's thread" : ""}, ${ctx.clock}).`;
   if (kind === "digest") return digest;
   return `${digest} Recorded in world state: ${ctx.touchedCount} agents touched by you.`;
@@ -389,7 +393,7 @@ export function agentNoticeText(d: NoticeDirective & { type: AgentAction }, leve
   if (level === "direct") {
     // a pause needs no ack (it is never reminded); everything else is acknowledged in one line
     if (d.type === "pause") return `Direction from ${ctx.byName} (${ctx.byId}, ${d.id}): ${what}. Stop after the current step and wait; no ack needed.`;
-    const tail = d.type === "tell" ? " Follow it unless it conflicts with a human directive or policy; the human's word wins (say so in your ack)." : "";
+    const tail = d.type === "tell" ? " Follow it unless it conflicts with something the human told you or a human policy; the human's word wins (say so in your ack)." : "";
     return `Direction from ${ctx.byName} (${ctx.byId}, ${d.id}): ${what}.${tail} Reply with helm_ack ${d.id} in one line.`;
   }
   return `${d.id} · ${ctx.byName} → ${ctx.targetName}: ${what} (${ctx.clock}).`;

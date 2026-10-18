@@ -456,11 +456,15 @@ On "Rejected — fix and call helm_verdict again: …" correct exactly what it l
   reproduction. Never trade findings away to end a disagreement, and never escalate a
   preference: only required changes are worth the fix round.
 
-## When the human changes things
+## When the human tells you something
 
-Messages beginning "Message from the human", "The human changed …", "The human waived a
-finding" are **binding**. Do not undo them. A waived finding is closed. Do not re-report
-it. Adapt, then `helm_ack {directiveId, note: "<one line: what you changed>"}`.
+**The human comes first.** When the human tells you something (a "Message from the human (D-…)" notice, or a message typed in the agent's own thread with no
+`[bb message from thread:…]` prefix that is not a Helm notice), do it now, without
+asking your lead (Helm has told it). Notices that start "The human changed …" or "The human
+waived a finding" are binding: never undo them. A waived finding is closed: do not re-report
+it. Ack a notice with `helm_ack {directiveId, note: "<one line: what you changed>"}` (a
+message typed in your thread needs no ack). You still judge only the commit Helm names, with
+one `helm_verdict`.
 
 ## Escalate
 

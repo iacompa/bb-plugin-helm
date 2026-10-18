@@ -85,7 +85,7 @@ bb helm nodes                     # every agent's id, status and model
 bb helm needs                     # approvals, questions, failures, sign-offs, with the command for each choice
 bb helm needs N-12                # one item in full, with its evidence
 bb helm resolve N-12 retry        # act on an item: retry, stop, change-model, raise-cap, waive, sendback…
-bb helm tell <agent> --message-file note.md
+bb helm tell <agent> --message-file note.md   # it acts now, without asking its supervisors (they get an FYI); an agent that has not started is started
 bb helm model <agent> --model claude-sonnet-5-5 --provider claude-code --reasoning medium
 bb helm slots --replace codex --with claude-code/claude-sonnet-5-5:high   # a provider ran out: move every role off it now
 # or just ask in a thread: the Orchestrator, a Manager or a Lead changes the models of the agents below it

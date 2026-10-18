@@ -386,7 +386,7 @@ export function DirectTab({ n }: { n: SnapNode }) {
       </section>
 
       <div className="dsend">
-        <span className="hint-t grow">{valid ? (preview ? `Notifies ${plural(preview.recipients.filter((r) => r.level !== "direct").length, "agent")} up the chain` : "") : problem}</span>
+        <span className="hint-t grow">{valid ? (preview ? `${type === "tell" ? "Acted on now, without asking anyone. " : ""}${plural(preview.recipients.filter((r) => r.level !== "direct").length, "agent")} up the chain get an FYI` : "") : problem}</span>
         <button type="button" className="btn primary" disabled={!valid || sending} onClick={() => void submit()} data-testid="dsend">
           <Ic name="Sent" size="sm" /> {sending ? "Sending…" : "Send directive"}
         </button>

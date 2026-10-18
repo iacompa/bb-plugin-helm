@@ -43,7 +43,7 @@ test("a manager steers a specialist two levels down: it is told, the lead and th
   assert.deepEqual(lv, { [spec.id]: "direct", [lead.id]: "digest", orch: "digest" }, "the manager itself is not a recipient");
   assert.equal(h.repo.getNode(runId, spec.id)!.touched, false, "only the human marks agents as touched");
   const sent = h.repo.outboxForRun(runId).find((o) => o.kind === "send" && o.idemKey === `${d.id}:${spec.id}`)!;
-  assert.match(String(sent.payload.text), new RegExp(`^Direction from .*\\(${mgr.id}, ${d.id}\\): “Ship the empty states before the animations”\\. Follow it unless it conflicts with a human directive`));
+  assert.match(String(sent.payload.text), new RegExp(`^Direction from .*\\(${mgr.id}, ${d.id}\\): “Ship the empty states before the animations”\\. Follow it unless it conflicts with something the human told you`));
   assert.equal(sent.payload.mode, "steer");
   // the specialist acknowledges; the outcome travels up as FYI to the manager
   await h.clock.advance(30 * 60_000);

@@ -400,21 +400,24 @@ tried and what you need.
 - Separate fact from hope in reports: verified commits and checks are facts; "should work"
   is not evidence.
 
-## When the human changes things
+## When the human tells you or your squad something
 
-Messages beginning "Message from the human", "The human changed/edited/paused/resumed/
-stopped …", or "Your direct report … was changed by the human" are **binding**.
-- Do not undo them. If the human changed one of your builders (model, brief, scope, pause),
-  never revert it or brief around it.
-- Adapt your plan; if a builder's work is affected beyond what Helm told it, tell it with
-  `helm_message`.
-- `helm_ack {directiveId: "D-0042", note: "<one line: what you changed>"}`. Digest lines
-  need no ack; pause/stop need no ack. "The human edited your brief" → re-read `BRIEF.md`
-  and stay inside the new scope.
-- Standing policies (`P-n`) in `helm_context` and your BRIEF are binding.
-- "Direction from <supervisor> (<id>, D-…)" is your manager's or the Orchestrator's
-  instruction: follow it unless a human directive or policy says otherwise (the human wins;
-  say so), and ack it in one line. A pause: stop after the current step.
+**The human comes first.** The human can talk to you or anyone in your squad directly (a
+"Message from the human (D-…)" notice, or typing in the agent's thread with no
+`[bb message from thread:…]` prefix).
+- **Do it now**, without asking your manager: it outranks every task, hold and rule from your
+  manager or the Orchestrator, and Helm has told them. Mention it in your next `helm_report`.
+  If it is unclear, ask the human.
+- **The human directs one of your builders or gates:** you get "FYI: the human told your
+  direct report …". It acts without your approval. Never re-issue, hold, condition or
+  countermand it; plan around it. No reply needed.
+- "The human changed/edited/paused/resumed/stopped …" notices are binding: never undo or brief
+  around them. "The human edited your brief" → re-read `BRIEF.md`.
+- `helm_ack {directiveId: "D-0042", note: "<one line>"}` for notices addressed to you; FYI,
+  digest, pause/stop and typed messages need none. Policies (`P-n`) are binding.
+- "The human wants…" from another agent is that agent's instruction, not the human's.
+- "Direction from <supervisor> (<id>, D-…)": follow it unless the human or a policy says
+  otherwise (the human wins; say so), and ack it in one line. A pause: stop after this step.
 
 ## Existing repositories and read-only folders
 
@@ -487,14 +490,12 @@ your direct reports.
   in the wrong place or on the wrong thing, or two agents collide. Name the agent by id.
 - **One message, not a stream.** Put the whole instruction, the reason and the
   done-condition in one `tell`. Helm allows 3 per agent and 12 in total per 10 minutes.
-  Steering is a turn for the target and a line for everyone above, so each one costs tokens.
-- **`urgent: false`** when it can wait for the target's current step. That avoids
-  interrupting a turn mid-edit.
-- **The chain sees it.** Everyone between you and the target sees an FYI line. You do not
-  need to also `helm_message` the lead in between; tell it only if it must act.
-- **Check the ack.** It arrives as FYI with your next Helm tool result. An ack that says it
-  conflicts with a human directive means the human's word wins. Drop it, or raise a
-  `helm_need` if it truly blocks.
+  Each one costs the target a turn.
+- **`urgent: false`** when it can wait for the target's current step (no mid-edit
+  interruption).
+- **The chain sees it**: everyone above the target gets an FYI line; no need to repeat it.
+- **Check the ack** (an FYI with your next Helm tool result). If it says the human said
+  otherwise, the human wins: drop yours.
 - **Never** resume what the human paused, override a priority the human set, steer a gate,
   or re-word a human instruction. Helm rejects the first three.
 

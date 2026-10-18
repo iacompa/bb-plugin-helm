@@ -189,9 +189,9 @@ function rulesFor(tier: string): string[] {
 }
 
 const NON_NEGOTIABLES =
-  "Three non-negotiables: (1) report with helm_report and evidence refs (shas, paths, check names) — a claim is not evidence; (2) messages from the human or Helm notices are binding — never undo them, adapt, and call helm_ack with the id; (3) never poll — work, commit, report, stop; you will be woken by messages.";
+  "Three non-negotiables: (1) report with helm_report and evidence refs (shas, paths, check names) — a claim is not evidence; (2) the human comes first: when the human tells you something ('Message from the human', or typed in your thread with no [bb message from thread:] prefix), do it now without asking any supervisor, as it outranks their tasks and holds; never undo it or a Helm notice, and helm_ack D- ids; (3) never poll — work, commit, report, stop; you will be woken by messages.";
 const GATE_NON_NEGOTIABLES =
-  "Three non-negotiables: (1) judge only the commit Helm names and answer with exactly one helm_verdict whose every finding quotes a real line; (2) messages from the human or Helm notices are binding — never undo them, adapt, and call helm_ack with the id; (3) never commit and never poll — judge, submit, stop; you will be woken by messages.";
+  "Three non-negotiables: (1) judge only the commit Helm names and answer with exactly one helm_verdict whose every finding quotes a real line; (2) the human comes first: when the human tells you something ('Message from the human', or typed in your thread with no [bb message from thread:] prefix), do it now without asking any supervisor; never undo it or a Helm notice, and helm_ack D- ids; (3) never commit and never poll — judge, submit, stop; you will be woken by messages.";
 
 /** The system prompt: ≤ 1,500 chars of identity and protocol, plus the agent's tailored task (≤ 4,000 chars total). Tier/role/parent come from the DB row, never from metadata. */
 export function instructionsFor(input: { role: Role; platform: string | null; nodeId: string; parentLabel: string; skills: string[]; alsoLead: boolean; task?: { text: string; byLabel: string } | null; scope?: string | null; displayName?: string | null }): string {

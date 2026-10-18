@@ -47,14 +47,18 @@ test("A7/A8: telling a specialist reaches specialist (direct), lead (full), mana
   await h.clock.advance(60 * 60_000);
   const after = Object.fromEntries(h.repo.recipients(runId, d.id).map((r) => [r.nodeId, r.state]));
   assert.equal(after[spec.id], "ack", JSON.stringify(after));
-  assert.equal(after[lead.id], "ack");
+  assert.equal(after[lead.id], "delivered", "the lead's copy is an FYI: no ack owed");
+  assert.deepEqual(h.repo.unackedFor(runId, lead.id).map((r) => r.directiveId), []);
+  assert.ok(!h.repo.outboxForRun(runId).some((o) => o.nodeId === lead.id && String(o.payload.text ?? "").startsWith("Reminder: please call helm_ack")), "the lead is never reminded");
   assert.equal(after[mgr.id], "rec");
   assert.equal(after.orch, "rec");
   // the specialist actually received the exact notice text
   const t = h.sim.threadOf(spec.id, runId)!;
   void t;
   const sent = h.repo.outboxForRun(runId).find((o) => o.kind === "send" && o.idemKey === `${d.id}:${spec.id}`)!;
-  assert.match(String(sent.payload.text), /^Message from the human \(D-0001\): “Use the warmer palette”\. Treat this as binding; adapt your plan\./);
+  assert.match(String(sent.payload.text), /^Message from the human \(D-0001\): “Use the warmer palette”\. Do it now: .*needs nobody's approval\. Do not ask your supervisor/);
+  const leadNote = h.repo.recipients(runId, d.id).find((r) => r.nodeId === lead.id)!.notice;
+  assert.match(leadNote, /^FYI: the human told your direct report .* acts on it now, without your approval\. Do not re-issue it, hold it, add conditions or countermand it; .*No reply needed\.$/);
 });
 
 test("A9: a subtree stop stops every descendant bottom-up; an unreachable node shows a failed receipt", async () => {
@@ -95,7 +99,7 @@ test("A10: a model change applies through threads.update, is recorded from → t
   const n = h.repo.getNode(runId, spec.id)!;
   assert.equal(n.modelOverride, true);
   const full = h.repo.recipients(runId, d.id).find((r) => r.level === "full")!;
-  assert.match(full.notice, /This is binding: do not undo it/);
+  assert.match(full.notice, /^FYI: the human changed your direct report .* Do not undo it; fit your own plan around it\. No reply needed\.$/);
   // an unavailable model is refused, never substituted
   await assert.rejects(createDirective(h.engine, runId, { type: "model", target: spec.id, modelTo: { providerId: "codex", modelId: "gpt-0-gone", reasoning: "low" } }), /no longer available/);
 });

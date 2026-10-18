@@ -93,10 +93,13 @@ const ctx = { targetName: "Lumen · UI builder", briefVersion: 4, modelName: (r:
 const D = (type: DirectiveType, extra: Partial<NoticeDirective> = {}): NoticeDirective => ({ id: "D-0007", type, cascade: "self", text: "Use the warmer palette", ts: 0, ...extra });
 
 test("notice text — direct / full / digest / world", () => {
-  assert.equal(noticeText(D("tell"), "direct", ctx), "Message from the human (D-0007): “Use the warmer palette”. Treat this as binding; adapt your plan.");
+  assert.equal(
+    noticeText(D("tell"), "direct", ctx),
+    "Message from the human (D-0007): “Use the warmer palette”. Do it now: the human's word outranks every supervisor's task, hold and standing rule, and needs nobody's approval. Do not ask your supervisor; Helm has told them.",
+  );
   assert.equal(
     noticeText(D("tell"), "full", ctx),
-    "Your direct report Lumen · UI builder was changed by the human (D-0007) — “Use the warmer palette”. This is binding: do not undo it; adjust your plan and reply with helm_ack D-0007.",
+    "FYI: the human told your direct report Lumen · UI builder directly (D-0007) — “Use the warmer palette”. Lumen · UI builder acts on it now, without your approval. Do not re-issue it, hold it, add conditions or countermand it; fit your own plan around it. No reply needed.",
   );
   assert.equal(noticeText(D("tell"), "digest", ctx), "D-0007 · Lumen · UI builder — “Use the warmer palette” (by human, 14:05).");
   assert.equal(noticeText(D("tell"), "world", ctx), "D-0007 · Lumen · UI builder — “Use the warmer palette” (by human, 14:05). Recorded in world state: 3 agents touched by you.");

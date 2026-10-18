@@ -112,9 +112,11 @@ bb helm start <runId> --yes          # approve and start (no prompt)
 
 ```bash
 bb helm tell <node> --message-file f.md [--cascade self|reports|subtree] [--mode steer|queue] [--policy]
+# the human's word comes first: the agent acts now without asking anyone; its supervisors get an FYI and
+# may not hold, re-issue or overrule it; an agent that has not started is started (its app too)
 bb helm model <node> --model <id> [--provider <id>] [--reasoning <level>]
 bb helm slots [--slot role=provider/model:level ...] [--replace <provider> --with provider/model:level] [--future]
-bb helm pause|resume|stop|retry <node> [--cascade self|reports|subtree]
+# pause, resume, stop and retry an agent: the panel's agent inspector, or its card (bb helm resolve)
 bb helm priority <app|node> low|normal|high
 ```
 
@@ -265,7 +267,8 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--autonomy high|ask]
   helm-code, helm-ios, helm-android, helm-macos, helm-windows, helm-security, helm-test,
   helm-research, helm-docs). Supervisors write each agent's task (`helm_set_task`, or `task`
   on `helm_spawn_squad`): it becomes part of the agent's system prompt and brief. To change
-  what one agent works on, ask its supervisor, or `bb helm tell` the agent directly. Managers see
+  what one agent works on, `bb helm tell` the agent directly (or type in its thread): it acts at once, without its
+  supervisor's go-ahead. Managers see
   only their own apps; cross-group work goes through the Orchestrator.
 - **"Show me the app" / screens** → the panel's **Screens** button, or `bb helm screens --app <name>`
   to list the pages. Screens shows each app as pages you click through like a tiny browser:

@@ -418,9 +418,9 @@ export function receiptCounts(d: DirectiveInfo) {
   for (const r of d.recipients) c[r.state] = (c[r.state] ?? 0) + 1;
   return c;
 }
-/** Receipts that still wait for something (queued, or delivered but not acked by a direct/full recipient). */
+/** Receipts that still wait for something (queued, or delivered but not acked by the agent it was for; supervisors' FYIs and messages typed in the agent's thread need no ack). */
 export function pendingReceipts(d: DirectiveInfo): number {
-  return d.recipients.filter((r) => r.state === "queued" || r.state === "failed" || (r.state === "delivered" && r.level !== "digest")).length;
+  return d.recipients.filter((r) => r.state === "queued" || r.state === "failed" || (r.state === "delivered" && r.level === "direct" && !d.implicit)).length;
 }
 
 // ───────────── board rules (§5.7) ─────────────

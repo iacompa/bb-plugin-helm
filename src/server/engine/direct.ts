@@ -115,6 +115,7 @@ export async function createDirective(e: Engine, runId: string, input: Directive
     await Promise.all(live.map(async (n) => threadProvider.set(n.id, (await e.port.threadState(n.threadId!).catch(() => null))?.providerId ?? null)));
   }
 
+  let startNow = false;
   const out = e.repo.tx(() => {
     const seq = e.repo.nextSeq(runId, "directive");
     const id = `D-${pad4(seq)}`;
@@ -268,11 +269,25 @@ export async function createDirective(e: Engine, runId: string, input: Directive
       case "sendback":
         // applied by resolveSignoff (needs gates.ts); the directive records and notifies
         break;
+      case "tell": {
+        // the human's word to an agent that has not started: it starts now (its app too), with the message in its first prompt
+        const app = target.appId ? e.repo.getApp(runId, target.appId) : null;
+        if (!by && !input.implicit && run.status === "running" && (target.status === "planned" || target.status === "queued") && app?.stage !== "done" && app?.stage !== "cancelled") {
+          if (app?.stage === "intake") e.admitAppTx(runId, app.id, `the human told ${e.label(target)} to work (${id})`);
+          e.repo.updateNode(runId, target.id, { status: "queued", firstInLine: true });
+          startNow = true;
+        }
+        // a builder that already reported done is woken for it while its app is in flight
+        if (!by && !input.implicit && target.status === "done" && target.tier === "specialist" && target.threadId && app && isInFlight(app.stage)) {
+          e.repo.updateNode(runId, target.id, { status: "waiting", endedAt: null });
+          nodes.set(target.id, { ...target, status: "waiting", endedAt: null });
+        }
+        break;
+      }
       case "approve":
       case "deny":
       case "answer":
       case "plan":
-      case "tell":
         break;
     }
     if (!by && (input.policy || type === "policy")) {
@@ -336,7 +351,7 @@ export async function createDirective(e: Engine, runId: string, input: Directive
   e.emit(runId, "directive.created", out);
   for (const nid of out.affected) e.emit(runId, "node.updated", e.repo.getNode(runId, nid));
   e.outbox.kick();
-  if (["resume", "retry", "spawn", "stop", "pause", "slots", "priority"].includes(type) || (by && type === "model")) await e.pump(runId);
+  if (["resume", "retry", "spawn", "stop", "pause", "slots", "priority"].includes(type) || (by && type === "model") || startNow) await e.pump(runId);
   return out;
 }
 
@@ -358,6 +373,7 @@ export function ack(e: Engine, node: NodeInfo, directiveId: string, note: string
   const r = d.recipients.find((x) => x.nodeId === node.id);
   if (!r) return `${directiveId} was not addressed to you.`;
   if (r.level === "digest") return `${directiveId} was an FYI for you — no ack needed.`;
+  if (r.level === "full") return `${directiveId} was an FYI for you: the human directed your report, who acts on it without your approval. No reply needed; fit your plan around it.`;
   if (r.state === "ack") return `${directiveId} already acknowledged.`;
   e.repo.updateRecipient(node.runId, directiveId, node.id, { state: "ack", ackAt: e.now(), ackNote: (note ?? "").slice(0, 300), deliveredAt: r.deliveredAt ?? e.now() });
   e.repo.event(node.runId, node.id, "ack", `acknowledged ${directiveId}${note ? `: ${note.slice(0, 120)}` : ""}`, directiveId);
@@ -623,7 +639,7 @@ export async function agentModels(e: Engine, by: NodeInfo): Promise<string> {
   return out.join("\n").slice(0, 12_000);
 }
 
-/** One reminder for unacked direct/full notices when the node goes idle (§6.4). */
+/** One reminder for unacked notices (the target of a directive only) when the node goes idle (§6.4). */
 export function remindUnacked(e: Engine, node: NodeInfo): void {
   // a stopped or paused agent is never woken to acknowledge; stops and pauses need no ack at all
   if (["idle", "done", "failed", "paused"].includes(e.repo.getNode(node.runId, node.id)?.status ?? "")) return;

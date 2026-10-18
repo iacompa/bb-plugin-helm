@@ -297,7 +297,7 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
           }),
       }),
       tell: cliCommand({
-        summary: "Tell an agent something; its whole chain of command is informed",
+        summary: "Tell an agent something: it acts now without asking anyone, its supervisors get an FYI, and an agent that has not started is started",
         positionals: [{ name: "node", description: "Node id, app name (its lead) or orch", required: true }] as const,
         options: {
           "message-file": { type: "string", required: true, description: "File with the message", placeholder: "file" },
@@ -313,7 +313,19 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             const text = await readText(i.options["message-file"], ctx, "message");
             const node = svc.nodeFor(run.id, i.positionals.node!);
             const d = await svc.directive(run.id, { type: "tell", target: node.id, text, cascade: i.options.cascade as Cascade | undefined, mode: i.options.mode as "steer" | "queue" | undefined, policy: i.options.policy });
-            return out(i.options.json, { directive: d }, `${d.id} → ${svc.engine.label(node)}: ${d.recipients.length} recipients (${d.recipients.map((r) => `${r.nodeId}:${r.level}`).join(", ")}).`);
+            const after = svc.repo.getNode(run.id, node.id)?.status ?? node.status;
+            const name = svc.engine.label(node);
+            const what =
+              node.status === "planned" && after !== "planned"
+                ? `${name} had not started, so Helm is starting it now with your message.`
+                : node.status === "planned"
+                  ? `${name} has not started; it gets your message when it does (the run is ${run.status}).`
+                  : node.status === "done" && after !== "done"
+                    ? `${name} had finished, so Helm woke it with your message.`
+                    : ["done", "idle", "failed"].includes(after)
+                      ? `${name} is ${after}, so it reads your message when it next starts${after === "failed" ? " (retry it from its card: bb helm needs)" : ""}.`
+                      : `${name} acts on it now, without asking anyone.`;
+            return out(i.options.json, { directive: d }, `${d.id} → ${name}: ${what} Told: ${d.recipients.map((r) => `${r.nodeId}:${r.level}`).join(", ")} (supervisors get an FYI and need not reply).`);
           }),
       }),
       model: cliCommand({
