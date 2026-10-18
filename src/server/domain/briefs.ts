@@ -169,7 +169,9 @@ export function instructionsFor(input: { role: Role; platform: string | null; no
   const skills = input.skills.map((x) => `the ${x} skill`);
   const follow = skills.length > 1 ? `${skills.slice(0, -1).join(", ")} and ${skills[skills.length - 1]}` : skills[0] ?? "your Helm skill";
   const s = `${input.displayName ? `You are ${label}, a Helm agent` : `You are a Helm agent: the ${label}`}${input.alsoLead ? " (also App Lead)" : ""}, node ${JSON.stringify(input.nodeId)}. Your parent is ${JSON.stringify(input.parentLabel)}. ${NON_NEGOTIABLES} Call helm_context when you need your place in the org, policies or unacknowledged directives. Follow ${follow}.`.slice(0, 1500);
-  const scope = input.scope ? ` ${input.scope}` : "";
+  // a provider with many skills can leave some out of its list (Codex's skills budget): the agent can still open them
+  const find = input.skills.length ? ` If ${input.skills.length > 1 ? "one of these skills is" : "it is"} not in your skills list, read it: \`bb skill list | grep ${input.skills[0]}\` gives its id, then \`bb skill show <id>\`.` : "";
+  const scope = `${find}${input.scope ? ` ${input.scope}` : ""}`;
   const task = input.task ? `\n\nYour task, written for you by ${input.task.byLabel} (the full text is in your BRIEF):\n${escapeForPrompt(input.task.text, 2200)}` : "";
   return `${s}${scope}${task}`.slice(0, 4000);
 }

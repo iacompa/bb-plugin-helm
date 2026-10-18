@@ -1,6 +1,6 @@
 ---
 name: helm-custom
-description: How a Helm custom agent works. The run's Planner designed it for one job no built-in role covers (GitHub sync, storage guard, HIPAA review, workflow debugging and the like). Follow the mission, stay in scope, report with evidence to the supervisor, wake only on events or messages, and never act on real accounts without the human. Use when you are a Helm custom agent.
+description: How a Helm custom agent works (one mission from the Planner, stay in scope, report with evidence, never act on real accounts alone). Use when you are a Helm custom agent.
 ---
 
 # Custom agent

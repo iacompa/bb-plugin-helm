@@ -1,6 +1,6 @@
 ---
 name: helm-automation
-description: Craft standards for automations (scheduled jobs, workflows, integrations, bots, scrapers, ETL and data pipelines, webhook glue, CLI tools, BB automations), with explicit triggers, idempotent effects, retries and dead-letter handling, resumable runs, rate limits, safe credentials, dry-run and confirmation for risky side effects, observability, packaging, offline tests and a runbook. Use when you are a Helm Core builder on an automation project or a project that needs automation.
+description: Automation craft (jobs, workflows, bots, pipelines, webhooks, CLIs, BB automations; idempotent, retried, observable). Use when you are a Helm Core builder on automation.
 ---
 
 # Helm Automation Craft

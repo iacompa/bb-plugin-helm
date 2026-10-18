@@ -1,6 +1,6 @@
 ---
 name: helm-backend
-description: Craft standards for the server side of a Helm project (API design from the CONTRACT, boundary validation, authentication, authorization, rate limiting, jobs, webhooks, uploads, email, payments, realtime, AI features, secrets, observability, testing, and seed data). Use when you are a Helm Core builder in a web project or in any project that needs a server.
+description: Server-side craft (API from the CONTRACT, validation, auth, jobs, webhooks, secrets, observability, tests). Use when you are a Helm Core builder who needs a server.
 ---
 
 # Helm Backend Craft

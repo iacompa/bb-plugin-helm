@@ -1,6 +1,6 @@
 ---
 name: helm-planner
-description: Plan any Helm run with the user (apps, websites and full-stack web apps, games, automation, or reviews of existing projects). Interview them, confirm what each project is, what it needs (database, accounts, payments, security, HIPAA, privacy, realtime, AI, automation, art, multiplayer) and which tools it uses (Unreal, Unity, Godot, Blender, Docker, BB plugins), ask where each project lives, pick a shape, choose a model for every role from the models this machine has, then write the brief and run `bb helm plan`. Use when the user types /helm-planner, opens Helm → New run → Plan with an agent, or asks to plan, set up, scope, write a brief or prompt for, or design a Helm run.
+description: Plan a Helm run with the user (apps, websites, games, automation, reviews), choose models per role, write the brief and run bb helm plan. Use for /helm-planner or to plan a Helm run.
 ---
 
 # Helm planner: turn an idea into a Helm run

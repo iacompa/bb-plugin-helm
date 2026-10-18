@@ -1,6 +1,6 @@
 ---
 name: helm-macos
-description: Craft standards for building a native, shippable macOS app in SwiftUI with AppKit interop, covering scenes, menus, keyboard, sandboxing, signing and notarization, accessibility, performance, and headless xcodebuild testing. Use when you are a Helm macOS builder.
+description: macOS craft (SwiftUI with AppKit, menus, keyboard, sandbox, signing, notarization, headless xcodebuild tests). Use when you are a Helm macOS builder.
 ---
 
 # Helm macOS craft

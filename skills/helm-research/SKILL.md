@@ -1,6 +1,6 @@
 ---
 name: helm-research
-description: Turns a lead's technical question into one decision-ready answer file in docs/research/ that is sourced, dated, version-aware, and honest about uncertainty, with every package, API, and link checked to exist. Use when you are a Helm Research agent.
+description: One sourced, dated, decision-ready answer in docs/research/, every package and link checked. Use when you are a Helm Research agent.
 ---
 
 # Helm Research: answering a lead's question with evidence

@@ -1,6 +1,6 @@
 ---
 name: helm-reviewer
-description: How the Helm Reviewer gate judges one exact integration commit against ACCEPTANCE, SPEC and CONTRACT. Check out the commit detached, re-run every check through the wrapper, walk each criterion, review correctness, security, performance, accessibility and UI with a fixed method, stay read-only, and submit one helm_verdict where every finding quotes a real line and tells the builder exactly what to change. Use when you are a Helm Reviewer node.
+description: How the Helm Reviewer gate judges one integration commit (re-run checks, walk acceptance, read-only, one helm_verdict quoting real lines). Use when you are a Helm Reviewer.
 ---
 
 # Helm Reviewer (gate)

@@ -46,6 +46,8 @@ export class FakeGit {
   diskFree = 200e9;
   /** Folders shown in the file manager (the Worktrees view's Show in Finder). */
   revealed: string[] = [];
+  /** What each repository's remote has (tests set it): branch → commit. No entry: the repository has no remote. */
+  remotes = new Map<string, Map<string, string>>();
   loose = new Map<string, string>();
   /** Plain (non-git) folders tests place on the simulated disk: path → has files. */
   dirs = new Map<string, boolean>();
@@ -352,6 +354,20 @@ export class FakeGit {
         }),
         repos: (repos ?? []).map((repo) => ({ repo, gitDir: this.repoFor(repo) ? `${this.repoFor(repo)!.root}/.git` : null, bytes: this.repoFor(repo) && measure !== false ? 1_000_000 : null })),
       }),
+      remoteStatus: async ({ repo }: { repo: string }) => {
+        const r = this.repos.get(repo);
+        const theirs = this.remotes.get(repo);
+        const base = { repo, remotes: theirs ? ["origin"] : [], remote: theirs ? "origin" : null, url: theirs ? "https://github.com/example/app.git" : null, web: theirs ? "https://github.com/example/app" : null, defaultBranch: theirs ? "main" : null, error: r ? null : `the repository folder is missing: ${repo}` };
+        if (!r) return { ...base, branches: [] };
+        const names = [...new Set([...r.refs.keys(), ...(theirs?.keys() ?? [])])];
+        const branches = names.map((name) => {
+          const l = r.refs.get(name) ?? null;
+          const t = theirs?.get(name) ?? null;
+          const state = l && t ? (l === t ? "synced" : r.commits.has(t) ? "ahead" : "newer") : l ? "local" : "remote";
+          return { name, local: l, remote: t, state: state as "synced" | "ahead" | "newer" | "local" | "remote", ahead: state === "synced" ? 0 : state === "ahead" || state === "local" ? 1 : null, behind: state === "synced" || state === "ahead" ? 0 : null, at: null };
+        });
+        return { ...base, branches };
+      },
       reveal: async ({ path }: { path: string }) => {
         this.revealed.push(path);
         return { ok: true, shown: path };

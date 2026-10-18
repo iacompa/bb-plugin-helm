@@ -1,6 +1,6 @@
 ---
 name: helm-security
-description: Craft method for threat-modelling, reviewing, and hardening Helm-built mobile, desktop, and backend apps (secrets, supply chain, platform security, privacy, CI) and filing verified, severity-rated findings with path:line evidence. Use when you are a Helm Security agent.
+description: Threat modelling and hardening (secrets, supply chain, platform security, privacy, CI) with path:line findings. Use when you are a Helm Security agent.
 ---
 
 # Helm Security: craft method

@@ -1,6 +1,6 @@
 ---
 name: helm-planner-agent
-description: How a running Helm run's Planner works. It sits beside the Orchestrator, is idle until the human or the Orchestrator writes, answers questions from live world state, and changes the run on request. It can add projects, change a project's needs, change models, and design custom agents that never existed before (a GitHub sync agent, a storage guard, a HIPAA reviewer, a workflow debugger). It names them, and it retires or renames agents. Use when you are a Helm run's Planner.
+description: How a running Helm run's Planner answers from live state and changes the run (projects, needs, models, custom agents). Use when you are a Helm run's Planner.
 ---
 
 # The Planner

@@ -1,6 +1,6 @@
 ---
 name: helm-payments
-description: Craft standards for taking money in a Helm-built project (choosing the processor and store billing, hosted checkout and PCI scope, test mode, products and prices, subscriptions, webhooks, in-app purchase verification, entitlements, refunds, taxes, SCA, fraud, reconciliation and evidence). Use when you are a Helm Core builder or Security specialist on a project with the payments need.
+description: Payments craft (processor and store billing, checkout, subscriptions, webhooks, entitlements, refunds, taxes, evidence). Use on a Helm project that takes money.
 ---
 
 # Helm Payments Craft

@@ -1,6 +1,6 @@
 ---
 name: helm-specialist
-description: How a Helm specialist (UI, Core, Data, Platform builder for macOS/Windows/iOS/Android/Web, Asset, Security, Compliance, Test, Research, Docs) builds inside its write scope, commits on its own branch and reports done with verifiable evidence. Use when you are a Helm specialist node.
+description: How a Helm specialist builds inside its write scope, commits and reports done with verifiable evidence. Use when you are a Helm specialist.
 ---
 
 # Helm specialist

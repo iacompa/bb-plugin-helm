@@ -1,6 +1,6 @@
 ---
 name: helm
-description: Drive the Helm BB plugin from the command line with `bb helm …` — plan and start runs from a brief, read world state, tell/steer/pause/stop agents, change models and priorities, answer Needs-you items, sign off or send back apps, read the ledger, export. Use when the user asks to inspect or steer a Helm run (portfolio, agents, needs, sign-off) from a terminal or script.
+description: Drive Helm from the terminal with bb helm (plan and start runs, world state, tell or steer agents, models, needs, sign-off). Use to inspect or steer a Helm run.
 ---
 
 # `bb helm` — the Helm CLI
@@ -275,7 +275,7 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
   minutes old, every 30 minutes, or with **Check now**): one row per app with its number of
   branches and worktrees, its size, the disk it is on (an external SSD by name, or This Mac) and
   **Show in Finder**; click an app for each worktree (state, branch, agents, disk, size) and branch,
-  and its git storage. A row whose repository folder was moved or deleted says so. `bb helm worktrees` lists them per
+  and its git storage. A row whose repository folder was moved or deleted says so. The **GitHub** tab beside it shows, per app, what its remote has and what it does not (branch names and commits only, from `git ls-remote` with git's own login; nothing downloaded, read only when the tab opens and is 15 minutes old or with **Check GitHub**): branches the same on both, commits not on GitHub yet, uncommitted files, branches newer or only on GitHub, an **Open on GitHub** button; `bb helm worktrees --github` prints the same. `bb helm worktrees` lists them per
   app (`--app <name>` for one). Apps from older runs may still have one BB worktree per agent on the
   internal drive; `bb helm worktrees --consolidate <app> --yes` moves one onto the shared worktree
   (refused while any of them holds uncommitted or unmerged work). The Git agent is told when a disk

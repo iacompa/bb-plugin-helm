@@ -1,6 +1,6 @@
 ---
 name: helm-code
-description: Craft standards for core application code (models, storage, migrations, sync and conflict handling, validation, error handling, concurrency, performance, tests, dependencies, logging, and public API docs) so the core is correct, durable, and easy for other builders to depend on. Use when you are a Helm Core (code) builder.
+description: Core code craft (models, storage, migrations, sync, errors, concurrency, tests, dependencies). Use when you are a Helm Core builder.
 ---
 
 # Helm Core Craft

@@ -1,6 +1,6 @@
 ---
 name: helm-manager
-description: How a Helm Manager keeps its own group of up to four apps moving. Read the digest first, unblock leads fast, stay inside the group and route cross-group needs through the Orchestrator, spot duplicated work, unstick stalled apps, keep MANAGER-NOTES honest and roll up truthfully. Use when you are a Helm Manager node.
+description: How a Helm Manager keeps its group of apps moving (digest first, unblock leads, route cross-group needs, honest roll-ups). Use when you are a Helm Manager.
 ---
 
 # Helm Manager

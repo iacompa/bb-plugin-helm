@@ -4,6 +4,7 @@
 import { needLook } from "./look.ts";
 import { worktreesViewFor } from "./worktree-view.ts";
 import { setGitLimits } from "./engine/worktrees.ts";
+import { githubViewFor } from "./github-view.ts";
 import { cleanDevices, devicesForPlatforms, DEVICE_CATALOG, MAX_DEVICES } from "../shared/devices.ts";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { ensureGitAgent, ensurePlanner } from "./engine/custom.ts";
@@ -49,6 +50,7 @@ export function registerRpc(bb: BbPluginApi, svc: HelmService): void {
     settings_setModels: (input) => svc.setDefaultModels(input as never),
     worktrees_list: ({ runId, app }) => svc.worktrees(runId, app),
     worktrees_view: ({ runId, refresh }) => worktreesViewFor(e).view(runId, { refresh }),
+    github_view: ({ runId, refresh }) => githubViewFor(e).view(runId, { refresh }),
     worktrees_reveal: ({ runId, path }) => worktreesViewFor(e).reveal(runId, path),
     git_setLimits: ({ runId, branches, worktrees }) => {
       const limits = setGitLimits(e, runId, { branches, worktrees });

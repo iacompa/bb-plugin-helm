@@ -158,6 +158,11 @@ export class WorktreesView {
     return this.build(runId, this.snap(runId));
   }
 
+  /** Uncommitted files per app from what is kept (nothing is read): work that is on no branch, so on no remote either. */
+  uncommitted(runId: string): Map<string, number> {
+    return new Map((this.snap(runId)?.list ?? []).map((a) => [a.appId, a.worktrees.reduce((n, w) => n + (w.missing ? 0 : w.dirty), 0)]));
+  }
+
   /** Show a folder of this view in Finder (Explorer, the Files app). Only folders the view lists. */
   async reveal(runId: string, path: string): Promise<{ ok: boolean; shown: string | null }> {
     const snap = this.snap(runId);

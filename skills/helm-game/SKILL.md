@@ -1,6 +1,6 @@
 ---
 name: helm-game
-description: Craft standards for game projects (engine choice, core loop and vertical slice, game design sections in SPEC, timestep and frame budget, input, data-driven content, save data, audio, mobile performance, monetization rules, multiplayer basics, testing, headless builds and gameplay evidence). Use when you are a Helm Core builder in a game project or the solo lead of a game.
+description: Game craft (engine, core loop, frame budget, input, saves, audio, mobile performance, headless builds, gameplay evidence). Use when you build a Helm game.
 ---
 
 # Helm Game Craft

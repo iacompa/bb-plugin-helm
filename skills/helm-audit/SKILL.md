@@ -1,6 +1,6 @@
 ---
 name: helm-audit
-description: Craft method for auditing an existing app, website, game or automation in a Helm `review` project, covering scoping and pinning the commit, per-role audit method, reproducible evidence-backed findings, safe execution and compiling REVIEW.md. Use when you are a specialist or the App Lead in a Helm review project.
+description: How to audit an existing project in a Helm review (pinned commit, evidence-backed findings, REVIEW.md). Use when you are a specialist or App Lead in a Helm review project.
 ---
 
 # Helm Audit Craft

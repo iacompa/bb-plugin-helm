@@ -1,6 +1,6 @@
 ---
 name: helm-test
-description: Craft method for turning ACCEPTANCE criteria into a traceable test plan and behaviour-focused tests (unit, property, contract, integration, and UI) that run headless, are proven able to fail, stay non-flaky, and produce failing-test reports an owner can act on immediately. Use when you are a Helm Test agent.
+description: Tests from ACCEPTANCE (unit, contract, integration, UI), headless, proven able to fail, not flaky. Use when you are a Helm Test agent.
 ---
 
 # Helm Test: craft method

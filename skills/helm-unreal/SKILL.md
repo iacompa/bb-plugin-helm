@@ -1,6 +1,6 @@
 ---
 name: helm-unreal
-description: Craft standards for Unreal Engine 5 work done by agents from a terminal (project layout, C++ over Blueprints, modules, reflection, headless builds with UnrealBuildTool and RunUAT BuildCookRun, commandlets and Python editor scripting, automation tests, source control with Git LFS, performance, mobile and Windows targets, engine pinning and evidence). Use when you are a Helm lead, Core builder or platform builder in a project whose tools include unreal.
+description: Unreal Engine 5 from a terminal (C++ modules, headless UBT and RunUAT builds, Python editor scripts, automation tests, Git LFS). Use when a Helm project uses Unreal.
 ---
 
 # Helm Unreal Craft

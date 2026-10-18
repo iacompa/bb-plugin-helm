@@ -1,6 +1,6 @@
 ---
 name: helm-data
-description: Craft standards for the database layer (choosing the database, schema design from the CONTRACT, migrations, queries and indexes, tenant isolation, PII and PHI handling, backups and restore drills, seed and test data, pooling and transactions) so the data is correct, private, recoverable and fast. Use when you are a Helm Data builder, or a Core builder who owns the database.
+description: Database craft (choice, schema, migrations, indexes, tenant isolation, PII and PHI, backups, seed data). Use when you are a Helm Data builder or own the database.
 ---
 
 # Helm Data Craft

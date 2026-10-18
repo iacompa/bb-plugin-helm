@@ -1,6 +1,6 @@
 ---
 name: helm-android
-description: Craft standards for building a native Android app in Kotlin and Jetpack Compose with Material 3, edge-to-edge and predictive back, minimal permissions, Play compliance, and headless emulator testing. Use when you are a Helm Android builder
+description: Android craft (Kotlin, Jetpack Compose, Material 3, permissions, Play rules, headless emulator tests). Use when you are a Helm Android builder.
 ---
 
 # Helm Android craft

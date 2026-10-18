@@ -1,6 +1,6 @@
 ---
 name: helm-docs
-description: Writes and maintains README.md and docs/** so that every statement matches what the code actually does, using Diátaxis doc types, a claim-by-claim verification procedure, commands you have actually run, and plain, fluff-free style. Use when you are a Helm Docs agent.
+description: README and docs that match the code, claim by claim, with commands actually run. Use when you are a Helm Docs agent.
 ---
 
 # Helm Docs: documentation that matches the code

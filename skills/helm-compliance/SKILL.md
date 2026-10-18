@@ -1,6 +1,6 @@
 ---
 name: helm-compliance
-description: Craft method for deciding which health, privacy, children's and payment rules apply (HIPAA, FTC HBNR, state health-data laws, GDPR/UK GDPR, CCPA/CPRA, COPPA, PCI DSS), mapping each requirement to an evidenced engineering control, and writing COMPLIANCE.md, drafts for counsel and path:line findings. Use when you are a Helm Compliance specialist.
+description: Which health, privacy, children's and payment rules apply (HIPAA, GDPR, CCPA, COPPA, PCI) and their evidenced controls. Use when you are a Helm Compliance specialist.
 ---
 
 # Helm Compliance Craft

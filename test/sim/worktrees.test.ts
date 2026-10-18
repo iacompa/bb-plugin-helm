@@ -404,3 +404,30 @@ test("the human sets a run's branch and worktree limits: the Git agent is told, 
   setGitLimits(h.engine, runId, { branches: null, worktrees: null });
   assert.deepEqual(h.engine.gitLimits(runId), { branches: 2, worktrees: 10, own: false });
 });
+
+test("the GitHub view: per app, what its remote has and what it does not; read only when asked", async () => {
+  const { h, runId } = await run();
+  const { githubViewFor, githubText } = await import("../../src/server/github-view.ts");
+  const repo = h.repo.getApp(runId, "alpha")!.repoPath!;
+  const refs = h.sim.git.repos.get(repo)!.refs;
+  h.sim.git.remotes.set(repo, new Map([["main", refs.get("main")!], ["old-feature", "f".repeat(40)]]));
+  const first = githubViewFor(h.engine).view(runId);
+  assert.equal(first.checking, false, "opening the panel without asking reads nothing");
+  assert.equal(first.checkedAt, null);
+  const v = await githubViewFor(h.engine).viewAndWait(runId);
+  const a = v.apps.find((x) => x.appId === "alpha")!;
+  assert.equal(a.web, "https://github.com/example/app");
+  assert.equal(a.counts.synced, 1);
+  assert.equal(a.counts.onlyRemote, 1);
+  assert.ok(a.counts.toPush >= 1, "the work branch is not on the remote");
+  assert.equal(a.branches[0].kind, "main");
+  const beta = v.apps.find((x) => x.appId === "beta")!;
+  assert.equal(beta.remote, null);
+  assert.equal(v.totals.noRemote, 1);
+  assert.match(githubText(v), /Beta: no remote: nothing of it is on GitHub/);
+  assert.match(githubText(v), /old-feature · only on the remote/);
+  // the Git agent can ask too
+  const git = h.repo.getNode(runId, GIT_ID)!;
+  const r = await callTool(h.engine, "helm_worktrees", git.threadId!, { github: true });
+  assert.match(r.text, /## On GitHub[\s\S]*Alpha: origin https:\/\/github\.com\/example\/app\.git/);
+});

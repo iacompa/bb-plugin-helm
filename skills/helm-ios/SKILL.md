@@ -1,6 +1,6 @@
 ---
 name: helm-ios
-description: Craft standards for building a native iOS app in SwiftUI with modern Swift concurrency, accessibility, privacy compliance, and headless simulator testing. Use when you are a Helm iOS builder
+description: iOS craft (SwiftUI, Swift concurrency, accessibility, privacy, headless simulator tests). Use when you are a Helm iOS builder.
 ---
 
 # Helm iOS craft

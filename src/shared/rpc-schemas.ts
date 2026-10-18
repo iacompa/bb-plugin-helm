@@ -54,6 +54,7 @@ export const RPC_SCHEMAS = {
   worktrees_list: { input: z.object({ runId: Id, app: z.string().max(80).optional() }), output: Any },
   /** The Git agent's Worktrees view: every app's worktrees and branches, their state, and (with `measure`) the space they take. */
   worktrees_view: { input: z.object({ runId: Id, refresh: z.enum(["open", "now"]).optional() }), output: Any },
+  github_view: { input: z.object({ runId: Id, refresh: z.enum(["open", "now"]).optional() }), output: Any },
   worktrees_reveal: { input: z.object({ runId: Id, path: z.string().min(1).max(1000) }), output: Any },
   git_setLimits: { input: z.object({ runId: Id, branches: z.number().int().min(2).max(12).nullish(), worktrees: z.number().int().min(2).max(32).nullish() }), output: Any },
   screens_setDevices: { input: z.object({ devices: z.array(z.string().min(1).max(60)).max(20) }), output: Any },

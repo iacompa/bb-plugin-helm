@@ -9,6 +9,7 @@ import { useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { useHelm } from "./ctx.tsx";
 import { Banner, Ic, Modal, ModalHead, cx } from "./ui.tsx";
 import { agoOf, errMsg } from "./format.ts";
+import { GithubBody } from "./github.tsx";
 import "./worktrees.css";
 
 type Role = "checkout" | "work" | "lane" | "extra";
@@ -113,6 +114,7 @@ function WorktreesInner() {
   const [err, setErr] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [tab, setTab] = useState<"worktrees" | "github">("worktrees");
 
   const load = useCallback(
     async (refresh?: "open" | "now") => {
@@ -177,8 +179,16 @@ function WorktreesInner() {
 
   return (
     <Modal label="Worktrees" cls="lg" onClose={h.closeWorktrees}>
-      <ModalHead title="Worktrees" onClose={h.closeWorktrees}>
-        <span className="muted wt-sub">
+      <ModalHead title={tab === "github" ? "GitHub" : "Worktrees"} onClose={h.closeWorktrees}>
+        <div className="seg" role="tablist" aria-label="View">
+          <button type="button" role="tab" aria-selected={tab === "worktrees"} onClick={() => setTab("worktrees")}>
+            <Ic name="GitBranch" size="sm" /> Worktrees
+          </button>
+          <button type="button" role="tab" aria-selected={tab === "github"} onClick={() => setTab("github")} title="What is on GitHub and what is not (nothing downloaded)">
+            <Ic name="Globe" size="sm" /> GitHub
+          </button>
+        </div>
+        <span className="muted wt-sub" hidden={tab !== "worktrees"}>
           {v ? (
             <>
               {plural(v.apps.length, "app")}
@@ -188,6 +198,9 @@ function WorktreesInner() {
           ) : null}
         </span>
       </ModalHead>
+      {tab === "github" ? (
+        <GithubBody />
+      ) : (
       <div className="mbody wt">
         {err ? <Banner tone="crit">Could not read the worktrees: {err}</Banner> : null}
         {note ? (
@@ -291,6 +304,7 @@ function WorktreesInner() {
           Each project has its main branch and its work branch, where every agent commits; this run allows {v ? plural(v.branchCap, "branch", "branches") : "…"} per project, so the Git agent may add {v && v.branchCap > 2 ? `up to ${v.branchCap - 2} lane branches` : "no other branches"} for parallel work. Branches you or other tools made are counted but never touched. A branch takes no space of its own: its commits live in the repository's git storage, which every branch and worktree shares. What takes space is each worktree's files (with its build output) and that storage. The Git agent keeps each project within {v?.cap ?? 10} worktrees and frees space when a disk runs low.
         </p>
       </div>
+      )}
     </Modal>
   );
 }

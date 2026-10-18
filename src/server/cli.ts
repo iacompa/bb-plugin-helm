@@ -2,6 +2,7 @@
 // raise PluginCliError so BB prints `{ok:false,error}` under --json. Multi-line
 // text only ever comes from --message-file / --brief-file.
 
+import { githubViewFor, githubText } from "./github-view.ts";
 import { readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { cliCommand, defineCli, PluginCliError, type PluginCliContext, type PluginCliResult } from "@get-bb/plugin-sdk";
@@ -442,6 +443,7 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
         options: {
           run: RUN,
           app: { type: "string", description: "Only this app (name or id)" },
+          github: { type: "boolean", description: "What each app's remote (GitHub) has and does not have: branch names and commits only, nothing downloaded" },
           consolidate: { type: "string", description: "App to consolidate: refuses, changing nothing, while any extra worktree has uncommitted or unmerged work" },
           yes: { type: "boolean", description: "Confirm --consolidate (its agents restart in the shared worktree)" },
           json: JSON_OPT,
@@ -453,6 +455,11 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
               if (!i.options.yes) throw new PluginCliError(`This stops ${i.options.consolidate}'s agents, removes their own worktrees (only when everything there is committed and merged) and restarts them in the shared work worktree. Re-run with --yes.`, { code: "confirm" });
               const r = await svc.consolidate(run.id, i.options.consolidate);
               return out(i.options.json, r, r.text);
+            }
+            if (i.options.github) {
+              const g = await githubViewFor(svc.engine).viewAndWait(run.id);
+              const only = i.options.app ? g.apps.filter((a) => a.appId === i.options.app || a.name.toLowerCase() === String(i.options.app).toLowerCase()) : g.apps;
+              return out(i.options.json, { ...g, apps: only }, githubText({ ...g, apps: only }));
             }
             const r = await svc.worktrees(run.id, i.options.app);
             return out(i.options.json, r, r.text);

@@ -11,6 +11,7 @@ import type { HostOps } from "../shared/host-contract.ts";
 import { scan, type ScanFile } from "../server/domain/slop/scan.ts";
 import { createScreenOps } from "./screens.ts";
 import { createDiskOps } from "./disk.ts";
+import { createRemoteOps } from "./remote.ts";
 
 const GIT_ENV = {
   ...process.env,
@@ -183,6 +184,7 @@ export function createHostOps(): HostOps {
   return {
     ...createScreenOps(),
     ...createDiskOps(),
+    ...createRemoteOps(),
     async ensureRepo({ path, files, message }) {
       const root = resolve(path);
       await mkdir(root, { recursive: true });

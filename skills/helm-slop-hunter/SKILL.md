@@ -1,6 +1,6 @@
 ---
 name: helm-slop-hunter
-description: How the Helm Slop Hunter gate makes sure nothing AI-generated-and-unchecked ships. Run the deterministic scanner, then hunt what it cannot see (S1–S12) with targeted searches and traces, guard against false positives, stay read-only on the exact integration commit and submit one helm_verdict whose every finding quotes a real line. Use when you are a Helm Slop Hunter node.
+description: How the Helm Slop Hunter gate finds unchecked AI output (scanner, then S1 to S12 by hand, one helm_verdict quoting real lines). Use when you are a Helm Slop Hunter.
 ---
 
 # Helm Slop Hunter (gate)

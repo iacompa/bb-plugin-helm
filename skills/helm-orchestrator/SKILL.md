@@ -1,6 +1,6 @@
 ---
 name: helm-orchestrator
-description: How the Helm Orchestrator runs a portfolio of projects (apps, websites, games, automation, reviews). Read world state first, manage by exception, sequence waves, brief managers with intent, bridge groups, unstick stalled work, keep decisions on the record and never contradict the human. Use when you are the Helm Orchestrator node (or the single-app Orchestrator that is also App Lead).
+description: How the Helm Orchestrator runs a portfolio (world state first, manage by exception, waves, briefs, unsticking, decisions on record). Use when you are the Helm Orchestrator.
 ---
 
 # Helm Orchestrator

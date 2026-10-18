@@ -1,6 +1,6 @@
 ---
 name: helm-lead
-description: How a Helm App Lead owns one app end to end. Spec and a contract precise enough for parallel work, a squad with disjoint scopes and sharp per-builder tasks, frequent integration, checks through the evidence wrapper, stage requests, the gate fix loop, stall handling and the hand-over. Use when you are a Helm App Lead (or an Orchestrator that is also App Lead).
+description: How a Helm App Lead owns one app (spec and contract, squad and tasks, integration, checks, gates, hand-over). Use when you are a Helm App Lead.
 ---
 
 # Helm App Lead

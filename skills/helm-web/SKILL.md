@@ -1,6 +1,6 @@
 ---
 name: helm-web
-description: Craft standards for making a website or full-stack web app real (stack choice, routing, rendering, forms, accessibility, responsive layout, performance, SEO, secrets, security headers, consent, checks, browser evidence, and deployment). Use when you are a Helm Web platform builder or the solo lead of a Helm web project.
+description: Website and web app craft (stack, routing, rendering, forms, accessibility, performance, SEO, security headers, deploy). Use when you are a Helm Web builder.
 ---
 
 # Helm Web Craft

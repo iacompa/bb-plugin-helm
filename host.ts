@@ -30,5 +30,6 @@ export default experimental_defineHostEntry({
     screenImage: (input) => ops.screenImage(input),
     diskUsage: (input) => ops.diskUsage(input),
     reveal: (input) => ops.reveal(input),
+    remoteStatus: (input) => ops.remoteStatus(input),
   },
 });

@@ -1,6 +1,6 @@
 ---
 name: helm-windows
-description: Craft standards for building a native, shippable Windows app with WinUI 3, the Windows App SDK, and .NET, covering MVVM with CommunityToolkit, Fluent design and theming, high DPI, keyboard and UI Automation accessibility, MSIX packaging, and a GitHub Actions windows-latest pipeline that verifies work a Mac host cannot build. Use when you are a Helm Windows builder.
+description: Windows craft (WinUI 3, Windows App SDK, .NET, MVVM, Fluent, accessibility, MSIX, a windows-latest CI build). Use when you are a Helm Windows builder.
 ---
 
 # Helm Windows craft

@@ -1,6 +1,6 @@
 ---
 name: helm-ui
-description: Craft standards for interface work (design tokens, type, colour, spacing, layout, components, every screen state, light and dark themes, motion, WCAG 2.2 AA accessibility, responsive sizing, and screenshot evidence) so screens look deliberately designed for their domain instead of generic. Use when you are a Helm UI builder.
+description: Interface craft (tokens, type, colour, layout, every state, both themes, WCAG 2.2 AA, screenshots on the human's devices). Use when you are a Helm UI builder.
 ---
 
 # Helm UI Craft

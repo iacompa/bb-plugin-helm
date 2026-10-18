@@ -75,6 +75,23 @@ export const HOST_CONTRACT = defineRpcContract({
       repos: z.array(z.object({ repo: z.string(), gitDir: z.string().nullable(), bytes: z.number().nullable() })),
     }),
   },
+  /**
+   * What a repository's remote (GitHub or any other) has compared with this computer: its branch
+   * names and commits from `git ls-remote`, nothing downloaded; ahead and behind counted locally.
+   */
+  remoteStatus: {
+    input: z.object({ repo: z.string().min(1).max(1000), remote: z.string().min(1).max(100).optional() }),
+    output: z.object({
+      repo: z.string(),
+      remotes: z.array(z.string()),
+      remote: z.string().nullable(),
+      url: z.string().nullable(),
+      web: z.string().nullable(),
+      defaultBranch: z.string().nullable(),
+      branches: z.array(z.object({ name: z.string(), local: z.string().nullable(), remote: z.string().nullable(), state: z.enum(["synced", "ahead", "behind", "diverged", "newer", "local", "remote"]), ahead: z.number().nullable(), behind: z.number().nullable(), at: z.number().nullable() })),
+      error: z.string().nullable(),
+    }),
+  },
   /** Show a folder in the file manager (Finder, Explorer, the Files app); a folder that is gone opens its nearest parent. */
   reveal: {
     input: z.object({ path: z.string().min(1).max(1000) }),

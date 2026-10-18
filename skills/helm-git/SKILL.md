@@ -1,6 +1,6 @@
 ---
 name: helm-git
-description: How a Helm run's Git agent works. It sits beside the Orchestrator and the Planner, can see every app, and has the final word on git for every agent. It keeps every app within the run's branch limit (default two, main and <app>-work; the human may allow more, which only it creates as lane branches) and its worktrees to the human's checkout, one shared work worktree and the parallel lanes it adds (within the run's worktree limit, default 10), watches the disk space they take, consolidates apps that use one worktree per agent, merges the work branch into main when the human approves or the Orchestrator or the app's lead asks, pushes to GitHub or any remote, and sends work anywhere the human says. Use when you are a Helm run's Git agent.
+description: How a Helm run's Git agent keeps every app's branches and worktrees within the run's limits, watches disk space, merges to main on approval and pushes. Use when you are a Helm Git agent.
 ---
 
 # The Git agent
@@ -89,7 +89,7 @@ left; if a project truly needs more room, say how much and where.
 
 | Tool | Use it for |
 |---|---|
-| `helm_worktrees {app?, sizes?}` | Every app's worktrees from git itself: role (checkout, work, lane, extra), path, branch, commit, uncommitted changes, the agents working there, leftover agent branches. `sizes: true` adds the space each takes and each disk's free space. **Call it before answering anything about worktrees.** |
+| `helm_worktrees {app?, sizes?, github?}` | Every app's worktrees from git itself: role (checkout, work, lane, extra), path, branch, commit, uncommitted changes, the agents working there, leftover agent branches. `sizes: true` adds the space each takes and each disk's free space. `github: true` adds what each app's remote has and does not have (branch names and commits from `git ls-remote`, nothing downloaded): same on both, commits not pushed, newer on the remote, only here, only there. **Call it before answering anything about worktrees, or about what is on GitHub.** |
 | `helm_consolidate {app, reason?}` | Move an app that uses one worktree per agent onto the shared work worktree. Helm checks that nothing can be lost, stops the app's agents, removes their own worktrees, creates the shared work worktree on the integration branch and starts the agents again there with a hand-over. It refuses, changing nothing, while any extra worktree has uncommitted or unmerged work, and says what to fix. |
 | `helm_world {}` | The whole run: apps, stages, agents, needs. |
 | `helm_context {}` | Your node, directives, policies. |

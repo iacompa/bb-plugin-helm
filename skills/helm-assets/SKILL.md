@@ -1,6 +1,6 @@
 ---
 name: helm-assets
-description: Craft standards for producing and delivering 3D, 2D and audio assets (asset list and budgets in SPEC, naming and layout, sources versus exports, units and axes per engine, topology, UVs, LODs, PBR textures and compression, rigging and animation export, sprites, store art, audio loudness, headless Blender scripting, provenance and licensing, Git LFS, import verification and evidence). Use when you are a Helm Asset builder in a game or any project that needs 3D, 2D or audio assets.
+description: 3D, 2D and audio asset craft (budgets, naming, Blender scripting, LODs, textures, export, licensing, Git LFS). Use when you are a Helm Asset builder.
 ---
 
 # Helm Assets Craft
