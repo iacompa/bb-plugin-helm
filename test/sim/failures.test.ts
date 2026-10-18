@@ -11,7 +11,7 @@ const one = (name = "Alpha", platforms = ["ios"]) => ({ apps: [{ name, tagline: 
 const two = { apps: [{ name: "Alpha", tagline: "a", platforms: ["ios"] }, { name: "Beta", tagline: "b", platforms: ["mac"] }], groups: [], assumptions: [], questions: [] };
 const H = 3600_000;
 
-async function run(h: Harness, portfolio: unknown, limits: Record<string, number> = {}) {
+async function run(h: Harness, portfolio: unknown, limits: Record<string, unknown> = {}) {
   const { runId } = h.engine.createRun({ name: "F", brief: "x", portfolio: portfolio as never, slots: CHEAP, limits });
   const r = await h.engine.startRun(runId);
   assert.deepEqual(r.problems, []);
@@ -69,7 +69,8 @@ test("A15: a gate that edits files is refused (read-only violation) and its verd
 
 test("A18: a failing agent raises a need with BB's error; Retry recovers it and the app reaches Ready", async () => {
   const h = await createHarness({ profileFor: role("code", "flaky") });
-  const runId = await run(h, one());
+  // autonomy ask: the failure comes straight to the human
+  const runId = await run(h, one(), { autonomy: "ask" });
   await h.clock.runUntil(h.clock.now() + 12 * H, { stopWhen: () => h.repo.listNeeds(runId, "open").some((n) => n.kind === "failed") });
   const need = h.repo.listNeeds(runId, "open").find((n) => n.kind === "failed")!;
   assert.ok(need, "a failed need is raised");

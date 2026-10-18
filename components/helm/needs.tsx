@@ -72,10 +72,14 @@ export function NeedsView() {
   const [modelFor, setModelFor] = useState<NeedInfo | null>(null);
   const [waiveFor, setWaiveFor] = useState<NeedInfo | null>(null);
   const [capFor, setCapFor] = useState<NeedInfo | null>(null);
+  const [showTeam, setShowTeam] = useState(false);
 
   if (!data) return <div className="pagewrap"><div className="page"><h2>Needs you</h2><span className="muted">Loading…</span></div></div>;
 
-  const open = data.needs.filter((n) => n.state === "open").sort((a, b) => b.createdAt - a.createdAt);
+  const openAll = data.needs.filter((n) => n.state === "open").sort((a, b) => b.createdAt - a.createdAt);
+  // hands-off: the Fixer, a lead, a manager or the Orchestrator decides these; the human can still step in
+  const open = openAll.filter((n) => !n.handler || n.handler === "human");
+  const team = openAll.filter((n) => n.handler && n.handler !== "human");
   const resolved = data.needs.filter((n) => n.state !== "open").sort((a, b) => (b.resolvedAt ?? 0) - (a.resolvedAt ?? 0));
   const kinds = KIND_ORDER.filter((k) => data.needs.some((n) => n.kind === k));
   const list = filter === "open" ? open : filter === "all" ? open : open.filter((n) => n.kind === filter);
@@ -109,7 +113,7 @@ export function NeedsView() {
       <div className="page">
         <div>
           <h2>Needs you</h2>
-          <p className="lead">Agents run in hidden threads, so BB can’t flash an attention badge for them. Everything that is waiting on you — approvals, questions, failures, gates, sign-offs — lands here, with context and one-click answers.</p>
+          <p className="lead">Agents run in hidden threads, so BB can’t flash an attention badge for them. Everything that is waiting on you lands here, with context and one-click answers. With autonomy on, only keys and accounts, spending and private data wait for you; your team decides the rest (folded below).</p>
         </div>
         <div className="ptools">
           <div className="seg" role="group" aria-label="Filter by kind">
@@ -130,6 +134,23 @@ export function NeedsView() {
           ))}
           {!list.length ? <div className="empty">{open.length ? "Nothing in this filter." : "All clear — nothing is waiting on you."}</div> : null}
         </div>
+        {team.length ? (
+          <div className="col" style={{ gap: 8 }}>
+            <button type="button" className="btn ghost sm" aria-expanded={showTeam} onClick={() => setShowTeam(!showTeam)} style={{ alignSelf: "flex-start" }}>
+              <Ic name={showTeam ? "ChevronDown" : "ChevronRight"} size="sm" /> Your team is deciding ({team.length})
+            </button>
+            {showTeam
+              ? team.map((n) => (
+                  <div key={n.id} className="col" style={{ gap: 4 }}>
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      {data.nodes[n.handler!]?.label ?? n.handler} is deciding this hands-off. You can still act on it.
+                    </span>
+                    <NeedCard need={n} data={data} busy={busy === n.id} resolve={resolve} onModel={() => setModelFor(n)} onWaive={() => setWaiveFor(n)} onCap={() => setCapFor(n)} />
+                  </div>
+                ))
+              : null}
+          </div>
+        ) : null}
         {(filter === "all" || filter === "open" || resolvedList.length) && resolvedList.length ? (
           <div className="col" style={{ gap: 8 }}>
             <button type="button" className="btn ghost sm" aria-expanded={resolvedOpen} onClick={() => (filter === "all" ? setFilter("open") : setShowResolved(!showResolved))} style={{ alignSelf: "flex-start" }}>

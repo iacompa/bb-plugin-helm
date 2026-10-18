@@ -8,6 +8,8 @@ import type { Engine } from "./engine.ts";
 import type { NodeInfo, NeedKind } from "../../shared/types.ts";
 import { createDirective, remindUnacked } from "./direct.ts";
 import { askKey } from "./asks.ts";
+import { autoRetriesSoFar, runDueRetries, scheduleAutoRetry, sweepCards } from "./handsoff.ts";
+import { FIXER_ID } from "./custom.ts";
 import { spendFromTokens } from "../domain/models.ts";
 import { isQuestion } from "../domain/directives.ts";
 import { nodeWorktree } from "./gates.ts";
@@ -69,8 +71,10 @@ export async function handleEvent(e: Engine, ev: HelmEvent, opts: { selfPluginId
     case "thread.failed": {
       if (TERMINAL.has(node.status) && node.status === "failed") return;
       let worktree = "unknown";
+      let wtPath: string | null = null;
       try {
         const wt = await nodeWorktree(e, node);
+        wtPath = wt;
         if (wt) {
           const st = await e.host(node.runId).status({ path: wt });
           worktree = st.head ? `intact at ${st.head.slice(0, 9)}${st.clean ? "" : ` with ${st.dirty.length} uncommitted changes`}` : "missing";
@@ -80,12 +84,15 @@ export async function handleEvent(e: Engine, ev: HelmEvent, opts: { selfPluginId
       }
       e.repo.tx(() => {
         e.repo.updateNode(node.runId, node.id, { status: "failed", endedAt: now, warning: (ev.error ?? "failed").slice(0, 200) });
+        // hands-off: Helm retries it itself (twice, a few minutes apart) before anyone is asked
+        const tried = autoRetriesSoFar(e, node);
+        if (scheduleAutoRetry(e, node, ev.error ?? "", worktree)) return;
         e.raiseNeed(node.runId, {
           kind: "failed",
           nodeId: node.id,
           appId: node.appId,
           title: `${e.label(node)} failed after BB's retries`,
-          body: `${ev.error ?? "The provider reported a failure."}\nWorktree: ${worktree}.`,
+          body: `${ev.error ?? "The provider reported a failure."}\nWorktree: ${wtPath ? `${wtPath} — ` : ""}${worktree}${node.branch ? ` (branch ${node.branch})` : ""}.${tried ? ` Helm retried it ${tried === 1 ? "once" : `${tried} times`} automatically.` : ""}`,
           evidence: `thread ${node.threadId}`,
           options: ["Retry", "Change model and retry", "Stop"],
           dedupeKey: `failed:${node.id}:${node.threadId}`,
@@ -270,7 +277,7 @@ async function onInteraction(e: Engine, node: NodeInfo, i: InteractionLite): Pro
 }
 
 /** An agent's BB prompt as a Needs-you card (call inside a transaction). */
-export function raiseInteractionNeed(e: Engine, node: NodeInfo, i: InteractionLite, note = ""): void {
+export function raiseInteractionNeed(e: Engine, node: NodeInfo, i: InteractionLite, note = "", handler?: string): void {
   {
     e.raiseNeed(node.runId, {
       kind: needKindFor(i),
@@ -284,6 +291,7 @@ export function raiseInteractionNeed(e: Engine, node: NodeInfo, i: InteractionLi
       dedupeKey: `interaction:${i.id}`,
       data: { questions: i.questions, decisions: i.decisions, threadId: i.threadId },
       setNodeNeeds: true,
+      handler,
     });
   }
 }
@@ -296,7 +304,7 @@ async function onDispatch(e: Engine, node: NodeInfo, ev: Extract<HelmEvent, { ty
   if (!text) return;
   if (isHelmText(e, node, text)) return;
   // the Planner is a conversation with the human, not a chain of command: nothing to record or relay
-  if (node.role === "planner" || node.role === "git") {
+  if (node.role === "planner" || node.role === "git" || node.role === "fixer") {
     e.repo.event(node.runId, node.id, "question", `the human: ${text.slice(0, 160)}`);
     return;
   }
@@ -336,6 +344,16 @@ function isHelmText(e: Engine, node: NodeInfo, text: string): boolean {
 
 // ───────────────────────────── watchdog (DB only) ─────────────────────────────
 
+/** Autonomy on: automatic retries that are due, and the cards the Orchestrator has not decided. */
+function handsOff(e: Engine, runId: string): void {
+  const retried = runDueRetries(e, runId).length > 0;
+  const fixerWaiting = () => e.repo.getNode(runId, FIXER_ID)?.status === "queued";
+  const before = fixerWaiting();
+  if (sweepCards(e, runId)) e.emit(runId, "run.updated", { id: runId });
+  // a retry, or a Fixer that just got its first card, starts now
+  if (retried || (!before && fixerWaiting())) void e.pump(runId);
+}
+
 export async function watchdog(e: Engine): Promise<{ nudged: string[]; stalled: string[] }> {
   const nudged: string[] = [];
   const stalled: string[] = [];
@@ -352,7 +370,8 @@ export async function watchdog(e: Engine): Promise<{ nudged: string[]; stalled: 
         e.log.warn(`watcher sweep for ${run.id} failed, using the plain stall checks this pass: ${err instanceof Error ? err.message : String(err)}`);
       }
       if (swept) {
-        if (expirePrompts(e, run.id, (n, i, note) => raiseInteractionNeed(e, n, i, note))) e.emit(run.id, "run.updated", { id: run.id });
+        handsOff(e, run.id);
+        if (expirePrompts(e, run.id, (n, i, note) => raiseInteractionNeed(e, n, i, note, "human"))) e.emit(run.id, "run.updated", { id: run.id });
         e.proposeNextWave(run.id);
         continue;
       }
@@ -374,7 +393,8 @@ export async function watchdog(e: Engine): Promise<{ nudged: string[]; stalled: 
         if (raised) stalled.push(n.id);
       }
     }
-    if (expirePrompts(e, run.id, (n, i, note) => raiseInteractionNeed(e, n, i, note))) e.emit(run.id, "run.updated", { id: run.id });
+    handsOff(e, run.id);
+    if (expirePrompts(e, run.id, (n, i, note) => raiseInteractionNeed(e, n, i, note, "human"))) e.emit(run.id, "run.updated", { id: run.id });
     e.proposeNextWave(run.id);
   }
   // the worktree rule: the Git agent hears about any app over the limits (throttled, host calls);

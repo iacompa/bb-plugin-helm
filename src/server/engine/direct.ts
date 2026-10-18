@@ -39,6 +39,13 @@ export interface DirectiveInput {
   affectedIds?: string[];
   /** How the ledger names a multi-agent selection ("3 Slop Hunters under Manager 1"). */
   targetLabel?: string;
+  /** Hands-off: the supervisor that decided a card on the human's behalf (named in the notices instead of "the human"). */
+  decidedBy?: string;
+}
+
+/** A notice written for the human's decision, reworded for the supervisor that made it (hands-off). */
+export function onBehalf(text: string, who: string): string {
+  return text.replace(/\bThe human\b/g, who).replace(/\bthe human\b/g, who).replace(/\bby human\b/g, `by ${who}`);
 }
 
 const SELF_ONLY: DirectiveType[] = ["approve", "deny", "answer", "plan", "signoff", "sendback", "waive", "slots", "spawn"];
@@ -161,6 +168,15 @@ export async function createDirective(e: Engine, runId: string, input: Directive
               e.repo.enqueue({ id: e.oid(), runId, kind: "retry", nodeId: nid, payload: {}, idemKey: `${id}:retry:${nid}` });
               for (const need of e.repo.openNeedsFor(runId, nid)) if (need.kind === "failed") e.repo.resolveNeed(runId, need.id, { action: "retry", text: "retried on the new model" });
             }
+          }
+          // a supervisor gave a model to an agent that waited for one (hands-off): it starts on it
+          if (by) {
+            const waiting = e.repo.openNeedsFor(runId, nid).filter((x) => x.kind === "model");
+            for (const need of waiting) {
+              e.repo.resolveNeed(runId, need.id, { action: "change_model", text: `model set by ${e.label(by)}` });
+              e.emit(runId, "need.resolved", { id: need.id, action: "change_model" });
+            }
+            if (waiting.length && !n.threadId && n.status === "needs") e.repo.updateNode(runId, nid, { status: "queued", firstInLine: true, prevStatus: null, warning: null });
           }
         }
         // the Orchestrator moved every agent of a role: future agents of that role follow
@@ -302,7 +318,7 @@ export async function createDirective(e: Engine, runId: string, input: Directive
     const nd: NoticeDirective = { id, type, cascade, text, value: input.value, modelFrom, modelTo: input.modelTo ?? null, implicit: input.implicit, ts };
     const ctx = { targetName: input.targetLabel ?? e.label(target), briefVersion, modelName: mname, touchedCount, clock: hhmm(ts) };
     const actx = by ? { ...ctx, byName: e.label(by), byId: by.id } : null;
-    const summary = actx ? agentSummary(nd as NoticeDirective & { type: AgentAction }, actx) : directiveSummary(nd, ctx);
+    const summary = actx ? agentSummary(nd as NoticeDirective & { type: AgentAction }, actx) : input.decidedBy ? `${directiveSummary(nd, ctx)} (by ${input.decidedBy})` : directiveSummary(nd, ctx);
     e.repo.insertDirective({ id, runId, ts, type, targetNodeId: target.id, cascade, mode: humanMode, policy: !!input.policy || type === "policy", text, value: { value: input.value ?? null, needId: input.needId ?? null, findingIds: input.findingIds ?? null, slots: input.slots ?? null, slotsScope: input.slotsScope ?? null }, modelFrom, modelTo: input.modelTo ?? null, affected, actor, byNode: by?.id ?? null, implicit: !!input.implicit, summary });
 
     // ── recipients and delivery ──
@@ -314,7 +330,9 @@ export async function createDirective(e: Engine, runId: string, input: Directive
           ? `${id} · ${actx.byName} (${actx.byId}) changed your model to ${mname(input.modelTo)}${text ? `: ${text}` : ""}. It applies from your next turn; carry on with your work.`
           : actx
             ? agentNoticeText(nd as NoticeDirective & { type: AgentAction }, r.level, actx)
-            : noticeFor(nd, r, ctx);
+            : input.decidedBy
+              ? onBehalf(noticeFor(nd, r, ctx), input.decidedBy)
+              : noticeFor(nd, r, ctx);
       let state: "queued" | "delivered" | "rec" = "queued";
       let outboxId: string | null = null;
       if (r.level === "digest") {
@@ -489,9 +507,9 @@ export function resolveModelWord(cat: Catalog, s: string): { ref: ModelRef } | {
   return p ? { problem: p.message } : { ref };
 }
 
-/** Whose models an agent may change: everyone below it; the Planner, everyone but itself. */
+/** Whose models an agent may change: everyone below it; the Planner and the Fixer, everyone but themselves. */
 function reach(e: Engine, by: NodeInfo): string[] {
-  if (by.tier === "planner") return e.repo.listNodes(by.runId).filter((n) => n.id !== by.id).map((n) => n.id);
+  if (by.tier === "planner" || by.tier === "fixer") return e.repo.listNodes(by.runId).filter((n) => n.id !== by.id).map((n) => n.id);
   return descendants(e.tree(by.runId), by.id);
 }
 
@@ -664,6 +682,8 @@ export interface NeedResolution {
   rotatedConfirmed?: boolean;
   /** Who resolved it: the human (default), or Helm on the Orchestrator's behalf when autonomy is high. */
   actor?: "human" | "system";
+  /** Hands-off: the supervisor that decided it (helm_resolve), named in the notices. */
+  decidedBy?: string;
 }
 
 type ResolveHooks = { signoff(appId: string, d: DirectiveInfo): Promise<void>; sendback(appId: string, d: DirectiveInfo): Promise<void> };
@@ -695,6 +715,7 @@ async function resolveNeedOnce(e: Engine, runId: string, needId: string, res: Ne
   }
   const target = need.nodeId ?? ORCH_ID;
   const text = res.text?.trim() ?? "";
+  const who = res.decidedBy ? { actor: res.actor, decidedBy: res.decidedBy } : {};
   let directive: DirectiveInfo | null = null;
   const close = () => {
     e.repo.resolveNeed(runId, needId, { action: res.action, text, directiveId: directive?.id ?? null });
@@ -713,10 +734,10 @@ async function resolveNeedOnce(e: Engine, runId: string, needId: string, res: Ne
         const delta = (need.data as { delta?: PlanDelta })?.delta;
         if (res.action === "approve" && delta) {
           const summary = await applyDelta(e, runId, delta);
-          directive = await createDirective(e, runId, { type: "plan", target: ORCH_ID, text: text || summary, needId, actor: res.actor });
+          directive = await createDirective(e, runId, { ...who, type: "plan", target: ORCH_ID, text: text || summary, needId, actor: res.actor });
         } else if (res.action === "approve") {
           const appIds = ((need.data as { appIds?: string[] })?.appIds ?? []).filter(Boolean);
-          directive = await createDirective(e, runId, { type: "plan", target: ORCH_ID, text: text || `admit ${appIds.join(", ")}`, needId, actor: res.actor });
+          directive = await createDirective(e, runId, { ...who, type: "plan", target: ORCH_ID, text: text || `admit ${appIds.join(", ")}`, needId, actor: res.actor });
           e.repo.tx(() => {
             for (const a of appIds) e.admitAppTx(runId, a, `wave approved (${directive!.id})`);
           });
@@ -733,7 +754,7 @@ async function resolveNeedOnce(e: Engine, runId: string, needId: string, res: Ne
         break;
       }
       if (res.action === "answer" && !text) throw new HelmError("An answer needs text.", "invalid_value");
-      directive = await createDirective(e, runId, { type: res.action, target, text: text || (res.action === "approve" ? "approved" : "denied"), needId });
+      directive = await createDirective(e, runId, { ...who, type: res.action, target, text: text || (res.action === "approve" ? "approved" : "denied"), needId });
       break;
     }
     case "nudge": {
@@ -742,30 +763,30 @@ async function resolveNeedOnce(e: Engine, runId: string, needId: string, res: Ne
       if (n?.threadId && !["failed", "idle", "needs"].includes(n.status)) {
         e.repo.tx(() => {
           e.repo.updateNode(runId, n.id, { nudgedAt: e.now() });
-          e.sendFromHelm(runId, n.id, `status check: the human asks for a helm_report (progress, blocked or done, with evidence).${text ? ` ${text}` : ""}`, { mode: "steer", key: `nudge-human:${runId}:${needId}` });
-          e.repo.event(runId, n.id, "nudge", "nudged again by the human");
+          e.sendFromHelm(runId, n.id, `status check: ${res.decidedBy ?? "the human"} asks for a helm_report (progress, blocked or done, with evidence).${text ? ` ${text}` : ""}`, { mode: "steer", key: `nudge-human:${runId}:${needId}` });
+          e.repo.event(runId, n.id, "nudge", `nudged again by ${res.decidedBy ?? "the human"}`);
         });
         e.outbox.kick();
         break;
       }
-      directive = await createDirective(e, runId, { type: "retry", target, text });
+      directive = await createDirective(e, runId, { ...who, type: "retry", target, text });
       break;
     }
     case "retry":
-      directive = await createDirective(e, runId, { type: "retry", target, text });
+      directive = await createDirective(e, runId, { ...who, type: "retry", target, text });
       break;
     case "change_model":
       if (!res.model) throw new HelmError("Choose a model.", "invalid_value");
-      directive = await createDirective(e, runId, { type: "model", target, modelTo: res.model, text });
+      directive = await createDirective(e, runId, { ...who, type: "model", target, modelTo: res.model, text });
       e.repo.tx(() => {
         const n = e.node(runId, target);
         if (!n.threadId && (n.status === "needs" || n.status === "failed")) e.repo.updateNode(runId, n.id, { status: "queued", firstInLine: true, prevStatus: null, warning: null });
       });
-      if (e.node(runId, target).threadId && e.node(runId, target).status === "failed") await createDirective(e, runId, { type: "retry", target, text: "retry on the new model" });
+      if (e.node(runId, target).threadId && e.node(runId, target).status === "failed") await createDirective(e, runId, { ...who, type: "retry", target, text: "retry on the new model" });
       await e.pump(runId);
       break;
     case "stop":
-      directive = await createDirective(e, runId, { type: "stop", target, cascade: need.kind === "slop" || need.kind === "signoff" ? "subtree" : "self", text });
+      directive = await createDirective(e, runId, { ...who, type: "stop", target, cascade: need.kind === "slop" || need.kind === "signoff" ? "subtree" : "self", text });
       if (need.appId && (need.kind === "slop" || need.kind === "failed")) {
         const lead = e.leadOf(runId, need.appId);
         if (lead && lead.id === target) e.repo.updateApp(runId, need.appId, { stage: "cancelled" });
@@ -782,20 +803,20 @@ async function resolveNeedOnce(e: Engine, runId: string, needId: string, res: Ne
     case "keep_paused":
       break;
     case "stop_run":
-      directive = await createDirective(e, runId, { type: "stop", target: ORCH_ID, cascade: "subtree", text: text || "run stopped from the budget prompt" });
+      directive = await createDirective(e, runId, { ...who, type: "stop", target: ORCH_ID, cascade: "subtree", text: text || "run stopped from the budget prompt" });
       // like ending the run: every agent (the Planner and Git agent have no parent) is stopped and archived
       e.repo.tx(close);
       await completeRun(e, runId, "cancelled");
       return { need: e.repo.getNeed(runId, needId), directive };
     case "signoff":
       if (!need.appId) throw new HelmError("This item is not about an app.", "bad_state");
-      directive = await createDirective(e, runId, { type: "signoff", target: e.leadOf(runId, need.appId)!.id, text, needId });
+      directive = await createDirective(e, runId, { ...who, type: "signoff", target: e.leadOf(runId, need.appId)!.id, text, needId });
       await hooks.signoff(need.appId, directive);
       break;
     case "sendback":
       if (!need.appId) throw new HelmError("This item is not about an app.", "bad_state");
       if (!text) throw new HelmError("Send back needs a reason.", "invalid_value");
-      directive = await createDirective(e, runId, { type: "sendback", target: e.leadOf(runId, need.appId)!.id, text, needId });
+      directive = await createDirective(e, runId, { ...who, type: "sendback", target: e.leadOf(runId, need.appId)!.id, text, needId });
       await hooks.sendback(need.appId, directive);
       break;
     case "waive": {
@@ -803,7 +824,7 @@ async function resolveNeedOnce(e: Engine, runId: string, needId: string, res: Ne
       // the gate judging now (the app sits in its stage after the fix-round cap), else either gate
       const atGate = app && (app.stage === "review" || app.stage === "slop") ? e.repo.getNode(runId, `${app.id}.${app.stage}`) : null;
       const gate = atGate ?? (need.appId ? e.repo.getNode(runId, `${need.appId}.slop`) ?? e.repo.getNode(runId, `${need.appId}.review`) : null);
-      directive = await createDirective(e, runId, { type: "waive", target: gate?.id ?? target, findingIds: res.findingIds, text, rotatedConfirmed: res.rotatedConfirmed });
+      directive = await createDirective(e, runId, { ...who, type: "waive", target: gate?.id ?? target, findingIds: res.findingIds, text, rotatedConfirmed: res.rotatedConfirmed });
       // a waiver alone moves nothing: the gate judges the same commit again with those findings set aside
       const head = app ? e.repo.appExtra(runId, app.id).integrationHead : null;
       if (atGate?.threadId && head) {

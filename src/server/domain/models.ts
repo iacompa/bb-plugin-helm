@@ -6,6 +6,7 @@ export const SLOT_DEFS: Array<{ id: SlotId; group: "Coordination" | "Build" | "G
   { id: "orchestrator", group: "Coordination", name: "Orchestrator", desc: "Strategy, staffing and the portfolio view. Reads everything.", role: "orch" },
   { id: "planner", group: "Coordination", name: "Planner", desc: "Answers your questions about the run and designs new agents when they help. Idle until you ask. Leave empty to use the default Planner model from Settings (Models → Default models), else the Orchestrator's model.", role: "planner" },
   { id: "git", group: "Coordination", name: "Git agent", desc: "Keeps every app within its worktree and branch limits (your checkout, one shared work worktree, and lanes only when parallel work needs them), sends work to GitHub or wherever you tell it, and checks what reached main. Leave empty to use the default Git agent model from Settings, else the Orchestrator's model.", role: "git" },
+  { id: "fixer", group: "Coordination", name: "Fixer", desc: "Takes every failed or stuck agent off your hands: finds out why, retries it, switches its model, has the Git agent rebuild a missing worktree, or reassigns the work. Leave empty to use the default Fixer model from Settings, else the Orchestrator's model.", role: "fixer" },
   { id: "manager", group: "Coordination", name: "Managers", desc: "Oversee up to four app leads each. Roll up status.", role: "mgr" },
   { id: "lead", group: "Coordination", name: "App leads", desc: "One per app: spec, contract, integration, decisions.", role: "lead" },
   { id: "ui", group: "Build", name: "UI builders", desc: "Design system, screens, motion. Asset builders use this model too.", role: "ui" },
@@ -294,6 +295,7 @@ export const BASE_TOK: Record<Role, number> = {
   assets: 700,
   planner: 400,
   git: 300,
+  fixer: 400,
   custom: 400,
 };
 

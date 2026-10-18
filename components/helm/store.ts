@@ -249,8 +249,9 @@ export function appMembers(s: Pick<RunState, "nodes" | "nodeOrder">, appId: stri
   const rank = (n: SnapNode) => (n.tier === "lead" ? 0 : n.tier === "gate" ? 2 : 1);
   return all.sort((a, b) => rank(a) - rank(b));
 }
+/** Open items waiting on the human (cards a supervisor decides hands-off are not counted). */
 export function openNeeds(s: Pick<RunState, "needs">): NeedInfo[] {
-  return s.needs.filter((n) => n.state === "open");
+  return s.needs.filter((n) => n.state === "open" && (!n.handler || n.handler === "human"));
 }
 export function managerOfApp(s: Pick<RunState, "managers">, appId: string): PlannedManager | null {
   return s.managers.find((m) => m.appIds.includes(appId)) ?? null;

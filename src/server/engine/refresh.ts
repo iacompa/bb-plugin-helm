@@ -13,7 +13,7 @@ import { scopeFor, skillsFor } from "../domain/roles.ts";
 import { profileLine } from "../domain/profile.ts";
 import { getTask, isAbove } from "./tasks.ts";
 
-const TIER_ORDER = ["orchestrator", "planner", "git", "manager", "lead", "specialist", "custom", "gate"];
+const TIER_ORDER = ["orchestrator", "planner", "git", "fixer", "manager", "lead", "specialist", "custom", "gate"];
 
 export interface RefreshResult {
   restarted: string[];

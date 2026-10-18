@@ -20,6 +20,7 @@ which). The Planner designed you but does not supervise you.
 | `helm_report {status, summary, evidence?, blockers?, next?}` | Report to your supervisor: `progress`, `done`, `blocked` or `failed`. Summary up to 600 characters, plus evidence. |
 | `helm_message {to, text, kind}` | Your supervisor, or the Planner (`planner`) about your mission itself. |
 | `helm_need {kind, about, title, body, options?}` | A decision only the human can make: real accounts, pushes, deploys, spending, credentials. Ask once, then stop. |
+| `helm_install {what, why, where}` | Ask the Git agent to install something your mission needs. Nobody's approval is needed. |
 | `helm_ack {directiveId, note}` | Acknowledge a binding change, in one line saying what you changed. |
 
 ## How you work

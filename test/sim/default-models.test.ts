@@ -21,11 +21,11 @@ test("the settings read provider/model:reasoning and ignore anything else", () =
   const warned: string[] = [];
   assert.equal(parseModelSetting("sonnet please", "Default Planner model", (m) => warned.push(m)), null);
   assert.match(warned[0], /Default Planner model.*not provider\/model:reasoning/);
-  assert.deepEqual(toHelmSettings({ plannerModel: "claude-code/claude-sonnet-5-5:medium" }).defaultModels, { planner: SONNET, orchestrator: null, git: null });
+  assert.deepEqual(toHelmSettings({ plannerModel: "claude-code/claude-sonnet-5-5:medium" }).defaultModels, { planner: SONNET, orchestrator: null, git: null, fixer: null });
 });
 
 test("new runs take the default Planner and Orchestrator models for roles they leave empty", async () => {
-  const h = await createHarness({ settings: { defaultModels: { planner: SONNET, orchestrator: { ...SONNET, reasoning: "high" }, git: null } } });
+  const h = await createHarness({ settings: { defaultModels: { planner: SONNET, orchestrator: { ...SONNET, reasoning: "high" }, git: null, fixer: null } } });
   const { orchestrator: _o, planner: _p, ...rest } = CHEAP;
   const { runId } = h.engine.createRun({ name: "D", brief: "x", portfolio: two(), slots: rest, limits: { concurrency: 32 } });
   const run = h.engine.run(runId);

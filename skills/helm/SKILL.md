@@ -36,7 +36,7 @@ for that action; confirm irreversible ones (`stop`, `signoff`, `sendback`, `comp
 
   Short one-line values (`--reason`, `--name`) go in **single** quotes.
 
-**Node ids:** `orch` (Orchestrator) · `planner` · `git` (Git agent) · `m1`, `m2` … (Managers) ·
+**Node ids:** `orch` (Orchestrator) · `planner` · `git` (Git agent) · `fixer` (Fixer) · `m1`, `m2` … (Managers) ·
 `<app>.lead` · `<app>.code` · `<app>.ui` · `<app>.p.mac|win|ios|and|web` (platform builders) ·
 `<app>.security` · `<app>.test` · `<app>.research` · `<app>.docs` · `<app>.data` ·
 `<app>.compliance` · `<app>.assets` · `<app>.review` · `<app>.slop`. Commands also take an app name
@@ -54,7 +54,8 @@ gate verdicts). Only the human moves Ready → Done (`signoff`) or Ready → Bui
 | `bb helm runs` | All runs with ids and status. |
 | `bb helm world [--run <id>]` | The same data the Orchestrator's `helm_world` returns: stages, open needs, recent directives with receipts, touched agents, policies, managers and apps. |
 | `bb helm nodes [--app <name>]` | Every agent of the run: id, status, label and model. |
-| `bb helm needs [<id>]` | Open Needs-you items (`N-…`): kind, title, who raised it, age, and the exact command for each choice. Sign-off items, or one item asked for by id, show the full body and evidence. |
+| `bb helm needs [<id>] [--all]` | Open Needs-you items (`N-…`) for the user: kind, title, who raised it, age, and the exact command for each choice. Sign-off items, or one item asked for by id, show the full body and evidence. With autonomy high most cards are decided by the team hands-off; `--all` also lists those, with who is deciding each (the user can still act on any). |
+| `bb helm installs [--run <id>] [--limit <n>]` | The run's install ledger, newest first: what the Git agent installed (or still has to), where, with which command, why, and for which agents. |
 | `bb helm errors [--hours <n>] [--all] [--json] [--clear]` | Helm's error journal, newest first. It covers server, RPC, agent-tool and panel failures; `--all` adds refused requests. Run it first whenever something in Helm fails; `bb helm doctor` shows the last 24 hours' count. |
 | `bb helm ledger [--limit <n>]` | Recent directives (`D-…`) with per-agent receipts (queued → delivered → ack/rec, or failed). It includes steers by supervisors (`Manager → Agent: …`), which agents give with `helm_direct`; the human's directives always win. |
 | `bb helm models` | Live model catalog with NEW flags and the current slots. |
@@ -151,9 +152,9 @@ bb helm rename <agent> "<name>"
 bb helm retire <agent> --yes [--reason "<why>"]
 ```
 
-- Every run has a **Planner** and a **Git agent** beside the **Orchestrator**. By default they
-  have no personal names, just their roles; a name set in Settings (`plannerName`,
-  `orchestratorName`, `gitName`) or with `bb helm rename <agent> "<name>"` shows as
+- Every run has a **Planner**, a **Git agent** and a **Fixer** beside the **Orchestrator**. By
+  default they have no personal names, just their roles; a name set in Settings (`plannerName`,
+  `orchestratorName`, `gitName`, `fixerName`) or with `bb helm rename <agent> "<name>"` shows as
   "Nova · Planner", and `bb helm rename <agent> none` clears it. The Planner runs on a
   model the user chooses: the run's `planner` slot, else the **Default Planner model** setting,
   else the Orchestrator's model. It never picks a model by itself. It is idle until asked, so it
@@ -183,15 +184,23 @@ bb helm retire <agent> --yes [--reason "<why>"]
 
 ### Who decides what
 
-Helm runs like a company:
+Helm runs like a company. With autonomy high (the default) the user runs hands-off: they say
+what they want, where, and how good, and the team builds it.
 - Leads decide inside their apps; managers decide inside their groups.
 - With autonomy high, a lead's or manager's ordinary question stays with it. Only workers'
-  questions go to their lead.
+  questions go to their lead. Product questions (`about: owner`) climb to the Orchestrator,
+  which decides them from the brief.
 - Upward questions are capped at 3 waking messages an hour per manager or lead; more arrive
   as FYI.
 - The Orchestrator oversees and delegates, and grants standing authority, not per-item GOs.
-- The human hears about credentials, spending, private data, access, and questions only the
-  owner can answer (`about: owner`).
+- What used to wait in Needs you is a card for the team: the **Fixer** takes failed, stuck and
+  modelless agents (after two automatic retries), a manager (or the Orchestrator) signs off its
+  apps and settles gate disputes, a lead answers its squad's permission prompts. A card left
+  for two hours moves up a level; after the Orchestrator it reaches the user.
+- Installs need nobody's approval: agents ask the Git agent, which keeps the install ledger
+  (`bb helm installs`).
+- The user hears only about a key, a login or an account, real spending (the budget cap
+  included), private data, and the run's completion.
 
 ## Answer Needs-you
 
@@ -204,6 +213,8 @@ bb helm resolve <needId> <choice> [--reason '…' | --message-file f] [--model p
 ```
 
 - `needs` prints, under each item, the exact command for each of its choices. Use those.
+  It shows the user's cards; `needs --all` adds the ones the team is deciding hands-off, and
+  the user may act on any of them.
 - `approve` / `deny` — only approvals (agents' permission requests), waves and plan changes
   proposed by the Orchestrator, and the "complete the run?" card. On any other kind they refuse
   and print the right command.
@@ -241,7 +252,7 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--autonomy high|ask]
 
 | Command | Use |
 |---|---|
-| `bb helm defaults [--planner p/m:level] [--orchestrator p/m:level] [--git p/m:level] [--apply]` | Show or set the default Planner, Orchestrator and Git agent models for new runs (`none` clears one); `--apply` also moves running runs' Planner and Git agent now. |
+| `bb helm defaults [--planner p/m:level] [--orchestrator p/m:level] [--git p/m:level] [--fixer p/m:level] [--apply]` | Show or set the default Planner, Orchestrator, Git agent and Fixer models for new runs (`none` clears one); `--apply` also moves running runs' Planner, Git agent and Fixer now. |
 | `bb helm reconcile` | Re-sync Helm's database with BB threads and the outbox (after a crash or plugin reload). Safe to repeat. |
 | `bb helm export <run> --out <file>` | JSON snapshot of the run: runs, nodes, directives, findings. |
 
@@ -315,7 +326,12 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--autonomy high|ask]
   starts it if the run has none and prints its thread; tell it in that thread where to send work (GitHub or any remote, a bare
   repository or folder on the Mac or an external disk). Settings: "Git agent" model and reasoning,
   name, and "When you sign a project off, the Git agent" (merge and push / push / report only). It never
-  force-pushes or handles credentials.
+  force-pushes or handles credentials. It also makes every install agents ask for
+  (`bb helm installs`).
+- **Fixer** → every run has one (`fixer`, beside the Orchestrator). It starts with the first
+  failed or stuck agent and gets it going again: a retry, another model, a worktree the Git agent
+  rebuilds, or the work reassigned. It reports to the Orchestrator. Settings: "Default Fixer
+  model" and reasoning (else the run's Orchestrator model), name; `bb helm defaults --fixer`.
 - **Permission prompts**: by default an agent's prompts go to its supervisor, who answers
   with `helm_approve`. Only escalations (credentials, spending, private data, access), the
   Orchestrator's own prompts, and prompts unanswered for 15 minutes reach the user. Setting:

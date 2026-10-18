@@ -45,7 +45,7 @@ function nowFallback(n: SnapNode): string {
   }
 }
 
-const SIDE_ORDER = ["planner", "git", "custom"];
+const SIDE_ORDER = ["planner", "git", "fixer", "custom"];
 
 /** Hand-moved positions saved in this browser (untrusted: anything malformed is dropped). */
 function readOffsets(key: string | null): Offsets {
@@ -61,7 +61,7 @@ function readOffsets(key: string | null): Offsets {
 }
 
 function agentTitle(n: SnapNode): string {
-  if (n.role === "planner" || n.role === "git" || n.role === "custom") return n.label;
+  if (n.role === "planner" || n.role === "git" || n.role === "fixer" || n.role === "custom") return n.label;
   if (n.role === "platform" && n.platform) return `${PLAT[n.platform] ?? n.platform} builder`;
   return ROLE_LABEL[n.role] ?? n.label;
 }
@@ -207,10 +207,10 @@ export function GraphView({ active }: { active: boolean }) {
       collapsed: ui.collapsed,
       expanded: ui.expanded,
       members: der.members,
-      // free-standing beside the Orchestrator: the Planner, the Git agent, then custom agents with no app
+      // free-standing beside the Orchestrator: the Planner, the Git agent, the Fixer, then custom agents with no app
       side: data.nodeOrder
         .map((id) => data.nodes[id])
-        .filter((n) => n.role === "planner" || n.role === "git" || (n.role === "custom" && !n.appId && n.status !== "done"))
+        .filter((n) => n.role === "planner" || n.role === "git" || n.role === "fixer" || (n.role === "custom" && !n.appId && n.status !== "done"))
         .sort((a, b) => SIDE_ORDER.indexOf(a.role) - SIDE_ORDER.indexOf(b.role))
         .map((n) => ({ id: n.id, parentId: n.role === "custom" ? n.parentId : null })),
       ghosts: ghosts.map((g) => GHOST + g.threadId),

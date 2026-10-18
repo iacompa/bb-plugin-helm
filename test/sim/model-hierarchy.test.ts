@@ -144,7 +144,7 @@ test("helm_models lists the catalog and the agents below; bad models and roles a
   const spec = under(h, runId, lead.id).find((n) => n.tier === "specialist")!;
   await h.clock.runUntil(h.clock.now() + 6 * 3600_000, { stopWhen: () => !!h.repo.getNode(runId, spec.id)?.threadId });
   const denied = await as(h, runId, spec, "helm_set_model", { changes: [{ nodes: [lead.id], model: OPUS }] });
-  assert.ok(denied.isError && /is for the Orchestrator, Managers, App Leads and the Planner/.test(denied.text), denied.text);
+  assert.ok(denied.isError && /is for the Orchestrator, Managers, App Leads, the Planner and the Fixer/.test(denied.text), denied.text);
 });
 
 test("a model on another provider moves the agent to a new thread", async () => {

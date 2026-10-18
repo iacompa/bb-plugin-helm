@@ -7,7 +7,7 @@ import type { Autonomy, DirectiveInfo, ModelRef, NodeInfo, PermissionMode, Portf
 import { MODEL_REASONING, NO_MODEL, PERMISSION_KEYS, modelSettingText, type SettingsWriter } from "./settings.ts";
 import { SLOT_IDS, SEED_PRESETS, modelName, validateRef } from "./domain/models.ts";
 import { ORCH_ID } from "./domain/topology.ts";
-import { ensureGitAgent, ensurePlanner, nameOf, renameNode, retireAgent } from "./engine/custom.ts";
+import { ensureFixerNode, ensureGitAgent, ensurePlanner, nameOf, renameNode, retireAgent } from "./engine/custom.ts";
 import { appWorktrees, consolidate, worktreesText } from "./engine/worktrees.ts";
 import { createDirective, previewDirective, resolveNeed, type DirectiveInput, type NeedResolution } from "./engine/direct.ts";
 import { HelmError, autonomyText, type Engine } from "./engine/engine.ts";
@@ -145,7 +145,7 @@ export class HelmService {
 
   /** The Planner, the Orchestrator and every custom agent, with names and who designed them. */
   agents(runId: string) {
-    const nodes = this.repo.listNodes(runId).filter((n) => n.role === "planner" || n.role === "git" || n.role === "orch" || n.role === "custom");
+    const nodes = this.repo.listNodes(runId).filter((n) => n.role === "planner" || n.role === "git" || n.role === "fixer" || n.role === "orch" || n.role === "custom");
     return nodes.map((n) => ({ id: n.id, label: this.engine.label(n), role: n.role, name: nameOf(this.engine, n), title: n.title, status: n.status, parent: n.parentId, threadId: n.threadId, mission: n.charter, wakeOn: n.wakeOn, createdBy: n.createdBy }));
   }
 
@@ -214,23 +214,23 @@ export class HelmService {
     return this.permissions();
   }
 
-  /** The default Planner, Orchestrator and Git agent models (Settings), as refs and as setting text. */
+  /** The default Planner, Orchestrator, Git agent and Fixer models (Settings), as refs and as setting text. */
   defaultModels() {
     const d = this.engine.settings.defaultModels;
-    return { planner: d.planner, orchestrator: d.orchestrator, git: d.git, text: { planner: modelSettingText(d.planner), orchestrator: modelSettingText(d.orchestrator), git: modelSettingText(d.git) } };
+    return { planner: d.planner, orchestrator: d.orchestrator, git: d.git, fixer: d.fixer, text: { planner: modelSettingText(d.planner), orchestrator: modelSettingText(d.orchestrator), git: modelSettingText(d.git), fixer: modelSettingText(d.fixer) } };
   }
 
   /**
-   * Set the default Planner, Orchestrator and/or Git agent model (null clears it). New runs use them
-   * for an empty role; with `applyToPlanners`, every live run's Planner (and Git agent, for a Git
-   * default) also moves to the new model now.
+   * Set the default Planner, Orchestrator, Git agent and/or Fixer model (null clears it). New runs
+   * use them for an empty role; with `applyToPlanners`, every live run's Planner (and Git agent or
+   * Fixer, for their defaults) also moves to the new model now.
    */
-  async setDefaultModels(input: { planner?: ModelRef | null; orchestrator?: ModelRef | null; git?: ModelRef | null; applyToPlanners?: boolean }) {
+  async setDefaultModels(input: { planner?: ModelRef | null; orchestrator?: ModelRef | null; git?: ModelRef | null; fixer?: ModelRef | null; applyToPlanners?: boolean }) {
     if (!this.writeSettings) throw new HelmError("Settings cannot be written here.", "bad_state");
     const cat = await this.engine.catalog(null);
     const values: Record<string, string> = {};
-    const LABEL = { planner: "Planner", orchestrator: "Orchestrator", git: "Git agent" } as const;
-    for (const key of ["planner", "orchestrator", "git"] as const) {
+    const LABEL = { planner: "Planner", orchestrator: "Orchestrator", git: "Git agent", fixer: "Fixer" } as const;
+    for (const key of ["planner", "orchestrator", "git", "fixer"] as const) {
       const ref = input[key];
       if (ref === undefined) continue;
       if (ref) {
@@ -249,7 +249,7 @@ export class HelmService {
       }
     }
     const moved: string[] = [];
-    for (const role of ["planner", "git"] as const) {
+    for (const role of ["planner", "git", "fixer"] as const) {
       const ref = input[role];
       if (!input.applyToPlanners || !ref) continue;
       for (const run of this.repo.listRuns().filter((r) => r.status === "running" || r.status === "paused")) {
@@ -299,6 +299,7 @@ export class HelmService {
     const run = this.engine.run(runId);
     if (run.status === "running" && !this.repo.getNode(runId, "planner")) await ensurePlanner(this.engine, runId, { queue: true });
     if (run.status === "running" && !this.repo.getNode(runId, "git")) await ensureGitAgent(this.engine, runId, { queue: true });
+    if (run.status === "running" && this.engine.autonomous(run)) ensureFixerNode(this.engine, runId);
     return refreshRun(this.engine, runId);
   }
 

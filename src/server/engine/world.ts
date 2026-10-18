@@ -105,12 +105,17 @@ export function context(e: Engine, n: NodeInfo): string {
   const run = e.run(n.runId);
   const running = e.repo.countRunning();
   const fyi = e.repo.unflushedInbox(n.runId, n.id);
+  // hands-off: the cards Helm handed this supervisor, and the Git agent's install requests
+  const cards = e.repo.listNeeds(n.runId, "open").filter((x) => x.handler === n.id);
+  const installs = n.tier === "git" ? e.repo.listInstalls(n.runId).filter((x) => x.state === "requested") : [];
   const L = [
     `You: ${e.label(n)} (${n.id}), ${n.status}, brief v${n.briefVersion}${n.branch ? `, branch ${n.branch}` : ""}.`,
     `Parent: ${parent ? `${e.label(parent)} (${parent.id})` : "the human"}.`,
     children.length ? `Children: ${children.map((c) => `${c.id} ${c.status}`).join(", ")}.` : "",
     app ? `App ${app.name} (appId ${app.id}): stage ${app.stage}, CONTRACT v${extra!.contractVersion}, integration ${extra!.integrationBranch ?? "—"}${extra!.integrationHead ? ` @ ${extra!.integrationHead.slice(0, 9)}` : ""}, fix round ${app.fixRound}/${run.limits.fixRounds}.` : "",
     unacked.length ? `Unacknowledged directives (call helm_ack): ${unacked.map((r) => `${r.directiveId}: ${r.notice.slice(0, 140)}`).join(" | ")}` : "No directives waiting for your ack.",
+    cards.length ? `Cards for you to decide now (helm_resolve): ${cards.map((c) => `${c.id} ${c.kind}: ${c.title.slice(0, 100)}`).join(" | ")}` : "",
+    installs.length ? `Install requests waiting for you (install, then helm_installed): ${installs.map((x) => `${x.id} ${x.what.slice(0, 80)}${x.where ? ` in ${x.where}` : ""}`).join(" | ")}` : "",
     policies.length ? `Standing policies: ${policies.map((p) => `${p.id} ${p.text.slice(0, 160)}`).join(" | ")}` : "",
     fyi.length ? `Unread FYI: ${fyi.slice(-5).map((l) => l.text.slice(0, 160)).join(" | ")}` : "",
     `Capacity: ${running}/${run.limits.concurrency} running${run.spawnsPaused ? ", spawns paused" : ""}.`,

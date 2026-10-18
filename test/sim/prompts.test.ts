@@ -8,9 +8,9 @@ import { PROMPT_TIMEOUT_MS, pendingPrompts } from "../../src/server/engine/promp
 const H = 3600_000;
 const two = { apps: [{ name: "Alpha", tagline: "a", platforms: ["ios"] }, { name: "Beta", tagline: "b", platforms: ["mac"] }], groups: [], assumptions: [], questions: [] };
 
-async function setup(settings = {}) {
+async function setup(settings = {}, limits: Record<string, unknown> = {}) {
   const h = await createHarness({ settings });
-  const { runId } = h.engine.createRun({ name: "P", brief: "x", portfolio: two as never, slots: CHEAP, limits: { concurrency: 48 } });
+  const { runId } = h.engine.createRun({ name: "P", brief: "x", portfolio: two as never, slots: CHEAP, limits: { concurrency: 48, ...limits } });
   assert.deepEqual((await h.engine.startRun(runId)).problems, []);
   const spec = h.repo.listNodes(runId).find((n) => n.role === "code")!;
   await h.clock.runUntil(h.clock.now() + 6 * H, { stopWhen: () => !!h.repo.getNode(runId, spec.id)?.threadId && !!h.repo.getNode(runId, spec.parentId!)?.threadId });
@@ -42,20 +42,45 @@ test("a builder's permission prompt goes to its lead, not the human; the lead's 
   assert.equal(pendingPrompts(h.engine, runId).length, 0);
 });
 
-test("escalate sends the prompt to the human, with who escalated and why", async () => {
+test("escalate climbs to the next supervisor up and reaches the human from the Orchestrator, with who escalated and why", async () => {
   const { h, runId, spec, lead } = await setup();
   await prompt(h, spec.threadId!, "int_b", "Run: curl -H 'Authorization: …' https://api.example");
-  await callTool(h.engine, "helm_approve", lead.threadId!, { promptId: "int_b", decision: "escalate", reason: "uses an API key" });
+  const chain = [lead.id];
+  for (let hop = 0; hop < 5 && !humanCards(h, runId).length; hop++) {
+    const by = h.repo.getNode(runId, chain[chain.length - 1])!;
+    const r = await callTool(h.engine, "helm_approve", by.threadId!, { promptId: "int_b", decision: "escalate", reason: "uses an API key" });
+    assert.equal(r.isError, false, r.text);
+    const next = pendingPrompts(h.engine, runId)[0];
+    if (next) chain.push(next.approverId);
+  }
+  assert.ok(chain.length >= 2, "the lead's escalation went to a supervisor first, not the human");
+  assert.equal(chain[chain.length - 1], "orch", "the Orchestrator is the last stop before the human");
   const cards = humanCards(h, runId);
   assert.equal(cards.length, 1);
+  assert.equal(cards[0].handler, "human");
   assert.match(cards[0].body, /escalated it: uses an API key/);
 });
 
-test("a prompt its supervisor does not answer in time comes to the human", async () => {
-  const { h, runId, spec } = await setup();
+test("without autonomy, escalate sends the prompt straight to the human", async () => {
+  const { h, runId, spec, lead } = await setup({}, { autonomy: "ask" });
+  await prompt(h, spec.threadId!, "int_b2", "Run: curl -H 'Authorization: …' https://api.example");
+  const r = await callTool(h.engine, "helm_approve", lead.threadId!, { promptId: "int_b2", decision: "escalate", reason: "uses an API key" });
+  assert.match(r.text, /Escalated to the human/);
+  assert.equal(humanCards(h, runId).length, 1);
+});
+
+test("a prompt nobody answers climbs a level every 15 minutes and comes to the human after the Orchestrator", async () => {
+  const { h, runId, spec, lead } = await setup();
   await prompt(h, spec.threadId!, "int_c");
-  await h.clock.advance(PROMPT_TIMEOUT_MS + 1000);
-  await watchdog(h.engine);
+  const seen = [pendingPrompts(h.engine, runId)[0]?.approverId];
+  assert.equal(seen[0], lead.id);
+  for (let k = 0; k < 5 && !humanCards(h, runId).length; k++) {
+    await h.clock.advance(PROMPT_TIMEOUT_MS + 1000);
+    await watchdog(h.engine);
+    const p = pendingPrompts(h.engine, runId)[0];
+    if (p) seen.push(p.approverId);
+  }
+  assert.equal(seen[seen.length - 1], "orch");
   assert.equal(humanCards(h, runId).length, 1);
   assert.equal(pendingPrompts(h.engine, runId).length, 0);
 });

@@ -10,6 +10,7 @@ import type {
   HelmLimits,
   ModelRef,
   NeedInfo,
+  InstallInfo,
   NodeEventInfo,
   NodeInfo,
   NodeStatus,
@@ -820,6 +821,42 @@ export class Repo {
     }));
   }
 
+  // ───────────── installs (the Git agent's ledger) ─────────────
+  insertInstall(x: InstallInfo): void {
+    this.run(
+      "INSERT INTO installs(id, run_id, what, where_path, state, needed_by_json, command, note, by_node, created_at, done_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      x.id, x.runId, x.what, x.where, x.state, js(x.neededBy), x.command, x.note, x.byNode, x.createdAt, x.doneAt,
+    );
+  }
+  private toInstall(r: Row): InstallInfo {
+    return {
+      id: String(r.id),
+      runId: String(r.run_id),
+      what: String(r.what ?? ""),
+      where: s(r.where_path),
+      state: (r.state as InstallInfo["state"]) ?? "requested",
+      neededBy: j(r.needed_by_json, []),
+      command: s(r.command),
+      note: s(r.note),
+      byNode: s(r.by_node),
+      createdAt: Number(r.created_at ?? 0),
+      doneAt: n(r.done_at),
+    };
+  }
+  getInstall(runId: string, id: string): InstallInfo | null {
+    const r = this.get1("SELECT * FROM installs WHERE run_id = ? AND id = ?", runId, id);
+    return r ? this.toInstall(r) : null;
+  }
+  listInstalls(runId: string): InstallInfo[] {
+    return this.all("SELECT * FROM installs WHERE run_id = ? ORDER BY created_at DESC", runId).map((r) => this.toInstall(r));
+  }
+  updateInstall(runId: string, id: string, patch: Partial<Pick<InstallInfo, "state" | "neededBy" | "command" | "note" | "byNode" | "doneAt">>): void {
+    const cur = this.getInstall(runId, id);
+    if (!cur) return;
+    const x = { ...cur, ...patch };
+    this.run("UPDATE installs SET state = ?, needed_by_json = ?, command = ?, note = ?, by_node = ?, done_at = ? WHERE run_id = ? AND id = ?", x.state, js(x.neededBy), x.command, x.note, x.byNode, x.doneAt, runId, id);
+  }
+
   // ───────────── needs ─────────────
   /** `resolvedSince`: also skip when a need with the same key was resolved at or after this time (a dismissed card stays dismissed). */
   insertNeed(x: NeedInfo & { dedupeKey?: string | null; resolvedSince?: number | null }): boolean {
@@ -829,9 +866,9 @@ export class Repo {
       if (x.resolvedSince != null && this.get1("SELECT id FROM needs WHERE run_id = ? AND dedupe_key = ? AND state = 'resolved' AND resolved_at >= ?", x.runId, x.dedupeKey, x.resolvedSince)) return false;
     }
     this.run(
-      `INSERT INTO needs(id, run_id, kind, node_id, title, body, evidence, options_json, interaction_id, state, created_at, resolved_at, resolution_json, app_id, dedupe_key, data_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      x.id, x.runId, x.kind, x.nodeId, x.title, x.body, x.evidence, js(x.options), x.interactionId, x.state, x.createdAt, x.resolvedAt, js(x.resolution), x.appId, x.dedupeKey ?? null, js(x.data ?? null),
+      `INSERT INTO needs(id, run_id, kind, node_id, title, body, evidence, options_json, interaction_id, state, created_at, resolved_at, resolution_json, app_id, dedupe_key, data_json, handler)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      x.id, x.runId, x.kind, x.nodeId, x.title, x.body, x.evidence, js(x.options), x.interactionId, x.state, x.createdAt, x.resolvedAt, js(x.resolution), x.appId, x.dedupeKey ?? null, js(x.data ?? null), x.handler ?? "human",
     );
     return true;
   }
@@ -852,7 +889,12 @@ export class Repo {
       resolvedAt: n(r.resolved_at),
       resolution: j(r.resolution_json, null),
       data: j(r.data_json, null),
+      handler: r.handler ? String(r.handler) : "human",
     };
+  }
+  /** Hand a card to the human or to the agent that decides it. */
+  setNeedHandler(runId: string, id: string, handler: string): void {
+    this.run("UPDATE needs SET handler = ? WHERE run_id = ? AND id = ?", handler, runId, id);
   }
   getNeed(runId: string, id: string): NeedInfo | null {
     const r = this.get1("SELECT * FROM needs WHERE run_id = ? AND id = ?", runId, id);

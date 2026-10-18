@@ -49,14 +49,18 @@ test("a worker's question still goes to its lead, which is told it is inside its
   assert.ok(woke(h, runId, lead.id, /ISO or locale dates\?.*It is inside your remit: do not pass it up/s));
 });
 
-test("the owner's call reaches the human from a manager; from a lead it goes to the manager first", async () => {
+test("the owner's call climbs lead → manager → Orchestrator, which decides it from the brief; it never reaches the human hands-off", async () => {
   const { h, runId, mgr, lead } = await setup();
+  const before = h.repo.listNeeds(runId, "open").length;
   const l = await as(h, lead, "helm_need", need("Is the free tier limited to 3 notes?", "owner"));
   assert.match(l.text, /sent to .* who decides/);
   assert.ok(woke(h, runId, mgr.id, /only the owner can answer.*helm_need \(about: owner\)/s));
   const m = await as(h, mgr, "helm_need", need("Is the free tier limited to 3 notes?", "owner"));
-  assert.ok(!m.isError, m.text);
-  assert.ok(h.repo.listNeeds(runId, "open").some((x) => x.title === "Owner's call: Is the free tier limited to 3 notes?"), "in Needs you, labelled");
+  assert.match(m.text, /sent to .* who decides/, m.text);
+  assert.ok(woke(h, runId, "orch", /only the owner can answer.*choose what serves the brief best/s));
+  const o = await as(h, h.repo.getNode(runId, "orch")!, "helm_need", need("Is the free tier limited to 3 notes?", "owner"));
+  assert.match(o.text, /^Autonomy is on: the human wants you to decide this/);
+  assert.equal(h.repo.listNeeds(runId, "open").length, before, "nothing in Needs you");
 });
 
 test("upward questions are capped: the fourth in an hour arrives as FYI and does not wake the Orchestrator", async () => {
@@ -77,8 +81,8 @@ test("briefs give each supervisor its authority; the Orchestrator never hands ou
   const { h, runId, mgr, lead } = await setup();
   const brief = (n: NodeInfo) => h.engine.buildBrief(h.engine.run(runId), h.repo.getNode(runId, n.id)!);
   const orch = brief(h.repo.getNode(runId, "orch")!);
-  assert.match(orch, /## Your authority\nYou oversee the run and delegate/);
+  assert.match(orch, /## Your authority\nYou set the strategy and delegate/);
   assert.match(orch, /never require a per-item GO \/ NO-GO/);
   assert.match(brief(mgr), /## Your authority\nYou run your group \(.+\) like a department head/);
-  assert.match(brief(lead), /## Your authority\nYou run .+\. Inside it you decide/);
+  assert.match(brief(lead), /## Your authority\nYou run .+: you are the busiest one, and you keep it moving\. Inside it you decide/);
 });

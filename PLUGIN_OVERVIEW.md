@@ -26,4 +26,4 @@ git on the BB host and at least one AI provider connected in BB. To verify build
 
 ## Costs
 
-Every agent is its own thread on your providers, so a run uses many times the tokens of a single chat. Even a one-app run starts several agents (Orchestrator, Planner, Git agent, its squad and two gates). Costs are estimated in relative units: 1 u is about 133k tokens on a Sonnet-class model. Set a budget cap when you approve a run: Helm stops spawning new agents when the cap is reached and asks you.
+Every agent is its own thread on your providers, so a run uses many times the tokens of a single chat. Even a one-app run starts several agents (Orchestrator, Planner, Git agent, its squad and two gates; the Fixer starts only when an agent fails). Costs are estimated in relative units: 1 u is about 133k tokens on a Sonnet-class model. Set a budget cap when you approve a run: Helm stops spawning new agents when the cap is reached and asks you.

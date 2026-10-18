@@ -1,6 +1,6 @@
-// Default models for the Planner, the Orchestrator and the Git agent: Helm settings that fill
-// those roles when a run leaves them empty. Changing the Planner's can also move every running
-// run's Planner now.
+// Default models for the Planner, the Orchestrator, the Git agent and the Fixer: Helm settings
+// that fill those roles when a run leaves them empty. Changing the Planner's (or the Git agent's
+// or Fixer's) can also move every running run's agent now.
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -14,22 +14,25 @@ interface Defaults {
   planner: ModelRef | null;
   orchestrator: ModelRef | null;
   git: ModelRef | null;
+  fixer: ModelRef | null;
   moved?: string[];
 }
 
-type Key = "planner" | "orchestrator" | "git";
+type Key = "planner" | "orchestrator" | "git" | "fixer";
 
 const ROWS = [
   { key: "planner", label: "Planner", empty: "Not set: uses each run's Orchestrator model" },
   { key: "orchestrator", label: "Orchestrator", empty: "Not set: chosen in each new run" },
   { key: "git", label: "Git agent", empty: "Not set: uses each run's Orchestrator model" },
+  { key: "fixer", label: "Fixer", empty: "Not set: uses each run's Orchestrator model" },
 ] as const;
 
-const TITLE: Record<Key, string> = { planner: "Planner", orchestrator: "Orchestrator", git: "Git agent" };
+const TITLE: Record<Key, string> = { planner: "Planner", orchestrator: "Orchestrator", git: "Git agent", fixer: "Fixer" };
 const HELP: Record<Key, string> = {
   planner: "Used whenever a run's Planner role has no model. Pick something affordable: the Planner is idle until you ask it something.",
   orchestrator: "Used for new runs that do not choose an Orchestrator model.",
   git: "Used whenever a run's Git agent role has no model. It checks worktrees and pushes: a light model is usually enough.",
+  fixer: "Used whenever a run's Fixer role has no model. The Fixer takes every failed or stuck agent off your hands: it finds out why and gets it going again (retry, another model, a rebuilt worktree). A capable model pays off here.",
 };
 
 export function DefaultModels() {
@@ -58,7 +61,7 @@ export function DefaultModels() {
       setD(r);
       setOpen(null);
       toast.success(`Default ${TITLE[key]} model ${ref ? "saved" : "cleared"}`, {
-        description: r.moved?.length ? `The ${key === "git" ? "Git agent" : "Planner"} moved to it now in: ${r.moved.join(", ")}.` : key === "orchestrator" ? "Used by new runs that do not choose an Orchestrator model." : `Used by runs whose ${TITLE[key]} role has no model.`,
+        description: r.moved?.length ? `The ${key === "git" || key === "fixer" ? TITLE[key] : "Planner"} moved to it now in: ${r.moved.join(", ")}.` : key === "orchestrator" ? "Used by new runs that do not choose an Orchestrator model." : `Used by runs whose ${TITLE[key]} role has no model.`,
       });
     } catch (e) {
       toast.error("Could not save the default model", { description: errMsg(e) });
@@ -104,7 +107,7 @@ export function DefaultModels() {
             {open.key !== "orchestrator" ? (
               <label className="row" style={{ gap: 8, fontSize: 12.5 }}>
                 <input type="checkbox" checked={applyLive} onChange={(e) => setApplyLive(e.target.checked)} />
-                Also switch the {open.key === "git" ? "Git agent" : "Planner"} in running runs to it now
+                Also switch the {open.key === "git" || open.key === "fixer" ? TITLE[open.key] : "Planner"} in running runs to it now
               </label>
             ) : null}
             <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>

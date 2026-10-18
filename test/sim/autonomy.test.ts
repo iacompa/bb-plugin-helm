@@ -43,11 +43,33 @@ test("a specialist's ordinary question goes to its lead, not the human", async (
 
 test("credentials, spending, private data and access still reach the human, labelled", async () => {
   const { h, runId, spec } = await setup();
-  for (const [about, label] of [["credentials", "Credentials"], ["spending", "Spending"], ["privacy", "Private data"], ["access", "Access"]] as const) {
-    const r = await ask(h, spec, { about, title: `need ${about}` });
+  const asks = [
+    ["credentials", "Credentials", "the Maps API key for production"],
+    ["spending", "Spending", "pay for the Mapbox subscription"],
+    ["privacy", "Private data", "crash logs would include users' personal data"],
+    ["access", "Access", "an Apple Developer account invite for signing"],
+  ] as const;
+  for (const [about, label, title] of asks) {
+    const r = await ask(h, spec, { about, title });
     assert.match(r.text, /^Created N-/, r.text);
-    assert.ok(h.repo.listNeeds(runId, "open").some((n) => n.title === `${label}: need ${about}`));
+    const card = h.repo.listNeeds(runId, "open").find((n) => n.title === `${label}: ${title}`);
+    assert.ok(card);
+    assert.equal(card.handler, "human");
   }
+});
+
+test("hands-off: a call labelled access or owner that names no key, account, payment or private data stays with the team", async () => {
+  const { h, runId, spec } = await setup();
+  const before = h.repo.listNeeds(runId, "open").length;
+  const r = await ask(h, spec, { about: "access", title: "Keep the install hold, or allow a bounded change?" });
+  assert.match(r.text, /^Helm did not send this to the human/);
+  assert.match(r.text, /sent to .* who decides/);
+  const orch = h.repo.getNode(runId, "orch")!;
+  const o = await ask(h, orch, { about: "owner", title: "Grant owner, clock and route for the read-only packet?" });
+  assert.match(o.text, /^Autonomy is on: the human wants you to decide this/);
+  const g = await ask(h, orch, { about: "access", title: "Stop the reviewer re-running checks without authority?" });
+  assert.match(g.text, /^Helm did not send this to the human/);
+  assert.equal(h.repo.listNeeds(runId, "open").length, before, "nothing new in Needs you");
 });
 
 test("the Orchestrator is told to decide ordinary questions itself", async () => {
@@ -84,8 +106,8 @@ test("switching autonomy on mid-run tells every live agent with its next tool re
   const svc = new HelmService(h.engine);
   await svc.setLimits(runId, { autonomy: "high" });
   assert.equal(h.engine.run(runId).limits.autonomy, "high");
-  assert.ok(h.repo.unflushedInbox(runId, spec.id).some((l) => /^Autonomy is now on\. The human wants the Orchestrator to run this build/.test(l.text)));
-  assert.ok(h.repo.unflushedInbox(runId, "orch").some((l) => /Decide everything yourself except/.test(l.text)));
+  assert.ok(h.repo.unflushedInbox(runId, spec.id).some((l) => /^Autonomy is now on\. The human runs hands-off/.test(l.text)));
+  assert.ok(h.repo.unflushedInbox(runId, "orch").some((l) => /decide everything that reaches you except/.test(l.text)));
   const r = await ask(h, spec, {});
   assert.match(r.text, /^Autonomy is on: sent to/);
 });

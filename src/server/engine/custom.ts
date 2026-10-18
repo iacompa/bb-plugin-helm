@@ -46,17 +46,18 @@ export interface CustomAgentInput {
   reason?: string;
 }
 
-/** The name people see: its own, or the default name in Settings for the Orchestrator, the Planner and the Git agent (none unless the human set one). */
+/** The name people see: its own, or the default name in Settings for the Orchestrator, the Planner, the Git agent and the Fixer (none unless the human set one). */
 export function nameOf(e: Engine, n: Pick<NodeInfo, "role"> & { name?: string | null }): string | null {
   if (n.name) return n.name;
   if (n.role === "orch") return e.settings.names.orchestrator || null;
   if (n.role === "planner") return e.settings.names.planner || null;
   if (n.role === "git") return e.settings.names.git || null;
+  if (n.role === "fixer") return e.settings.names.fixer || null;
   return null;
 }
 
 /** Renaming to one of these clears the personal name, so the agent is called by its role. */
-const ROLE_WORDS: Record<string, string[]> = { orch: ["orchestrator"], planner: ["planner"], git: ["git agent", "git"] };
+const ROLE_WORDS: Record<string, string[]> = { orch: ["orchestrator"], planner: ["planner"], git: ["git agent", "git"], fixer: ["fixer"] };
 
 const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N} .'’-]{0,39}$/u;
 
@@ -307,4 +308,45 @@ export async function ensureGitAgent(e: Engine, runId: string, opts: { queue?: b
     n = e.repo.getNode(runId, GIT_ID)!;
   }
   return n;
+}
+
+export const FIXER_ID = "fixer";
+
+/** The Fixer's model: its role's model in the run, else the default in Settings, else the Orchestrator's model. */
+export function fixerModel(run: RunInfo, settings: HelmSettings): ModelRef | null {
+  return run.slots.fixer ?? settings.defaultModels.fixer ?? run.slots.orchestrator ?? run.slots.lead ?? null;
+}
+
+/**
+ * Make sure the run has its Fixer (beside the Orchestrator, like the Git agent): Helm hands it every
+ * failed or stuck agent so errors never stop for the human. Synchronous, so it can run inside a
+ * transaction; it starts only when the first card arrives (wakeFixer).
+ */
+export function ensureFixerNode(e: Engine, runId: string): NodeInfo {
+  const n = e.repo.getNode(runId, FIXER_ID);
+  if (n) return n;
+  const model = fixerModel(e.run(runId), e.settings);
+  e.repo.tx(() => {
+    e.repo.insertNode({ runId, id: FIXER_ID, appId: null, tier: "fixer", role: "fixer", platform: null, parentId: null, slot: "fixer", alsoLead: false, model, modelOverride: false, scopeGlobs: ROLES.fixer.scope, branch: null, briefMd: null, name: e.settings.names.fixer || null });
+    e.repo.event(runId, FIXER_ID, "created", `the run's Fixer, on ${model ? `${model.providerId}/${model.modelId}${model.reasoning ? `:${model.reasoning}` : ""}` : "no model yet"}`);
+  });
+  const made = e.repo.getNode(runId, FIXER_ID)!;
+  e.emit(runId, "node.updated", made);
+  return made;
+}
+
+/** The Fixer can take a card now: it is working, or it has not started yet and will (not paused, stopped or failed). */
+export function fixerCanTake(n: NodeInfo | null | undefined): n is NodeInfo {
+  if (!n || n.tier !== "fixer") return false;
+  if (n.threadId) return n.status === "running" || n.status === "waiting" || n.status === "needs";
+  return n.status === "planned" || n.status === "queued" || n.status === "idle";
+}
+
+/** Queue a Fixer that has not started (call inside a transaction; the next pump spawns it). Returns true when it was queued. */
+export function wakeFixer(e: Engine, runId: string): boolean {
+  const n = e.repo.getNode(runId, FIXER_ID);
+  if (!n || n.threadId || !(n.status === "planned" || n.status === "idle") || e.run(runId).status !== "running") return false;
+  e.repo.updateNode(runId, n.id, { status: "queued", firstInLine: true, warning: null });
+  e.repo.event(runId, n.id, "queued", "starting: a failed or stuck agent needs fixing");
+  return true;
 }

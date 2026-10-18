@@ -4,6 +4,7 @@
 // the engine as their first argument; nothing here touches api.sdk directly.
 
 import { askKey } from "./asks.ts";
+import { announceCard, CARD_TIMEOUT_MS, handlerFor } from "./handsoff.ts";
 import { authorityText } from "../domain/authority.ts";
 import type { OutboxRow, Repo } from "../db/repo.ts";
 import type { BbPort, EnvSpec, HelmEvent, PluginLite } from "../bb/port.ts";
@@ -29,7 +30,7 @@ import { COMPACT_AT, DEFAULT_SETTINGS, expandHome, newRunId, silentLogger, type 
 import { cleanDevices, devicesForPlatforms, COMPUTER_SIZES, WEB_PHONE_SIZE } from "../../shared/devices.ts";
 import { parseBrief, withProfiles } from "../domain/brief.ts";
 import { ORCH_ID, planTopology, slugify, type TopologyPlan } from "../domain/topology.ts";
-import { ensureGitAgent, ensurePlanner, GIT_ID, nameOf, PLANNER_ID, threadTitle, wakeCustom, customMeta } from "./custom.ts";
+import { ensureFixerNode, ensureGitAgent, ensurePlanner, GIT_ID, nameOf, PLANNER_ID, threadTitle, wakeCustom, customMeta } from "./custom.ts";
 import { ROLES, roleLabel, scopeFor, tierOfRole } from "../domain/roles.ts";
 import { forecast, normalizeModel, PROVIDER_LABEL, requiredSlots, resolveModel, validateRef, modelName, unsetSlots, familyWarnings } from "../domain/models.ts";
 import { briefFor, escapeForPrompt, initialPortfolioMd, managerNotesMd, type BriefContext, type ProjectBrief } from "../domain/briefs.ts";
@@ -148,10 +149,10 @@ const FLUSH_MS = 120_000;
 
 /** What every agent is told when autonomy is high (briefs, and the notice when it is switched on). */
 export function autonomyText(orchestrator: boolean): string {
-  const human = "credentials or API keys; anything that spends real money (paid services, purchases, a budget raise); anything that could expose private keys, secrets or personal data; access only the human can grant (permissions, accounts)";
+  const human = "a key, a login, a password or an account only the human holds; anything that spends real money (paid services, purchases, a budget raise); anything that could expose secrets or personal data";
   return orchestrator
-    ? `The human wants you to run this build. Decide everything yourself except: ${human}. Managers and leads decide what is inside their groups and apps; only what crosses them comes to you. Waves and plan changes go ahead without approval. When a call is uncertain, pick the safest reasonable option, write it under Decisions in PORTFOLIO.md, and keep going; the human reviews everything at sign-off. Use helm_need only for the exceptions above, or a question only the owner can answer, and set \`about\` to say which.`
-    : `The human wants the Orchestrator to run this build. Workers' questions (helm_need) go to their supervisor, not the human, and the answer comes back as a message; a supervisor decides what is inside its own remit (see Your authority). Only ${human} reach the human. Keep working on whatever does not depend on the answer.`;
+    ? `The human runs hands-off: they say what they want, where, and how good, and the team builds it like a company. You set the strategy and decide everything that reaches you except: ${human}. Managers and leads decide what is inside their groups and apps (failures, retries, models, prompts, sign-off of their apps); only what crosses them, or what they cannot decide, comes to you. Waves and plan changes go ahead without approval. Installs need nobody's approval (agents ask the Git agent). When a call is uncertain, pick the option that keeps the work moving safely, write it under Decisions in PORTFOLIO.md, and keep going. Use helm_need only for the exceptions above, and set \`about\` to say which.`
+    : `The human runs hands-off: the team builds like a company, and nobody waits for them. Workers' questions (helm_need) go to their supervisor and the answer comes back as a message; a supervisor decides what is inside its own remit (see Your authority), and Helm hands it the cards for its part of the work (helm_resolve). Installs need nobody's approval: ask the Git agent (helm_install). Only ${human} reach the human. Keep working on whatever does not depend on an answer.`;
 }
 
 /** BB's refusal when a provider cannot run the requested permission mode. */
@@ -366,6 +367,7 @@ export class Engine {
     if (n.role === "orch") return name ? `${name} · Orchestrator` : "Orchestrator";
     if (n.role === "planner") return name ? `${name} · Planner` : "Planner";
     if (n.role === "git") return name ? `${name} · Git agent` : "Git agent";
+    if (n.role === "fixer") return name ? `${name} · Fixer` : "Fixer";
     const app = n.appId ? this.repo.getApp(n.runId, n.appId) : null;
     if (n.role === "custom") return `${name ?? n.id} · ${n.title ?? "Custom agent"}${app ? ` (${app.name})` : ""}`;
     const base = n.role === "mgr" ? `${this.managerName(n.runId, n.id)} manager` : app ? `${app.name} · ${n.role === "lead" ? "App lead" : roleLabel(n.role, n.platform)}` : n.role === "lead" ? "App lead" : roleLabel(n.role, n.platform);
@@ -736,7 +738,7 @@ export class Engine {
   /** Effective model for a node right now: node override > app override > run slots (§7.5). */
   effectiveModel(run: RunInfo, n: NodeInfo): ModelRef | null {
     const app = n.appId ? this.repo.getApp(run.id, n.appId) : null;
-    const runSlot = run.slots[n.slot] ?? (n.role === "planner" ? this.settings.defaultModels.planner ?? run.slots.orchestrator ?? null : n.role === "git" ? this.settings.defaultModels.git ?? run.slots.orchestrator ?? null : null);
+    const runSlot = run.slots[n.slot] ?? (n.role === "planner" ? this.settings.defaultModels.planner ?? run.slots.orchestrator ?? null : n.role === "git" ? this.settings.defaultModels.git ?? run.slots.orchestrator ?? null : n.role === "fixer" ? this.settings.defaultModels.fixer ?? run.slots.orchestrator ?? null : null);
     return resolveModel({ nodeOverride: n.modelOverride ? n.model : null, appOverride: app?.slotOverrides?.[n.slot] ?? null, runSlot });
   }
 
@@ -781,6 +783,8 @@ export class Engine {
     await ensurePlanner(this, runId, { catalog: cat });
     // the Git agent: beside them, keeps every app within its worktree and branch limits and sends work where the human says
     await ensureGitAgent(this, runId);
+    // the Fixer: beside them, takes every failed or stuck agent (hands-off); it starts with the first one
+    if (this.autonomous(this.run(runId))) ensureFixerNode(this, runId);
     const fresh = this.run(runId);
     const studio = this.studioPath(fresh);
     const w = wavesEstimate(plan.apps.length, fresh.concurrency);
@@ -1077,6 +1081,12 @@ export class Engine {
       lines.push(`## Your notes\nKeep \`${studio}/GIT-NOTES.md\`: for each app, its repository, work worktree, integration branch, remote, and the last commit you pushed or merged and where. Read it when you start.`);
       lines.push(`## Apps now\n${this.repo.listApps(run.id).filter((a) => a.stage !== "cancelled").slice(0, 40).map((a) => `- ${a.name} (${a.id}): ${a.repoPath ?? "no repository yet"}${this.workTree(run.id, a.id) ? ` · work worktree ${this.workTree(run.id, a.id)}` : ""} · branch ${this.repo.appExtra(run.id, a.id).integrationBranch ?? "not yet"} · ${a.stage}`).join("\n") || "- none yet"}`);
     }
+    if (n.role === "fixer") {
+      const orch = byId.get(ORCH_ID);
+      lines.push(`## Your place\nYou sit beside ${orch ? this.label(orch) : "the Orchestrator"}, the Planner and the Git agent, outside the chain of command: nobody reports to you, and you answer to the Orchestrator (your \`helm_report\` goes to it). You can see every agent of the run and message any of them. The human runs hands-off: when an agent fails or gets stuck, Helm hands the card to you instead of the human, after retrying it automatically where waiting can help.`);
+      lines.push(`## Your cards\nEach card arrives as a message ("Card N-x is yours to decide") and is listed in \`helm_context\`. Decide every one: \`helm_resolve\` (retry, nudge or stop), or \`helm_set_model\` (another model: that retries the agent and closes its failed or model card). A card you leave for ${CARD_TIMEOUT_MS / 3600_000} hours goes to the Orchestrator.`);
+      lines.push(`## Your notes\nKeep \`${studio}/FIXER-NOTES.md\`: each failure, its cause, what you did and whether it held. Read it when you start: the same failure twice calls for a different fix.`);
+    }
     if (n.role === "custom") {
       const meta = customMeta(this, run.id, n.id);
       const work = app ? this.workTree(run.id, app.id) : null;
@@ -1153,7 +1163,7 @@ export class Engine {
       repoPath: app?.repoPath ?? null,
       location: app && (app.adopted || app.reads.length) ? { adopted: app.adopted, userBranch: app.userBranch, helmBranch: app.helmBranch, reads: app.reads } : null,
       project: app && n.role !== "custom" ? this.projectBrief(run, app, n) : null,
-      displayName: n.role === "planner" || n.role === "git" || n.role === "custom" || n.name || n.role === "orch" ? this.label(n) : null,
+      displayName: n.role === "planner" || n.role === "git" || n.role === "fixer" || n.role === "custom" || n.name || n.role === "orch" ? this.label(n) : null,
       mission: n.role === "custom" && n.charter ? { text: n.charter, by: (n.createdBy && byId.get(n.createdBy) ? this.label(byId.get(n.createdBy)!) : "the Planner") } : null,
       extra: lines,
       integrationCommit: extra.integrationCommit ?? null,
@@ -1196,8 +1206,10 @@ export class Engine {
 
   // ───────────────────────────── needs ─────────────────────────────
 
-  raiseNeed(runId: string, x: { kind: NeedKind; nodeId: string | null; appId: string | null; title: string; body: string; evidence: string; options: string[]; interactionId?: string | null; dedupeKey?: string | null; data?: unknown; setNodeNeeds?: boolean; snoozeMs?: number }): NeedInfo | null {
+  raiseNeed(runId: string, x: { kind: NeedKind; nodeId: string | null; appId: string | null; title: string; body: string; evidence: string; options: string[]; interactionId?: string | null; dedupeKey?: string | null; data?: unknown; setNodeNeeds?: boolean; snoozeMs?: number; handler?: string }): NeedInfo | null {
     const id = `N-${this.repo.nextSeq(runId, "need")}`;
+    // hands-off: the nearest supervisor decides what is not about keys, spending or private data
+    const handler = x.handler ?? handlerFor(this, this.run(runId), { ...x, appId: x.appId });
     const need: NeedInfo = {
       id,
       runId,
@@ -1214,6 +1226,7 @@ export class Engine {
       resolvedAt: null,
       resolution: null,
       data: x.data ?? null,
+      handler,
     };
     const inserted = this.repo.insertNeed({ ...need, dedupeKey: x.dedupeKey ?? null, resolvedSince: x.snoozeMs != null ? this.now() - x.snoozeMs : null });
     if (!inserted) return null;
@@ -1222,6 +1235,7 @@ export class Engine {
       if (n && n.status !== "needs") this.repo.updateNode(runId, n.id, { status: "needs", prevStatus: n.status });
     }
     if (x.nodeId) this.repo.event(runId, x.nodeId, "need", `${x.kind}: ${x.title}`, id);
+    if (handler !== "human") announceCard(this, need);
     this.emit(runId, "need.created", need);
     return need;
   }
@@ -1296,7 +1310,7 @@ export class Engine {
 
   private envFor(run: RunInfo, n: NodeInfo, hostId: string | null): EnvSpec | { wait: string } {
     const c1 = n.alsoLead;
-    if ((n.role === "orch" && !c1) || n.role === "mgr" || n.role === "planner" || n.role === "git" || (n.role === "custom" && !n.appId)) {
+    if ((n.role === "orch" && !c1) || n.role === "mgr" || n.role === "planner" || n.role === "git" || n.role === "fixer" || (n.role === "custom" && !n.appId)) {
       if (!run.studioProjectId) return { wait: "studio project" };
       return { kind: "path", hostId, path: this.studioPath(run) };
     }
@@ -1317,7 +1331,7 @@ export class Engine {
   }
 
   projectFor(run: RunInfo, n: NodeInfo): string | null {
-    if ((n.role === "orch" && !n.alsoLead) || n.role === "mgr" || n.role === "planner" || n.role === "git" || (n.role === "custom" && !n.appId)) return run.studioProjectId;
+    if ((n.role === "orch" && !n.alsoLead) || n.role === "mgr" || n.role === "planner" || n.role === "git" || n.role === "fixer" || (n.role === "custom" && !n.appId)) return run.studioProjectId;
     const app = n.appId ? this.repo.getApp(run.id, n.appId) : n.alsoLead ? this.repo.listApps(run.id)[0] ?? null : null;
     return app?.projectId ?? null;
   }
@@ -1420,7 +1434,7 @@ export class Engine {
       const integrationCommit = n.tier === "gate" && n.appId ? this.repo.appExtra(run.id, n.appId).integrationHead : null;
       if (n.appId) await this.probeRun(run.id).catch(() => undefined);
       const prompt = this.buildBrief(run, n, { integrationCommit, scannerFindings: this.repo.getMeta(`scanner:${run.id}:${n.id}`), handover: typeof row.payload.handover === "string" ? row.payload.handover : null });
-      const visible = n.role === "orch" || n.role === "planner" || n.role === "git" || (this.settings.showLeadsInSidebar && this.isLeadNode(n));
+      const visible = n.role === "orch" || n.role === "planner" || n.role === "git" || n.role === "fixer" || (this.settings.showLeadsInSidebar && this.isLeadNode(n));
       ref = await this.port.spawnThread({
         projectId,
         environment: env,

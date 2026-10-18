@@ -10,6 +10,8 @@ import { setTask } from "../engine/tasks.ts";
 import { applyVerdicts, watcherRun, type WatchVerdict } from "../engine/watch.ts";
 import { answerPrompt } from "../engine/prompts.ts";
 import { raiseInteractionNeed } from "../engine/events.ts";
+import { cardActions, humanTopic } from "../engine/handsoff.ts";
+import { recordInstall, requestInstall } from "../engine/installs.ts";
 import { z } from "zod";
 import type { Engine } from "../engine/engine.ts";
 import { HelmError } from "../engine/engine.ts";
@@ -18,14 +20,14 @@ import { decideYourselfText, UPWARD_ASKS_PER_HOUR } from "../domain/authority.ts
 import { toolsForNode, PLANNER_TOOLS } from "../domain/roles.ts";
 import { KindLooseSchema, PortfolioSchema, normalizePortfolio } from "../domain/brief.ts";
 import { VerdictSchema } from "../domain/verdict.ts";
-import { ack, agentDirect, agentModels, agentSetModel, resolveModelWord, resolveNeed, type ModelChange } from "../engine/direct.ts";
+import { ack, agentDirect, agentModels, agentSetModel, resolveModelWord, resolveNeed, type ModelChange, type NeedResolution } from "../engine/direct.ts";
 import { buildSpec, renameNode, retireAgent } from "../engine/custom.ts";
-import { assignFix, declareExisting, publishContract, recordCheck, releaseSquadMembers, report, slopScan, spawnSquad, stageRequest, verdict } from "../engine/gates.ts";
+import { assignFix, declareExisting, publishContract, recordCheck, releaseSquadMembers, report, sendback, signoff, slopScan, spawnSquad, stageRequest, verdict } from "../engine/gates.ts";
 import { context, digest, world } from "../engine/world.ts";
 import { validateDelta, type ProfileChange } from "../engine/delta.ts";
 import { appWorktrees, consolidate, worktreesText } from "../engine/worktrees.ts";
 import { normalizeNeed, normalizeTool } from "../domain/profile.ts";
-import { planTopology } from "../domain/topology.ts";
+import { ORCH_ID, planTopology } from "../domain/topology.ts";
 import { inFlightCap } from "../domain/scheduler.ts";
 import { isInFlight } from "../domain/stages.ts";
 
@@ -57,7 +59,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "helm_need",
     description:
-      "Ask for a decision (question|approval|decision). Set `about`: credentials (API keys, logins), spending (real money), privacy (secrets or personal data could leak), access (permissions or accounts only the human grants), owner (a question only the owner can answer: what the product should be, a business choice), or other. When the run's autonomy is high, those four always reach the human; owner reaches the human from the Orchestrator or a manager (a lead's goes to its manager first); other goes to a worker's supervisor, and a supervisor (Orchestrator, Manager, App Lead) is told to decide it itself. Then keep working on what does not depend on it; the answer is sent to you.",
+      "Ask for a decision (question|approval|decision). Set `about`: credentials (an API key, a login, a password, an account), spending (real money: a paid service, a purchase, a budget raise), privacy (secrets or personal data could leak), access (an account or permission on an outside service only the human holds), owner (what the product should be), or other. With autonomy on (hands-off) only credentials, spending, privacy and access reach the human, and only when the question really names a key, login, account, payment or private data; everything else goes to your supervisor, and the Orchestrator decides it (installs, holds, git, gates, retries, sign-off, product calls). Then keep working on what does not depend on it; the answer is sent to you.",
     parameters: z
       .object({
         kind: z.enum(["question", "approval", "decision"]),
@@ -87,7 +89,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "helm_set_model",
     description:
-      "Change the model of agents below you: the Orchestrator can change anyone, a Manager its Leads and their teams, a Lead its squad and gates. Use it when the human asks (directly, or relayed by your supervisor), or to move an agent off a model that keeps failing. Each change picks agents by `nodes` (ids), or by `role` (manager, lead, ui, code, platform, security, test, research, docs, data, compliance, assets, reviewer, slop = Slop Hunter, gates, specialists, all) narrowed by `app`, `under` one of your reports, or `platform`; `model` is provider/model:reasoning from helm_models (provider and reasoning may be left out when unambiguous). Several changes in one call, e.g. one manager to one model and another to a different one. Same provider: it switches at its next turn. Another provider: it moves to a new thread with a hand-over. A failed agent retries on the new model. When the Orchestrator moves every agent of a role, future agents of that role follow.",
+      "Change the model of agents below you: the Orchestrator, the Planner and the Fixer can change anyone, a Manager its Leads and their teams, a Lead its squad and gates. Use it when the human asks (directly, or relayed by your supervisor), or to move an agent off a model that keeps failing. Each change picks agents by `nodes` (ids), or by `role` (manager, lead, ui, code, platform, security, test, research, docs, data, compliance, assets, reviewer, slop = Slop Hunter, gates, specialists, all) narrowed by `app`, `under` one of your reports, or `platform`; `model` is provider/model:reasoning from helm_models (provider and reasoning may be left out when unambiguous). Several changes in one call, e.g. one manager to one model and another to a different one. Same provider: it switches at its next turn. Another provider: it moves to a new thread with a hand-over. A failed agent retries on the new model. When the Orchestrator moves every agent of a role, future agents of that role follow.",
     parameters: z
       .object({
         changes: z
@@ -153,9 +155,27 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: "helm_approve",
-    description: "Answer a permission prompt from one of your delegates (sent to you as 'Permission request … prompt <id>'). allow: ordinary work for its task. deny: destructive, outside its worktree, or unclear. escalate: credentials or secrets, spending real money, private data, or access only the human can grant.",
+    description: "Answer a permission prompt (sent to you as 'Permission request … prompt <id>'). allow: ordinary work for its task, including installs and downloads it needs. deny: destructive, outside its worktree, or unclear. escalate: a key, password or login, spending real money, or private data (it goes to the Orchestrator, and from the Orchestrator to the human).",
     parameters: z.object({ promptId: z.string().min(1).max(120), decision: z.enum(["allow", "deny", "escalate"]), reason: z.string().min(1).max(400) }).strict(),
     presentation: { label: { pending: "Answering a permission prompt", completed: "Answered a permission prompt" }, icon: { glyph: "SecurityCheck" } },
+  },
+  {
+    name: "helm_resolve",
+    description: "Decide a card Helm handed you instead of the human (hands-off: the message says 'Card N-… is yours to decide'; the Fixer gets failed and stuck agents, a lead its squad's prompts, a manager its apps' sign-offs and gate disputes, the Orchestrator the rest). action: signoff · sendback (text = exactly what to fix) · retry · stop · nudge · waive (findings + text = why) · approve · deny · answer (text) · dismiss (text = why it needs nothing). Use one of the actions the card names; text records your reason for the human. To move a failing agent to another model use helm_set_model instead (it retries the agent and closes its card).",
+    parameters: z.object({ needId: z.string().regex(/^N-\d+$/), action: z.enum(["signoff", "sendback", "retry", "stop", "nudge", "waive", "approve", "deny", "answer", "dismiss"]), text: z.string().max(1500).optional(), findings: z.array(z.string().min(1).max(20)).max(50).optional() }).strict(),
+    presentation: { label: { pending: "Deciding a card", completed: "Decided a card" }, icon: { glyph: "CircleCheck" } },
+  },
+  {
+    name: "helm_install",
+    description: "Ask the run's Git agent to install something your work needs: packages (npm/pnpm/yarn, CocoaPods, pip, gems, Gradle), an SDK, a command-line tool, a download. The human allows installs: nobody's approval is needed and no supervisor's hold stops one. Say what, why, and where (a folder; default: your worktree). The Git agent installs it, records it in the run's install ledger, and you are told when it is done. Do not install things yourself.",
+    parameters: z.object({ what: z.string().min(1).max(300), why: z.string().min(1).max(500), where: z.string().max(500).optional() }).strict(),
+    presentation: { label: { pending: "Asking for an install", completed: "Asked for an install" }, icon: { glyph: "Download" } },
+  },
+  {
+    name: "helm_installed",
+    description: "The Git agent's record of an install request (I-…), once handled: state done (command = the exact command you ran), failed (note = the error), or needs_human (it needs a key, a login, a password or a payment; then raise helm_need about credentials or spending). Every agent that asked is told, and the run's install ledger keeps it.",
+    parameters: z.object({ id: z.string().regex(/^I-\d+$/), state: z.enum(["done", "failed", "needs_human"]), command: z.string().max(500).optional(), note: z.string().max(800).optional() }).strict(),
+    presentation: { label: { pending: "Recording an install", completed: "Recorded an install" }, icon: { glyph: "Download" } },
   },
   { name: "helm_world", description: "The whole run from Helm's database: stages, needs, recent human directives with receipts, touched agents, policies, managers and apps. Always current.", parameters: z.object({ appsPage: z.number().int().min(0).max(20).optional() }).strict(), presentation: { label: { pending: "Reading world state", completed: "Read world state" }, icon: { glyph: "Globe" } } },
   {
@@ -203,14 +223,16 @@ export const TOOL_DEFS: ToolDef[] = [
 export const TOOL_NAMES = TOOL_DEFS.map((t) => t.name);
 
 const TIER_NAME: Record<string, string> = {
-  helm_world: "the Orchestrator, the Planner and the Git agent",
+  helm_world: "the Orchestrator, the Planner, the Git agent and the Fixer",
+  helm_resolve: "the Orchestrator, Managers, App Leads and the Fixer",
+  helm_installed: "the Git agent",
   helm_worktrees: "the Git agent",
   helm_consolidate: "the Git agent",
   helm_approve: "the Orchestrator, Managers and App Leads",
   helm_set_task: "the Orchestrator, Managers and App Leads",
   helm_direct: "the Orchestrator, Managers and App Leads",
-  helm_models: "the Orchestrator, Managers, App Leads and the Planner",
-  helm_set_model: "the Orchestrator, Managers, App Leads and the Planner",
+  helm_models: "the Orchestrator, Managers, App Leads, the Planner and the Fixer",
+  helm_set_model: "the Orchestrator, Managers, App Leads, the Planner and the Fixer",
   helm_create_agent: "the Planner",
   helm_rename_agent: "the Planner",
   helm_retire_agent: "the Planner",
@@ -302,8 +324,14 @@ async function dispatch(e: Engine, node: NodeInfo, name: string, p: Record<strin
       const routed = routeNeed(e, node, p);
       if (routed) return routed;
       const need = e.repo.tx(() => e.raiseNeed(node.runId, { kind: p.kind as "question", nodeId: node.id, appId: node.appId, title: String(p.title), body: String(p.body ?? ""), evidence: String(p.evidence ?? ""), options: (p.options as string[]) ?? [], dedupeKey: `need:${node.id}:${String(p.title).slice(0, 80)}`, setNodeNeeds: true }));
-      return need ? `Created ${need.id}. Stop and wait; the answer will be sent to you.` : "You already asked this; stop and wait for the answer.";
+      return need ? `Created ${need.id} for the human. Keep working on what does not depend on it; the answer is sent to you.` : "You already asked this; the answer is sent to you.";
     }
+    case "helm_resolve":
+      return resolveCard(e, node, p as { needId: string; action: NeedResolution["action"]; text?: string; findings?: string[] });
+    case "helm_install":
+      return requestInstall(e, node, p as { what: string; why: string; where?: string });
+    case "helm_installed":
+      return recordInstall(e, node, p as { id: string; state: "done" | "failed" | "needs_human"; command?: string; note?: string });
     case "helm_message":
       return message(e, node, String(p.to), String(p.text), String(p.kind ?? "info"));
     case "helm_direct":
@@ -359,7 +387,7 @@ async function dispatch(e: Engine, node: NodeInfo, name: string, p: Record<strin
     case "helm_set_task":
       return setTask(e, node, String(p.nodeId), String(p.task));
     case "helm_approve":
-      return answerPrompt(e, node, String(p.promptId), p.decision as "allow" | "deny" | "escalate", String(p.reason), (n, i, note) => raiseInteractionNeed(e, n, i, note));
+      return answerPrompt(e, node, String(p.promptId), p.decision as "allow" | "deny" | "escalate", String(p.reason), (n, i, note) => raiseInteractionNeed(e, n, i, note, "human"));
     case "helm_record_check":
       return recordCheck(e, node, p as never);
     case "helm_existing_docs":
@@ -384,8 +412,9 @@ function resolveApp(e: Engine, runId: string, key: string): string {
 function message(e: Engine, from: NodeInfo, to: string, text: string, kind: string): string {
   const target = e.repo.getNode(from.runId, to);
   if (!target) return `No node ${to}. Use ids from helm_context.`;
-  // the Planner and the Git agent may talk to anyone; supervisors and custom agents may talk to them
-  const planner = from.tier === "planner" || from.tier === "git" || ((target.tier === "planner" || target.tier === "git") && ["orchestrator", "manager", "lead", "custom", "planner"].includes(from.tier));
+  // the Planner, the Git agent and the Fixer may talk to anyone; supervisors and custom agents may talk to them
+  const side = (t: string) => t === "planner" || t === "git" || t === "fixer";
+  const planner = side(from.tier) || (side(target.tier) && ["orchestrator", "manager", "lead", "custom", "planner", "git", "fixer"].includes(from.tier));
   const allowed = planner || target.id === from.parentId || target.parentId === from.id || (target.parentId === from.parentId && target.appId !== null && target.appId === from.appId);
   if (!allowed) return `Rejected: you can message your parent, your children and siblings in the same app. Route cross-app traffic through ${from.parentId ?? "the Orchestrator"}.`;
   let note = "";
@@ -430,29 +459,72 @@ const ABOUT_LABEL: Record<string, string> = { credentials: "Credentials", spendi
  */
 function routeNeed(e: Engine, node: NodeInfo, p: Record<string, unknown>): string | null {
   const run = e.run(node.runId);
-  const about = String(p.about ?? "other");
-  if (about !== "other") p.title = `${ABOUT_LABEL[about] ?? about}: ${String(p.title)}`.slice(0, 200);
-  if (!e.autonomous(run) || node.tier === "planner" || (HUMAN_ONLY as readonly string[]).includes(about)) return null;
+  let about = String(p.about ?? "other");
+  const label = () => {
+    if (about !== "other") p.title = `${ABOUT_LABEL[about] ?? about}: ${String(p.title)}`.slice(0, 200);
+  };
+  if (!e.autonomous(run) || node.tier === "planner") {
+    label();
+    return null;
+  }
+  // hands-off: the human hears only about keys and accounts, real spending and private data
+  let note = "";
+  if ((HUMAN_ONLY as readonly string[]).includes(about)) {
+    if (humanTopic(`${String(p.title)} ${String(p.body ?? "")} ${String(p.evidence ?? "")}`)) {
+      label();
+      return null;
+    }
+    note = "Helm did not send this to the human: it names no key, login, account, payment or private data, and the human wants everything else decided without them. ";
+    about = "other";
+  }
+  // the owner's call: the Orchestrator makes it from the brief; everyone else passes it up
+  if (about === "owner" && node.tier === "orchestrator") about = "other";
   const supervisor = node.tier === "orchestrator" || node.tier === "manager" || node.tier === "lead";
-  // the owner's call reaches the human from the top two levels
-  if (about === "owner" && (node.tier === "orchestrator" || node.tier === "manager")) return null;
-  const parent = node.parentId ? e.repo.getNode(node.runId, node.parentId) : null;
+  // the Git agent and custom agents without a supervisor ask the Orchestrator
+  const parent = node.parentId ? e.repo.getNode(node.runId, node.parentId) : node.tier !== "orchestrator" ? e.repo.getNode(node.runId, ORCH_ID) : null;
   // a supervisor decides what is inside its own remit (a real company: managers manage)
   if ((about === "other" && supervisor) || !parent) {
     e.repo.event(node.runId, node.id, "decide", `kept a decision (autonomy): ${String(p.title).slice(0, 160)}`);
-    return decideYourselfText(node.tier, scopeName(e, node));
+    return note + decideYourselfText(node.tier, scopeName(e, node));
   }
   const options = ((p.options as string[] | undefined) ?? []).length ? ` Options: ${(p.options as string[]).join(" / ")}.` : "";
   const what = `${p.kind === "approval" ? "Approval" : p.kind === "decision" ? "Decision" : "Question"} from ${e.label(node)} (${node.id}), sent to you instead of the human because autonomy is on: ${String(p.title)}. ${String(p.body ?? "")}${options}${p.evidence ? ` Evidence: ${String(p.evidence)}` : ""}`;
   const how =
     about === "owner"
-      ? ` It says only the owner can answer. Answer it with helm_message (to ${node.id}) if the brief, PORTFOLIO.md or your notes settle it; otherwise raise it once with helm_need (about: owner).`
-      : ` Decide and answer with helm_message (to ${node.id}). It is inside your remit: do not pass it up unless it crosses into another app or group. Escalate with helm_need only if it is about credentials, spending, privacy or access.`;
+      ? ` It says only the owner can answer. Answer it with helm_message (to ${node.id}) from the brief, PORTFOLIO.md or your notes${parent.tier === "orchestrator" ? "; if they do not settle it, choose what serves the brief best and record it under Decisions in PORTFOLIO.md" : "; if they do not settle it, pass it up with helm_need (about: owner)"}.`
+      : ` Decide and answer with helm_message (to ${node.id}). It is inside your remit: do not pass it up unless it crosses into another app or group. Only a key, login or account, real spending or private data goes to the human (helm_need).`;
   e.repo.tx(() => {
     e.repo.comms(node.runId, { from: node.id, to: parent.id, kind: "ask", summary: `(instead of the human) ${String(p.title)}`.slice(0, 300) });
     e.sendFromHelm(node.runId, parent.id, (what + how).slice(0, 3000), { senderNodeId: node.id, kind: "message", commsKind: "ask", key: `ask:${node.runId}:${node.id}:${String(p.title).slice(0, 60)}` });
   });
-  return `Autonomy is on: sent to ${e.label(parent)}, who decides (not the human). Keep working on what does not depend on it; the answer arrives as a message.`;
+  return `${note}Autonomy is on: sent to ${e.label(parent)}, who decides (not the human). Keep working on what does not depend on it; the answer arrives as a message.`;
+}
+
+/** helm_resolve: a supervisor decides a card Helm handed it instead of the human. */
+async function resolveCard(e: Engine, node: NodeInfo, p: { needId: string; action: NeedResolution["action"]; text?: string; findings?: string[] }): Promise<string> {
+  const need = e.repo.getNeed(node.runId, p.needId);
+  if (!need) return `No card ${p.needId}.`;
+  if (need.state !== "open") return `${need.id} is already decided; nothing to do.`;
+  if (need.handler !== node.id) return need.handler === "human" || !need.handler ? `${need.id} waits for the human (a key, spending or private data); you cannot decide it.` : `${need.id} is for ${need.handler} to decide, not you.`;
+  const acts = cardActions(need);
+  if (!acts.includes(p.action) && p.action !== "dismiss") return `Rejected: ${need.id} takes ${acts.join(", ") || "only helm_set_model"}${need.kind === "model" ? " (pick its model with helm_set_model)" : ""}.`;
+  const text = (p.text ?? "").trim();
+  if (!text && ["sendback", "answer", "dismiss", "waive"].includes(p.action)) return `Rejected: ${p.action} needs text (${p.action === "answer" ? "the answer" : p.action === "sendback" ? "exactly what to fix" : "why"}).`;
+  if (p.action === "waive" && !p.findings?.length) return "Rejected: name the findings to waive (findings).";
+  try {
+    const r = await resolveNeed(
+      e,
+      node.runId,
+      need.id,
+      { action: p.action, text, findingIds: p.findings, actor: "system", decidedBy: e.label(node) },
+      { signoff: (appId, d) => signoff(e, node.runId, appId, d), sendback: (appId, d) => sendback(e, node.runId, appId, d) },
+    );
+    if (r.already) return r.already;
+    e.repo.event(node.runId, node.id, "decide", `decided ${need.id} (${need.title.slice(0, 120)}): ${p.action}${text ? ` — ${text.slice(0, 160)}` : ""}`);
+    return `${need.id}: ${p.action} done${r.directive ? ` (${r.directive.id})` : ""}. The human sees your decision and reason in the ledger.`;
+  } catch (err) {
+    return `Could not ${p.action} ${need.id}: ${err instanceof Error ? err.message : String(err)}`;
+  }
 }
 
 /** The remit a supervisor decides inside: its app, its group, or the run. */

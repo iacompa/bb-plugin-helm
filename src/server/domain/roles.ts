@@ -238,6 +238,19 @@ export const ROLES: Record<Role, RoleDef> = {
     doneMeans: ["each app is within its worktree and branch limits, with no extra worktree or agent branch left behind", "what the human asked to send is sent, with the commit and destination on record"],
     skill: "helm-git",
   },
+  fixer: {
+    role: "fixer",
+    tier: "fixer",
+    slot: "fixer",
+    label: "Fixer",
+    mission:
+      "Keep every agent of the run working, so errors never reach the human. Helm hands you every failed or stuck agent: find out why, then get it going again (retry it, move it to another model, have the Git agent rebuild a missing worktree or branch, or stop it and have its supervisor reassign the work), and tell the Orchestrator what you did. You do not write app code.",
+    scope: ["FIXER-NOTES.md", "agents/fixer/**"],
+    inputs: ["the cards Helm hands you (helm_context)", "helm_world", "the failed agent's error and worktree", "FIXER-NOTES.md"],
+    outputs: ["cards decided with helm_resolve (retry, nudge, stop)", "model changes (helm_set_model)", "worktree repairs asked of the Git agent", "FIXER-NOTES.md: each failure, its cause and the fix"],
+    doneMeans: ["every card handed to you is decided", "the agent is working again, or its work is reassigned, and the Orchestrator knows"],
+    skill: "helm-fixer",
+  },
   custom: {
     role: "custom",
     tier: "custom",
@@ -261,7 +274,8 @@ export const COMMON_RULES = [
   "Answer a question from another agent with `helm_message` to it: what you write in your own thread reaches no agent. When you ask someone, its answer comes back to you as a message; until it does, never tell the human or anyone what it said, found or did.",
   "Stay inside your write scope. If you need a change outside it, `helm_message` the owner (usually your lead) and wait; do not edit around it.",
   "Never poll. Work, commit, report, then stop. You will be woken by messages.",
-  "If you are blocked on a decision only the human can make, call `helm_need` once with a precise question and options, then stop. Do not guess.",
+  "Keep moving. Work inside your task needs no GO, allowance, time box or written authority from anyone. Only a key, a login or an account, real spending or private data needs the human: then call `helm_need` once with a precise question and options and keep working on what does not depend on it. Everything else you or your supervisor decides: never stop to wait for the human.",
+  "Installs and downloads need nobody's approval: ask the Git agent with `helm_install {what, why, where}` and keep working; you are told when it is done. No hold, GO or standing rule from a supervisor covers installs, and you never ask a supervisor or the human for one. Do not install things yourself.",
   "Commit small and often on your branch with clear messages. No secrets in code, config or history. Never use a destructive or major-version command (`--force`, dropping data, major dependency upgrades) without an approval through `helm_need`, unless the human told you to do exactly that.",
   "Keep your own context small: read diffs, reports and the specific files you need, not the whole repository. Put durable facts in files, not chat.",
   "`bb helm` is the human's command line. You may run only its read-only commands your skill names (`bb helm screens`, `bb helm world`, `bb helm status`); never one that changes the run (approve, deny, resolve, answer, signoff, sendback, tell, model, slots, priority, limits, start, end, complete, refresh): those are the human's decisions. Use your Helm tools instead.",
@@ -320,6 +334,8 @@ export const TOOLS_BY_TIER: Record<Tier, string[]> = {
     "helm_propose_wave",
     "helm_set_priority",
     "helm_digest",
+    "helm_resolve",
+    "helm_install",
   ],
   manager: [
     "helm_context",
@@ -334,6 +350,8 @@ export const TOOLS_BY_TIER: Record<Tier, string[]> = {
     "helm_set_task",
     "helm_set_priority",
     "helm_digest",
+    "helm_resolve",
+    "helm_install",
   ],
   lead: [
     "helm_context",
@@ -353,8 +371,10 @@ export const TOOLS_BY_TIER: Record<Tier, string[]> = {
     "helm_record_check",
     "helm_slop_scan",
     "helm_existing_docs",
+    "helm_resolve",
+    "helm_install",
   ],
-  specialist: ["helm_context", "helm_report", "helm_ack", "helm_need", "helm_message", "helm_slop_scan"],
+  specialist: ["helm_context", "helm_report", "helm_ack", "helm_need", "helm_message", "helm_slop_scan", "helm_install"],
   planner: [
     "helm_context",
     "helm_report",
@@ -369,9 +389,11 @@ export const TOOLS_BY_TIER: Record<Tier, string[]> = {
     "helm_create_agent",
     "helm_rename_agent",
     "helm_retire_agent",
+    "helm_install",
   ],
-  git: ["helm_context", "helm_report", "helm_ack", "helm_need", "helm_message", "helm_world", "helm_worktrees", "helm_consolidate"],
-  custom: ["helm_context", "helm_report", "helm_ack", "helm_need", "helm_message"],
+  git: ["helm_context", "helm_report", "helm_ack", "helm_need", "helm_message", "helm_world", "helm_worktrees", "helm_consolidate", "helm_installed"],
+  fixer: ["helm_context", "helm_report", "helm_ack", "helm_need", "helm_message", "helm_world", "helm_models", "helm_set_model", "helm_resolve", "helm_install"],
+  custom: ["helm_context", "helm_report", "helm_ack", "helm_need", "helm_message", "helm_install"],
   gate: [
     "helm_context",
     "helm_report",
@@ -381,6 +403,7 @@ export const TOOLS_BY_TIER: Record<Tier, string[]> = {
     "helm_record_check",
     "helm_slop_scan",
     "helm_verdict",
+    "helm_install",
   ],
 };
 
@@ -441,6 +464,7 @@ export const CUSTOM_SKILLS = [
 export function skillsFor(n: { role: Role; platform: Platform | null; alsoLead: boolean }, app: SkillProfile | null, extra: string[] = []): string[] {
   if (n.role === "planner") return ["helm-planner-agent"];
   if (n.role === "git") return ["helm-git"];
+  if (n.role === "fixer") return ["helm-fixer"];
   if (n.role === "custom") return [...new Set(["helm-custom", ...extra.filter((x) => CUSTOM_SKILLS.includes(x)).slice(0, 4)])];
   const kind = app?.kind ?? "app";
   const needs = app?.needs ?? [];

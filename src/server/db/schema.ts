@@ -157,4 +157,10 @@ ALTER TABLE nodes ADD COLUMN charter TEXT;
 ALTER TABLE nodes ADD COLUMN wake_json TEXT DEFAULT '[]';
 ALTER TABLE nodes ADD COLUMN created_by TEXT;
 `,
+  // 8 — hands-off: a card the Orchestrator decides instead of the human (autonomy high), and the
+  // install ledger: what the Git agent installed, where, why and for which agents.
+  `
+ALTER TABLE needs ADD COLUMN handler TEXT;
+CREATE TABLE IF NOT EXISTS installs(id TEXT, run_id TEXT, what TEXT, where_path TEXT, state TEXT, needed_by_json TEXT DEFAULT '[]', command TEXT, note TEXT, by_node TEXT, created_at INTEGER, done_at INTEGER, PRIMARY KEY(run_id, id));
+`,
 ];

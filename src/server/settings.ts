@@ -31,7 +31,7 @@ export const MODEL_REASONING = "default";
 const REASONING_ORDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "ultracode"];
 
 /** The two default-model pickers (model + reasoning) for one role, as BB select settings. */
-function modelSelects(choices: ModelChoice[], who: "Planner" | "Orchestrator" | "Git agent", empty: string, desc: string) {
+function modelSelects(choices: ModelChoice[], who: "Planner" | "Orchestrator" | "Git agent" | "Fixer", empty: string, desc: string) {
   const levels = [...new Set(choices.flatMap((c) => c.reasoning))].sort((a, b) => (REASONING_ORDER.indexOf(a) + 1 || 99) - (REASONING_ORDER.indexOf(b) + 1 || 99));
   return {
     model: {
@@ -58,13 +58,15 @@ export function settingsDescriptors(choices: ModelChoice[]) {
   const pl = modelSelects(choices, "Planner", "Not set: use each run's Orchestrator model", "The Planner's model in runs whose Planner role has no model.");
   const or = modelSelects(choices, "Orchestrator", "Not set: choose it in each new run", "The Orchestrator's model for new runs that do not choose one.");
   const gt = modelSelects(choices, "Git agent", "Not set: use each run's Orchestrator model", "The Git agent's model: it keeps every app's branches and worktrees in order, watches their disk space and sends work where you tell it.");
-  return { plannerModel: pl.model, plannerReasoning: pl.reasoning, orchestratorModel: or.model, orchestratorReasoning: or.reasoning, gitModel: gt.model, gitReasoning: gt.reasoning, ...BASE_DESCRIPTORS };
+  const fx = modelSelects(choices, "Fixer", "Not set: use each run's Orchestrator model", "The Fixer's model: when an agent fails or gets stuck, the Fixer finds out why and gets it going again (retry, another model, a rebuilt worktree, or the work reassigned), so the error never reaches you. A capable model pays off here.");
+  return { plannerModel: pl.model, plannerReasoning: pl.reasoning, orchestratorModel: or.model, orchestratorReasoning: or.reasoning, gitModel: gt.model, gitReasoning: gt.reasoning, fixerModel: fx.model, fixerReasoning: fx.reasoning, ...BASE_DESCRIPTORS };
 }
 
 const BASE_DESCRIPTORS = {
   plannerName: { type: "string", label: "Planner's name", description: "Empty: the Planner is just called Planner. A name here is shown with the role (\"Nova · Planner\"). Rename one run's with bb helm rename planner <name>; bb helm rename planner none clears it.", default: DEFAULT_SETTINGS.names.planner },
   orchestratorName: { type: "string", label: "Orchestrator's name", description: "Empty: the Orchestrator is just called Orchestrator. Rename one run's with bb helm rename orch <name>; bb helm rename orch none clears it.", default: DEFAULT_SETTINGS.names.orchestrator },
   gitName: { type: "string", label: "Git agent's name", description: "Empty: the Git agent is just called Git agent. Rename one run's with bb helm rename git <name>; bb helm rename git none clears it.", default: DEFAULT_SETTINGS.names.git },
+  fixerName: { type: "string", label: "Fixer's name", description: "Empty: the Fixer is just called Fixer. Rename one run's with bb helm rename fixer <name>; bb helm rename fixer none clears it.", default: DEFAULT_SETTINGS.names.fixer },
   gitOnSignoff: {
     type: "select",
     label: "When you sign a project off, the Git agent",
@@ -101,9 +103,9 @@ const BASE_DESCRIPTORS = {
   autonomy: {
     type: "select",
     label: "Autonomy",
-    description: "Default for new runs. High: agents' questions, waves and plan changes are decided by the Orchestrator on the record. Ask: they come to Needs you. Change a running run with bb helm limits --autonomy.",
+    description: "Default for new runs. High is hands-off: the team decides on the record (the Orchestrator sets strategy, managers sign off their apps, leads answer their squads, the Fixer takes failed and stuck agents, installs go through the Git agent), and only keys and accounts, spending and private data come to you. Ask: questions, waves, plan changes, failures and sign-off come to Needs you. Change a running run with bb helm limits --autonomy.",
     options: ["high", "ask"] as string[],
-    experimental_optionLabels: { high: "The Orchestrator decides; ask me only about credentials, spending, private data or access", ask: "Ask me about every question, wave and plan change" },
+    experimental_optionLabels: { high: "Hands-off: the team decides; ask me only for keys and accounts, spending or private data", ask: "Ask me about every question, wave, plan change and failure" },
     default: "high",
   },
   autoAdvance: { type: "select", label: "Later waves", description: "Applies only when Autonomy is Ask. With Autonomy High (the default), the Orchestrator admits later waves itself.", options: ["ask", "auto"] as string[], experimental_optionLabels: { ask: "Ask me before each wave", auto: "Run waves automatically" }, default: "ask" },
@@ -115,7 +117,7 @@ const BASE_DESCRIPTORS = {
   approvePrompts: {
     type: "select",
     label: "Who approves agents' permission prompts",
-    description: "A builder's prompt goes to its lead, a lead's to its manager, a manager's to the Orchestrator. They escalate to you only for credentials, spending, private data or access, and a prompt nobody answers in 15 minutes comes to you. The Orchestrator's own prompts always come to you.",
+    description: "A builder's prompt goes to its lead, a lead's to its manager, a manager's (and the Git agent's, the Planner's and the Fixer's) to the Orchestrator. Installs and downloads count as ordinary work. A prompt escalated, or unanswered for 15 minutes, goes one level up; it comes to you only from the Orchestrator, or when it needs a key, spending or private data. The Orchestrator's own prompts always come to you.",
     options: ["supervisor", "human"] as string[],
     experimental_optionLabels: { supervisor: "Their supervisor approves for me", human: "Ask me every time" },
     default: "supervisor",
@@ -192,6 +194,7 @@ export function toHelmSettings(v: Values, warn: (m: string) => void = () => {}, 
     // the Planner runs like the Orchestrator, custom agents like specialists
     planner: perm(v.permissionOrchestrator),
     git: perm(v.permissionOrchestrator),
+    fixer: perm(v.permissionOrchestrator),
     custom: perm(v.permissionSpecialist),
   };
   const nm = (x: unknown, d: string) => (typeof x === "string" && x.trim() ? x.trim().slice(0, 40) : d);
@@ -201,11 +204,12 @@ export function toHelmSettings(v: Values, warn: (m: string) => void = () => {}, 
     permissionMode,
     showLeadsInSidebar: v.showLeadsInSidebar === true,
     appsRoot: typeof v.appsRoot === "string" && v.appsRoot.trim() ? v.appsRoot.trim() : DEFAULT_SETTINGS.appsRoot,
-    names: { planner: nm(v.plannerName, DEFAULT_SETTINGS.names.planner), orchestrator: nm(v.orchestratorName, DEFAULT_SETTINGS.names.orchestrator), git: nm(v.gitName, DEFAULT_SETTINGS.names.git) },
+    names: { planner: nm(v.plannerName, DEFAULT_SETTINGS.names.planner), orchestrator: nm(v.orchestratorName, DEFAULT_SETTINGS.names.orchestrator), git: nm(v.gitName, DEFAULT_SETTINGS.names.git), fixer: nm(v.fixerName, DEFAULT_SETTINGS.names.fixer) },
     defaultModels: {
       planner: withReasoning(parseModelSetting(v.plannerModel, "Default Planner model", warn), v.plannerReasoning, choices),
       orchestrator: withReasoning(parseModelSetting(v.orchestratorModel, "Default Orchestrator model", warn), v.orchestratorReasoning, choices),
       git: withReasoning(parseModelSetting(v.gitModel, "Default Git agent model", warn), v.gitReasoning, choices),
+      fixer: withReasoning(parseModelSetting(v.fixerModel, "Default Fixer model", warn), v.fixerReasoning, choices),
     },
     gitOnSignoff: v.gitOnSignoff === "push" || v.gitOnSignoff === "report" ? v.gitOnSignoff : "merge-push",
     worktreesPerApp: clampInt(v.worktreesPerApp, 2, 32, DEFAULT_SETTINGS.worktreesPerApp),

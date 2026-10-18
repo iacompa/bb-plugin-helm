@@ -3,9 +3,10 @@
 
 /**
  * planner: Amer, the run's advisor beside the Orchestrator; git: the Git agent beside them (worktrees,
- * pushes); custom: an agent the Planner designed for this run.
+ * pushes); fixer: the Fixer beside them (failed and stuck agents); custom: an agent the Planner
+ * designed for this run.
  */
-export type Tier = "orchestrator" | "manager" | "lead" | "specialist" | "gate" | "planner" | "git" | "custom";
+export type Tier = "orchestrator" | "manager" | "lead" | "specialist" | "gate" | "planner" | "git" | "fixer" | "custom";
 export type Role =
   | "orch"
   | "mgr"
@@ -24,6 +25,7 @@ export type Role =
   | "slop"
   | "planner"
   | "git"
+  | "fixer"
   | "custom";
 export type Platform = "mac" | "win" | "ios" | "and" | "web";
 
@@ -92,7 +94,8 @@ export type SlotId =
   | "docs"
   | "watcher"
   | "planner"
-  | "git";
+  | "git"
+  | "fixer";
 
 export interface ModelRef {
   providerId: string;
@@ -395,6 +398,27 @@ export interface NeedInfo {
   resolution: unknown;
   /** Machine data the resolver needs (wave app ids, finding ids, interaction payload). */
   data?: unknown;
+  /** Who decides it: "human", or the id of the agent that does (autonomy high: everything but keys, spending and private data). */
+  handler?: NeedHandler;
+}
+
+/** "human", or the node id of the supervisor that decides a card (its lead, its manager, the Orchestrator). */
+export type NeedHandler = string;
+
+/** One install the Git agent made (or was asked for): the run's install ledger. */
+export interface InstallInfo {
+  id: string;
+  runId: string;
+  what: string;
+  where: string | null;
+  state: "requested" | "done" | "failed" | "needs_human";
+  /** Every agent that asked for it, with its reason. */
+  neededBy: Array<{ nodeId: string; why: string; at: number }>;
+  command: string | null;
+  note: string | null;
+  byNode: string | null;
+  createdAt: number;
+  doneAt: number | null;
 }
 
 export interface FindingInfo {

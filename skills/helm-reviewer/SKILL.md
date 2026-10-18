@@ -42,6 +42,7 @@ not your verdict.
 | `helm_slop_scan {paths?}` | The deterministic scanner on the judged commit. |
 | `helm_context {}` | "App <Name> (appId <id>)", stage, integration HEAD, fix round, unacked directives. |
 | `helm_message`, `helm_report`, `helm_ack`, `helm_need` | As in every Helm role. Your parent is the App Lead. |
+| `helm_install {what, why, where}` | Ask the Git agent to install what a check needs (dependencies, a tool). Nobody's approval is needed. |
 | Evidence for your own files | Your worktree stays clean, so files you write under `reports/` are never committed: cite them as `{kind: "report", ref: "reports/…"}`, not `file` (a `file` must be committed). Cite the judged commit as `{kind: "commit"}`. |
 
 ## Protocol

@@ -68,6 +68,7 @@ export function createSimAgents(profileFor: (meta: HelmThreadMeta) => Profile = 
     if (role === "planner") return amer(ctx);
     if (role === "custom") return custom(ctx);
     if (role === "git") return gitAgent(ctx, log);
+    if (role === "fixer") return fixer(ctx, log);
     if (role === "watch") {
       // the sim Watcher restarts every agent in the packet
       const ids = [...ctx.text.matchAll(/^- id: (\S+)/gm)].map((x) => x[1]);
@@ -118,6 +119,20 @@ async function gitAgent(ctx: TurnContext, log: string[]): Promise<string> {
     return "consolidated";
   }
   if (/signed off/.test(ctx.text)) await ctx.tool("helm_report", { status: "done", summary: "Recorded the signed-off work in GIT-NOTES.md." });
+  return "idle";
+}
+
+/** The Fixer: decides every card helm_context lists (retry a failure, nudge a stalled agent), then reports. */
+async function fixer(ctx: TurnContext, log: string[]): Promise<string> {
+  const c = await ctx.tool("helm_context", {});
+  const line = c.split("\n").find((l) => l.startsWith("Cards for you to decide now"));
+  const cards = [...(line ?? "").matchAll(/(N-\d+) (failed|stalled|model)/g)];
+  for (const [, id, kind] of cards) {
+    if (kind === "model") continue;
+    const r = await ctx.tool("helm_resolve", { needId: id, action: kind === "stalled" ? "nudge" : "retry", text: "passing failure: retrying" });
+    log.push(`fixer ${id}: ${r.split("\n")[0]}`);
+  }
+  if (cards.length) await ctx.tool("helm_report", { status: "progress", summary: `Fixed ${cards.length} card${cards.length === 1 ? "" : "s"}: retried.` });
   return "idle";
 }
 

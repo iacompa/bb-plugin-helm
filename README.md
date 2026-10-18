@@ -61,10 +61,11 @@ No run agent spawns until you start the plan. When the planner has made it, pres
 
 **Helm remembers where you were.** The New run wizard keeps its draft: brief, portfolio, models, and the planning conversation. Your view, selection and inspector tab are kept too. Leave the panel, reload, or open Helm in another window, and you come back to the same place. **Close** keeps the draft (New run reopens it). **Discard** clears it, and starting a run clears it.
 
-**Talk to the Planner.** Every run has three agents at the top of the graph:
+**Talk to the Planner.** Every run has four agents at the top of the graph:
 - The **Orchestrator** runs the build and delegates.
 - The **Planner** sits beside it, on the model you choose, unconnected to the rest, and stays idle until you ask it something.
-- The **Git agent** sits beside them too. It keeps every app's branches and worktrees in order, shows the space they take (the **Worktrees** button on its card) and sends work where you say (see below).
+- The **Git agent** sits beside them too. It keeps every app's branches and worktrees in order, shows the space they take (the **Worktrees** button on its card), makes the installs agents ask for and sends work where you say (see below).
+- The **Fixer** waits beside them until an agent fails or gets stuck. Then it finds out why and gets it going again: a retry, another model, a worktree the Git agent rebuilds, or the work handed to someone else. It tells the Orchestrator what it did, so those errors never stop for you. Choose its model in **Models → Default models** (otherwise it uses the run's Orchestrator model).
 
 They are called by their roles. To give one a personal name, set it in Settings or run `bb helm rename planner "Nova"` (it shows as "Nova · Planner"); `bb helm rename planner none` clears it.
 
@@ -132,7 +133,15 @@ It also decides each project's **needs** (database, accounts, payments, security
 
 **Several sessions at once.** Every run you open gets a tab under the top bar. Each tab shows whether the run is live and how many items need you, and runs keep going while you look at another tab. **+ New session** opens a fresh start page without touching your runs. From there you can write a brief, plan with an agent, or reopen any earlier run. Closing a tab only hides it; to end a run use the run menu or `bb helm end`.
 
-**The Orchestrator runs it.** Runs default to **autonomy high**. Agents' questions go up the chain, and the Orchestrator decides. Waves and plan changes go ahead on the record. You are asked only about four things: credentials or API keys, spending real money, anything that could expose private data, and access only you can grant. Sign-off, real failures and the budget cap still come to you. Switch a run to **ask** (every question, wave and plan change) in the capacity chip, the wizard's Approve step, or with `bb helm limits --autonomy ask`.
+**Hand it over: the team runs it.** Runs default to **autonomy high**, which is hands-off. You say what you want, where, and how good, and the team builds it like a company:
+- The Orchestrator sets the strategy and delegates. Managers and leads decide inside their groups and apps, and agents' questions go up the chain.
+- Waves, plan changes and product questions the brief does not settle are decided on the record.
+- What used to wait in **Needs you** becomes a card for whoever on the team is closest to it. The **Fixer** takes failed, stuck or modelless agents after Helm's two automatic retries. A manager (or the Orchestrator) signs off its apps (the Git agent then merges and pushes as your setting says) and settles gate disputes. A lead answers its squad's permission prompts. A card left for two hours moves up a level, and reaches you only after the Orchestrator.
+- **Installs need nobody's approval.** Agents ask the Git agent (`helm_install`). It installs into the project, never with a password, and keeps a ledger of what, where, which command, why and for whom (`bb helm installs`).
+- You are asked only for a key, a login or an account, real spending (the budget cap included), private data, and to complete the run.
+- Needs you shows the team's cards folded under **Your team is deciding**, and you can still act on any of them (`bb helm needs --all`).
+
+Switch a run to **ask** (every question, wave, plan change and failure comes to you) in the capacity chip, the wizard's Approve step, or with `bb helm limits --autonomy ask`.
 
 **Steering.** Every agent's inspector ends in a one-line **Steer…** box. Type an instruction and press Enter. It interrupts the agent's current turn, or tick *after its turn* to wait. You can also apply it to the agent's reports or its whole team. The line under the box shows who else hears about it: its parent gets it in full, and the levels above see one FYI line.
 
@@ -150,7 +159,9 @@ FYI lines reach agents with their next Helm tool result rather than as separate 
 - **Slot**: a role's model (`orchestrator`, `ui`, `code`, `review` …). The **Model Studio** is where you pick them; a **preset** fills them all.
 - **Gate**: an app's Reviewer or Slop Hunter. Both must pass the same commit before the app is **Ready** for your sign-off.
 - **Directive** (`D-…`): a change you or a supervisor make to an agent. Each agent it reaches leaves a **receipt** (queued, delivered, acknowledged) in the **Ledger**.
-- **Needs you** (`N-…`): what is waiting on you: approvals, questions, failures, budget and sign-off.
+- **Needs you** (`N-…`): what is waiting on you. With autonomy high that is only keys and accounts, spending, private data and completing the run; the rest are **cards** the team decides (`helm_resolve`), shown folded beneath.
+- **Fixer**: the run's agent for failed and stuck agents.
+- **Install ledger** (`I-…`): every install the Git agent made for an agent, with the command and the reason.
 - **Studio**: Helm's notes folder for a run (`<run folder>/_studio`): the agents' briefs and `PORTFOLIO.md`.
 - **Observatory**: the graph button that shows BB threads outside the run, read-only.
 - **Unit** (u): Helm's cost estimate. 1 u is about 133k tokens on a weight-1.0 model such as Sonnet.
@@ -162,12 +173,12 @@ Settings live under `bb plugin config helm` (and BB → Settings → Helm, where
 - concurrency and total-agent caps;
 - spans, fix rounds and stall minutes;
 - budget cap, in relative units (1 u ≈ 133k tokens on a weight-1.0 model);
-- autonomy (`high`: the Orchestrator decides; `ask`: questions, waves and plan changes come to you);
+- autonomy (`high`: hands-off, the team decides and you hear only about keys and accounts, spending and private data; `ask`: questions, waves, plan changes and failures come to you);
 - wave approval (`ask` / `auto`), which applies only when autonomy is `ask`;
 - permission mode per tier, and who approves agents' permission prompts (their supervisor, or you);
-- personal names for the Planner, the Orchestrator and the Git agent (none by default: they are called by their roles);
+- personal names for the Planner, the Orchestrator, the Git agent and the Fixer (none by default: they are called by their roles);
 - what the Git agent does when you sign a project off (merge and push, push, or report only), and the most branches (default 2) and worktrees (default 10) a project may have;
-- the default Planner, Orchestrator and Git agent models and their reasoning: dropdowns that list the models of the providers you have connected, so nothing is typed (also in the panel: **Models → Default models**, or `bb helm defaults`). A newly connected provider appears after Helm reloads;
+- the default Planner, Orchestrator, Git agent and Fixer models and their reasoning: dropdowns that list the models of the providers you have connected, so nothing is typed (also in the panel: **Models → Default models**, or `bb helm defaults`). A newly connected provider appears after Helm reloads;
 - showing leads in the sidebar;
 - zero-tolerance slop categories (default S1 placeholders, S2 fake data, S3 invented dependencies, S5 debug leftovers, S6 secrets);
 - pricing weights, keyed by model id (`{"claude-haiku-5-5": 0.25}`).

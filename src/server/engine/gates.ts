@@ -10,7 +10,7 @@ import type { ScanOutput } from "../../shared/host-contract.ts";
 import { leadTransition, readyAllowed, REVIEW_FILE, specFilesFor, stageLabel, stagePct } from "../domain/stages.ts";
 import { missingChecks, parseChecksJson, verifyCheckClaim, type ChecksDecl } from "../domain/checks.ts";
 import { validateVerdict, blocksReady, type Verdict, shaMatches } from "../domain/verdict.ts";
-import { admissibleSpecialists, nodeIdFor, squadFor, type SquadMember } from "../domain/topology.ts";
+import { admissibleSpecialists, nodeIdFor, ORCH_ID, squadFor, type SquadMember } from "../domain/topology.ts";
 import { roleLabel } from "../domain/roles.ts";
 import { bottomUp } from "../domain/directives.ts";
 import { redactSecrets } from "../domain/slop/rules.ts";
@@ -74,7 +74,7 @@ export async function verifyEvidence(e: Engine, n: NodeInfo, evidence: EvidenceR
       // agents outside the apps (Orchestrator, managers, Planner, Git agent) work in the Studio; the
       // Git agent also cites commits in the apps' repositories
       const studio = e.studioPath(e.run(n.runId));
-      const repos = [studio, ...(n.tier === "git" ? e.repo.listApps(n.runId).map((a) => a.repoPath).filter((p): p is string => !!p) : [])];
+      const repos = [studio, ...(n.tier === "git" || n.tier === "fixer" ? e.repo.listApps(n.runId).map((a) => a.repoPath).filter((p): p is string => !!p) : [])];
       let hit: string | null = null;
       for (const r of repos.slice(0, 40)) {
         hit = ev.kind === "commit" ? (await host.revParse({ repo: r, ref }).catch(() => ({ sha: null }))).sha : (await host.fileAt({ repo: r, ref: "HEAD", path: ref, maxBytes: 4_000_000 }).catch(() => ({ content: null }))).content !== null ? ref : null;
@@ -155,7 +155,8 @@ export async function report(e: Engine, n: NodeInfo, input: { status: "progress"
       }
     }
   }
-  const parent = n.parentId ? e.repo.getNode(n.runId, n.parentId) : null;
+  // the Fixer answers to the Orchestrator without being in its tree
+  const parent = n.parentId ? e.repo.getNode(n.runId, n.parentId) : n.tier === "fixer" ? e.repo.getNode(n.runId, ORCH_ID) : null;
   e.repo.tx(() => {
     e.repo.addReport(n.runId, n.id, { status: input.status, summary, evidence: verified, verified: ok, problems });
     e.repo.updateNode(n.runId, n.id, { nowLine: summary.slice(0, 160), lastActivityAt: e.now() });

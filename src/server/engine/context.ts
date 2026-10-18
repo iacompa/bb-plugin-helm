@@ -18,9 +18,9 @@ export interface HelmSettings {
   /** Who answers an agent's BB permission prompt: its supervisor (escalating only what the human must decide) or the human. */
   approvePrompts: "supervisor" | "human";
   /** Default personal names for new runs ("" = none: just the role); any agent can be renamed later. */
-  names: { planner: string; orchestrator: string; git: string };
-  /** Default models (settings plannerModel, orchestratorModel, gitModel): used when a run's slot is empty. */
-  defaultModels: { planner: ModelRef | null; orchestrator: ModelRef | null; git: ModelRef | null };
+  names: { planner: string; orchestrator: string; git: string; fixer: string };
+  /** Default models (settings plannerModel, orchestratorModel, gitModel, fixerModel): used when a run's slot is empty. */
+  defaultModels: { planner: ModelRef | null; orchestrator: ModelRef | null; git: ModelRef | null; fixer: ModelRef | null };
   /** What the Git agent does when the human signs a project off. */
   gitOnSignoff: "push" | "merge-push" | "report";
   /** The most worktrees an app may have: the checkout, the shared work worktree and lanes the Git agent makes. */
@@ -31,9 +31,9 @@ export interface HelmSettings {
 
 export const DEFAULT_SETTINGS: HelmSettings = {
   limits: LIMIT_DEFAULTS,
-  permissionMode: { orchestrator: "auto", manager: "auto", lead: "auto", specialist: "auto", gate: "auto", planner: "auto", git: "auto", custom: "auto" },
-  names: { planner: "", orchestrator: "", git: "" },
-  defaultModels: { planner: null, orchestrator: null, git: null },
+  permissionMode: { orchestrator: "auto", manager: "auto", lead: "auto", specialist: "auto", gate: "auto", planner: "auto", git: "auto", fixer: "auto", custom: "auto" },
+  names: { planner: "", orchestrator: "", git: "", fixer: "" },
+  defaultModels: { planner: null, orchestrator: null, git: null, fixer: null },
   gitOnSignoff: "merge-push",
   worktreesPerApp: 10,
   branchesPerApp: 2,

@@ -3,6 +3,7 @@
 // text only ever comes from --message-file / --brief-file.
 
 import { githubViewFor, githubText } from "./github-view.ts";
+import { installsText } from "./engine/installs.ts";
 import { readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { cliCommand, defineCli, PluginCliError, type PluginCliContext, type PluginCliResult } from "@get-bb/plugin-sdk";
@@ -98,7 +99,7 @@ async function guard(fn: () => Promise<PluginCliResult>): Promise<PluginCliResul
 }
 
 /** What an agent Helm runs may use: reading only. Every other command is the human's decision. */
-const AGENT_READ_ONLY = new Set(["status", "runs", "nodes", "world", "agents", "needs", "screens", "ledger", "models", "errors", "doctor"]);
+const AGENT_READ_ONLY = new Set(["status", "runs", "nodes", "world", "agents", "needs", "screens", "ledger", "installs", "models", "errors", "doctor"]);
 
 export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: boolean; lines: string[]; checks: unknown[] }> }) {
   /** Is the caller a thread Helm itself runs? The plan chat (a conversation with the human) may also plan. */
@@ -452,15 +453,18 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
           }),
       }),
       needs: cliCommand({
-        summary: "Open Needs-you items: what each is about, its evidence, and the command for each choice",
+        summary: "Open Needs-you items: what each is about, its evidence, and the command for each choice (--all adds the cards the team is deciding hands-off)",
         positionals: [{ name: "needId", description: "Show one item in full (N-12 or 12)", required: false }] as const,
-        options: { run: RUN, json: JSON_OPT },
+        options: { run: RUN, json: JSON_OPT, all: { type: "boolean", description: "Also list the cards the team (the Fixer, a lead, a manager or the Orchestrator) is deciding for you (autonomy on)" } },
         run: (i) =>
           guard(async () => {
             const run = runOf(i.options.run);
             const one = i.positionals.needId ? needOf(run.id, i.positionals.needId) : null;
             if (i.positionals.needId && !one) throw new PluginCliError(`No need ${i.positionals.needId} in ${run.name}.`, { code: "not_found", hint: "bb helm needs lists the open ones." });
-            const needs = one ? [one] : svc.repo.listNeeds(run.id, "open");
+            const open = svc.repo.listNeeds(run.id, "open");
+            // hands-off: cards a supervisor decides are not the human's unless they ask to see them
+            const team = open.filter((n) => n.handler && n.handler !== "human");
+            const needs = one ? [one] : i.options.all ? open : open.filter((n) => !n.handler || n.handler === "human");
             const SHOWN = 30;
             const indent = (t: string) => t.split("\n").map((l) => `      ${l}`).join("\n");
             const card = (n: NeedInfo) => {
@@ -469,17 +473,19 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
               const body = full ? n.body : n.body.split("\n").slice(0, 3).join("\n").slice(0, 400);
               const who = n.nodeId ? svc.repo.getNode(run.id, n.nodeId) : null;
               const mins = Math.max(0, Math.round((svc.engine.now() - n.createdAt) / 60_000));
+              const decider = n.handler && n.handler !== "human" ? svc.repo.getNode(run.id, n.handler) : null;
               return [
                 `${n.id}  [${n.kind}]  ${n.title}${n.state === "open" ? "" : `  (resolved)`}`,
-                `      from ${who ? svc.engine.label(who) : "Helm"} · ${mins < 90 ? `${mins} min` : `${Math.round(mins / 60)} h`} ago`,
+                `      from ${who ? svc.engine.label(who) : "Helm"} · ${mins < 90 ? `${mins} min` : `${Math.round(mins / 60)} h`} ago${decider && n.state === "open" ? ` · ${svc.engine.label(decider)} is deciding it (you can still act)` : ""}`,
                 body ? indent(body) : "",
                 full && n.evidence ? indent(`Evidence: ${n.evidence}`) : "",
                 n.state === "open" ? `      → ${needCommands(n, appNameOf(run.id, n)).join("\n      → ")}` : "",
               ].filter(Boolean).join("\n");
             };
+            const teamLine = !one && !i.options.all && team.length ? `${team.length} more card${team.length === 1 ? " is" : "s are"} being decided by the team hands-off (bb helm needs --all).` : "";
             const text = needs.length
-              ? [...needs.slice(0, SHOWN).map(card), needs.length > SHOWN ? `…and ${needs.length - SHOWN} more (--json lists them all).` : "", one || needs.every((n) => n.kind === "signoff") ? "" : "bb helm needs <id> shows one item in full."].filter(Boolean).join("\n")
-              : "Nothing needs you.";
+              ? [...needs.slice(0, SHOWN).map(card), needs.length > SHOWN ? `…and ${needs.length - SHOWN} more (--json lists them all).` : "", one || needs.every((n) => n.kind === "signoff") ? "" : "bb helm needs <id> shows one item in full.", teamLine].filter(Boolean).join("\n")
+              : ["Nothing needs you.", teamLine].filter(Boolean).join(" ");
             return out(i.options.json, { needs }, text);
           }),
       }),
@@ -583,7 +589,7 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
           run: RUN,
           concurrency: { type: "integer", min: 1, max: 48, description: "Agents allowed to run at once in this run" },
           budget: { type: "integer", min: 1, max: 1000000, description: "Budget cap in relative units (1 u is about 133k tokens on a weight-1.0 model such as Sonnet; raising it above the spend lifts a budget pause)" },
-          autonomy: { type: "enum", values: ["high", "ask"], description: "high: the Orchestrator decides everything except credentials, spending, private data and access; ask: every question, wave and plan change asks you" },
+          autonomy: { type: "enum", values: ["high", "ask"], description: "high: hands-off, the team decides everything except keys and accounts, spending and private data; ask: every question, wave, plan change and failure asks you" },
           permission: { type: "string", description: "provider=accept-edits|auto|full: the mode for a provider that cannot run Helm's configured one (e.g. acp-grok=full)" },
           json: JSON_OPT,
         },
@@ -599,12 +605,13 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
           }),
       }),
       defaults: cliCommand({
-        summary: "Show or set the default Planner, Orchestrator and Git agent models (new runs use them when a run leaves those roles empty)",
+        summary: "Show or set the default Planner, Orchestrator, Git agent and Fixer models (new runs use them when a run leaves those roles empty)",
         options: {
           planner: { type: "string", description: "provider/model:reasoning, or none to clear" },
           orchestrator: { type: "string", description: "provider/model:reasoning, or none to clear" },
           git: { type: "string", description: "provider/model:reasoning for the Git agent, or none to clear" },
-          apply: { type: "boolean", description: "Also move every running run's Planner / Git agent to the new model now" },
+          fixer: { type: "string", description: "provider/model:reasoning for the Fixer (it handles failed and stuck agents), or none to clear" },
+          apply: { type: "boolean", description: "Also move every running run's Planner / Git agent / Fixer to the new model now" },
           json: JSON_OPT,
         },
         run: (i) =>
@@ -619,8 +626,9 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             const planner = await parse(i.options.planner);
             const orchestrator = await parse(i.options.orchestrator);
             const git = await parse(i.options.git);
-            const r = planner === undefined && orchestrator === undefined && git === undefined ? { ...svc.defaultModels(), moved: [] as string[] } : await svc.setDefaultModels({ planner, orchestrator, git, applyToPlanners: !!i.options.apply });
-            const lines = [`Planner: ${r.text.planner || "not set (uses the run's Orchestrator model)"}`, `Orchestrator: ${r.text.orchestrator || "not set (choose it in each new run)"}`, `Git agent: ${r.text.git || "not set (uses the run's Orchestrator model)"}`];
+            const fixer = await parse(i.options.fixer);
+            const r = planner === undefined && orchestrator === undefined && git === undefined && fixer === undefined ? { ...svc.defaultModels(), moved: [] as string[] } : await svc.setDefaultModels({ planner, orchestrator, git, fixer, applyToPlanners: !!i.options.apply });
+            const lines = [`Planner: ${r.text.planner || "not set (uses the run's Orchestrator model)"}`, `Orchestrator: ${r.text.orchestrator || "not set (choose it in each new run)"}`, `Git agent: ${r.text.git || "not set (uses the run's Orchestrator model)"}`, `Fixer: ${r.text.fixer || "not set (uses the run's Orchestrator model)"}`];
             if (r.moved.length) lines.push(`Moved now in: ${r.moved.join(", ")}`);
             return out(i.options.json, r, lines.join("\n"));
           }),
@@ -704,6 +712,15 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
               );
             const r = await svc.finish(run.id, "cancelled");
             return out(i.options.json, { run: r }, `${r.name} is ended (${r.status}).`);
+          }),
+      }),
+      installs: cliCommand({
+        summary: "The run's install ledger: what the Git agent installed, where, with which command, why, and for which agents",
+        options: { run: RUN, json: JSON_OPT, limit: { type: "integer", min: 1, max: 500, description: "How many (default 50)" } },
+        run: (i) =>
+          guard(async () => {
+            const run = runOf(i.options.run);
+            return out(i.options.json, { installs: svc.repo.listInstalls(run.id).slice(0, i.options.limit ?? 50) }, installsText(svc.engine, run.id, { limit: i.options.limit ?? 50 }));
           }),
       }),
       ledger: cliCommand({
