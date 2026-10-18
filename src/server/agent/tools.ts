@@ -10,11 +10,13 @@ import { raiseInteractionNeed } from "../engine/events.ts";
 import { z } from "zod";
 import type { Engine } from "../engine/engine.ts";
 import { HelmError } from "../engine/engine.ts";
-import { HUMAN_ONLY, PROJECT_NEEDS, type NodeInfo, type ProjectNeed } from "../../shared/types.ts";
+import { HUMAN_ONLY, NEED_ABOUT, PROJECT_NEEDS, type NodeInfo, type ProjectNeed } from "../../shared/types.ts";
+import { decideYourselfText, UPWARD_ASKS_PER_HOUR } from "../domain/authority.ts";
 import { toolsForNode, PLANNER_TOOLS } from "../domain/roles.ts";
 import { KindLooseSchema, PortfolioSchema, normalizePortfolio } from "../domain/brief.ts";
 import { VerdictSchema } from "../domain/verdict.ts";
-import { ack, agentDirect, agentModels, agentSetModel, resolveNeed, type ModelChange } from "../engine/direct.ts";
+import { ack, agentDirect, agentModels, agentSetModel, resolveModelWord, resolveNeed, type ModelChange } from "../engine/direct.ts";
+import { buildSpec, renameNode, retireAgent } from "../engine/custom.ts";
 import { assignFix, declareExisting, publishContract, recordCheck, releaseSquadMembers, report, slopScan, spawnSquad, stageRequest, verdict } from "../engine/gates.ts";
 import { context, digest, world } from "../engine/world.ts";
 import { validateDelta, type ProfileChange } from "../engine/delta.ts";
@@ -49,11 +51,11 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "helm_need",
     description:
-      "Ask for a decision (question|approval|decision). Set `about`: credentials (API keys, logins), spending (real money), privacy (secrets or personal data could leak), access (permissions or accounts only the human grants), or other. When the run's autonomy is high, only those four reach the human; anything else goes to your supervisor (the Orchestrator decides at the top). Then keep working on what does not depend on it; the answer is sent to you.",
+      "Ask for a decision (question|approval|decision). Set `about`: credentials (API keys, logins), spending (real money), privacy (secrets or personal data could leak), access (permissions or accounts only the human grants), owner (a question only the owner can answer: what the product should be, a business choice), or other. When the run's autonomy is high, those four always reach the human; owner reaches the human from the Orchestrator or a manager (a lead's goes to its manager first); other goes to a worker's supervisor, and a supervisor (Orchestrator, Manager, App Lead) is told to decide it itself. Then keep working on what does not depend on it; the answer is sent to you.",
     parameters: z
       .object({
         kind: z.enum(["question", "approval", "decision"]),
-        about: z.enum([...HUMAN_ONLY, "other"]).default("other"),
+        about: z.enum(NEED_ABOUT).default("other"),
         title: z.string().min(1).max(200),
         body: z.string().max(1200),
         options: z.array(z.string().max(80)).max(6).optional(),
@@ -102,6 +104,28 @@ export const TOOL_DEFS: ToolDef[] = [
       .strict(),
     presentation: { label: { pending: "Changing models", completed: "Changed models" }, icon: { glyph: "SlidersHorizontal" } },
   },
+  {
+    name: "helm_create_agent",
+    description:
+      "The Planner designs a new agent for this run, one that has never existed, when it would help: e.g. a GitHub Sync agent that pushes signed-off work, a Storage Guard that checks everything lives on the external SSD, a HIPAA reviewer, a workflow debugger. Give it a short memorable `name` (unique in the run; the human can rename it), a job `title`, a `mission` (what it does, when, what done looks like, what it must never do), and who it reports to (`reportsTo`: orch, a manager id, or an app lead id; under a lead it works in that app's repository). Optional: `writes` (relative globs it may edit; default its own reports/agents folder), `reads` (absolute read-only folders), `model` (provider/model:reasoning from helm_models; default the Core builder's), `skills` (up to 4 craft skills, e.g. helm-security, helm-compliance, helm-automation), `wakeOn` (stage, ready, signoff, failed: Helm wakes it on those events in its scope instead of it polling). Autonomy on: it is created and starts now. Otherwise the human approves it.",
+    parameters: z
+      .object({
+        name: z.string().min(1).max(40),
+        title: z.string().min(2).max(60),
+        mission: z.string().min(40).max(4000),
+        reportsTo: z.string().min(1).max(80),
+        writes: z.array(z.string().min(1).max(200)).max(10).optional(),
+        reads: z.array(z.string().min(1).max(500)).max(10).optional(),
+        model: z.string().min(1).max(120).optional(),
+        skills: z.array(z.string().min(1).max(40)).max(4).optional(),
+        wakeOn: z.array(z.enum(["stage", "ready", "signoff", "failed"])).max(4).optional(),
+        reason: z.string().max(400).optional(),
+      })
+      .strict(),
+    presentation: { label: { pending: "Designing an agent", completed: "Designed an agent" }, icon: { glyph: "UserRoundPlus" } },
+  },
+  { name: "helm_rename_agent", description: "Give any agent in the run a new personal name when the human asks (including yourself or the Orchestrator). Names are unique in the run; the agent's thread title follows.", parameters: z.object({ nodeId: z.string().min(1).max(80), name: z.string().min(1).max(40) }).strict(), presentation: { label: { pending: "Renaming", completed: "Renamed" }, icon: { glyph: "Edit" } } },
+  { name: "helm_retire_agent", description: "Stop a custom agent for good (its thread is stopped and archived) when it is no longer useful or the human asks. Only custom agents can be retired.", parameters: z.object({ nodeId: z.string().min(1).max(80), reason: z.string().min(1).max(300) }).strict(), presentation: { label: { pending: "Retiring an agent", completed: "Retired an agent" }, icon: { glyph: "Archive" } } },
   {
     name: "helm_watch",
     description: "The Watcher's only tool: one verdict per agent from Helm's packet. ok (working, leave it) · nudge (interrupt with your note) · restart (stop a hung or looping turn and resume) · escalate (to its nearest active supervisor) · human (credentials, spending, private data, access, or nobody can fix it).",
@@ -170,8 +194,11 @@ const TIER_NAME: Record<string, string> = {
   helm_approve: "the Orchestrator, Managers and App Leads",
   helm_set_task: "the Orchestrator, Managers and App Leads",
   helm_direct: "the Orchestrator, Managers and App Leads",
-  helm_models: "the Orchestrator, Managers and App Leads",
-  helm_set_model: "the Orchestrator, Managers and App Leads",
+  helm_models: "the Orchestrator, Managers, App Leads and the Planner",
+  helm_set_model: "the Orchestrator, Managers, App Leads and the Planner",
+  helm_create_agent: "the Planner",
+  helm_rename_agent: "the Planner",
+  helm_retire_agent: "the Planner",
   helm_propose_plan: "the Orchestrator",
   helm_propose_wave: "the Orchestrator",
   helm_set_priority: "the Orchestrator and Managers",
@@ -270,6 +297,12 @@ async function dispatch(e: Engine, node: NodeInfo, name: string, p: Record<strin
       return agentModels(e, node);
     case "helm_set_model":
       return agentSetModel(e, node, p.changes as ModelChange[], String(p.reason ?? ""));
+    case "helm_create_agent":
+      return createAgent(e, node, p);
+    case "helm_rename_agent":
+      return `Renamed: ${renameNode(e, node.runId, String(p.nodeId), String(p.name), e.label(node))}. Tell the human.`;
+    case "helm_retire_agent":
+      return retireAgent(e, node.runId, node, String(p.nodeId), String(p.reason));
     case "helm_world":
       return JSON.stringify(world(e, node.runId, { appsPage: p.appsPage as number | undefined }));
     case "helm_propose_plan":
@@ -312,18 +345,29 @@ async function dispatch(e: Engine, node: NodeInfo, name: string, p: Record<strin
 function message(e: Engine, from: NodeInfo, to: string, text: string, kind: string): string {
   const target = e.repo.getNode(from.runId, to);
   if (!target) return `No node ${to}. Use ids from helm_context.`;
-  const allowed = target.id === from.parentId || target.parentId === from.id || (target.parentId === from.parentId && target.appId !== null && target.appId === from.appId);
+  // the Planner may talk to anyone; supervisors and custom agents may talk to the Planner
+  const planner = from.tier === "planner" || (target.tier === "planner" && ["orchestrator", "manager", "lead", "custom"].includes(from.tier));
+  const allowed = planner || target.id === from.parentId || target.parentId === from.id || (target.parentId === from.parentId && target.appId !== null && target.appId === from.appId);
   if (!allowed) return `Rejected: you can message your parent, your children and siblings in the same app. Route cross-app traffic through ${from.parentId ?? "the Orchestrator"}.`;
+  let note = "";
+  // a supervisor's questions upward are capped: decide inside your remit, batch the rest
+  if (kind === "ask" && target.id === from.parentId && (from.tier === "lead" || from.tier === "manager") && e.autonomous(e.run(from.runId))) {
+    const asked = e.repo.countComms(from.runId, from.id, target.id, "ask", e.now() - 3600_000);
+    if (asked >= UPWARD_ASKS_PER_HOUR) {
+      kind = "info";
+      note = ` It went as FYI, not as a question: you already asked ${UPWARD_ASKS_PER_HOUR} questions this hour. Decide what is inside ${scopeName(e, from)} yourself and keep going; put what truly needs ${e.label(target)} into one message later, with your recommendation.`;
+    } else note = ` (${asked + 1} of ${UPWARD_ASKS_PER_HOUR} questions this hour. Decide what is inside ${scopeName(e, from)} yourself.)`;
+  }
   const line = `Message from ${e.label(from)} (${from.id}, ${kind}): ${text}`;
   e.repo.tx(() => {
     e.repo.comms(from.runId, { from: from.id, to: target.id, kind, summary: text.slice(0, 300) });
     if (kind === "info") e.fyi(from.runId, target.id, line.slice(0, 800));
     else e.sendFromHelm(from.runId, target.id, line, { senderNodeId: from.id, kind: "message", commsKind: kind, key: `msg:${from.runId}:${from.id}:${target.id}:${e.now()}` });
   });
-  return kind === "info" ? `Delivered to ${e.label(target)} as FYI (it reads it on its next turn).` : `Sent to ${e.label(target)}.`;
+  return (kind === "info" ? `Delivered to ${e.label(target)} as FYI (it reads it on its next turn).` : `Sent to ${e.label(target)}.`) + note;
 }
 
-const ABOUT_LABEL: Record<string, string> = { credentials: "Credentials", spending: "Spending", privacy: "Private data", access: "Access" };
+const ABOUT_LABEL: Record<string, string> = { credentials: "Credentials", spending: "Spending", privacy: "Private data", access: "Access", owner: "Owner's call" };
 
 /**
  * Autonomy is high: a question that is not about credentials, spending, privacy or access goes to
@@ -334,27 +378,74 @@ function routeNeed(e: Engine, node: NodeInfo, p: Record<string, unknown>): strin
   const run = e.run(node.runId);
   const about = String(p.about ?? "other");
   if (about !== "other") p.title = `${ABOUT_LABEL[about] ?? about}: ${String(p.title)}`.slice(0, 200);
-  if (!e.autonomous(run) || about !== "other") return null;
+  if (!e.autonomous(run) || node.tier === "planner" || (HUMAN_ONLY as readonly string[]).includes(about)) return null;
+  const supervisor = node.tier === "orchestrator" || node.tier === "manager" || node.tier === "lead";
+  // the owner's call reaches the human from the top two levels
+  if (about === "owner" && (node.tier === "orchestrator" || node.tier === "manager")) return null;
   const parent = node.parentId ? e.repo.getNode(node.runId, node.parentId) : null;
-  if (!parent) {
+  // a supervisor decides what is inside its own remit (a real company: managers manage)
+  if ((about === "other" && supervisor) || !parent) {
     e.repo.event(node.runId, node.id, "decide", `kept a decision (autonomy): ${String(p.title).slice(0, 160)}`);
-    return "Autonomy is on: the human wants you to decide this. Pick the safest reasonable option, write it under Decisions in PORTFOLIO.md, tell the agents it affects (helm_direct), and keep going. The human reviews everything at sign-off. helm_need reaches the human only with about: credentials, spending, privacy or access.";
+    return decideYourselfText(node.tier, scopeName(e, node));
   }
   const options = ((p.options as string[] | undefined) ?? []).length ? ` Options: ${(p.options as string[]).join(" / ")}.` : "";
-  const text = `${p.kind === "approval" ? "Approval" : p.kind === "decision" ? "Decision" : "Question"} from ${e.label(node)} (${node.id}), sent to you instead of the human because autonomy is on: ${String(p.title)}. ${String(p.body ?? "")}${options}${p.evidence ? ` Evidence: ${String(p.evidence)}` : ""} Decide and answer with helm_message (to ${node.id}). Escalate with helm_need only if it is about credentials, spending, privacy or access.`;
+  const what = `${p.kind === "approval" ? "Approval" : p.kind === "decision" ? "Decision" : "Question"} from ${e.label(node)} (${node.id}), sent to you instead of the human because autonomy is on: ${String(p.title)}. ${String(p.body ?? "")}${options}${p.evidence ? ` Evidence: ${String(p.evidence)}` : ""}`;
+  const how =
+    about === "owner"
+      ? ` It says only the owner can answer. Answer it with helm_message (to ${node.id}) if the brief, PORTFOLIO.md or your notes settle it; otherwise raise it once with helm_need (about: owner).`
+      : ` Decide and answer with helm_message (to ${node.id}). It is inside your remit: do not pass it up unless it crosses into another app or group. Escalate with helm_need only if it is about credentials, spending, privacy or access.`;
   e.repo.tx(() => {
     e.repo.comms(node.runId, { from: node.id, to: parent.id, kind: "ask", summary: `(instead of the human) ${String(p.title)}`.slice(0, 300) });
-    e.sendFromHelm(node.runId, parent.id, text.slice(0, 3000), { senderNodeId: node.id, kind: "message", commsKind: "ask", key: `ask:${node.runId}:${node.id}:${String(p.title).slice(0, 60)}` });
+    e.sendFromHelm(node.runId, parent.id, (what + how).slice(0, 3000), { senderNodeId: node.id, kind: "message", commsKind: "ask", key: `ask:${node.runId}:${node.id}:${String(p.title).slice(0, 60)}` });
   });
   return `Autonomy is on: sent to ${e.label(parent)}, who decides (not the human). Keep working on what does not depend on it; the answer arrives as a message.`;
 }
 
+/** The remit a supervisor decides inside: its app, its group, or the run. */
+function scopeName(e: Engine, n: NodeInfo): string {
+  if (n.tier === "lead" && n.appId) return e.repo.getApp(n.runId, n.appId)?.name ?? "your app";
+  if (n.tier === "manager") {
+    const apps = e.repo.listApps(n.runId).filter((a) => a.managerNodeId === n.id).map((a) => a.name);
+    return apps.length ? `your group (${apps.slice(0, 6).join(", ")}${apps.length > 6 ? ", …" : ""})` : "your group";
+  }
+  return n.tier === "orchestrator" ? "the run" : "your task";
+}
+
 /** Autonomy is high: approve a wave or plan change on the Orchestrator's behalf, on the record. */
-async function autoApprove(e: Engine, runId: string, needId: string, what: string): Promise<void> {
+async function autoApprove(e: Engine, runId: string, needId: string, what: string, by = "the Orchestrator"): Promise<void> {
   const noGate = async () => {
     throw new HelmError("not a sign-off", "bad_state");
   };
-  await resolveNeed(e, runId, needId, { action: "approve", text: `${what} (approved by the Orchestrator; autonomy is on)`, actor: "system" }, { signoff: noGate, sendback: noGate });
+  await resolveNeed(e, runId, needId, { action: "approve", text: `${what} (approved by ${by}; autonomy is on)`, actor: "system" }, { signoff: noGate, sendback: noGate });
+}
+
+/** helm_create_agent: the Planner designs an agent; it joins through the plan-change flow (autonomy approves it at once). */
+async function createAgent(e: Engine, node: NodeInfo, p: Record<string, unknown>): Promise<string> {
+  let model = null;
+  if (p.model) {
+    const res = resolveModelWord(await e.catalog(e.repo.runHost(node.runId)), String(p.model));
+    if ("problem" in res) return `Rejected: ${res.problem}`;
+    model = res.ref;
+  }
+  const spec = buildSpec(e, node, { name: String(p.name), title: String(p.title), mission: String(p.mission), reportsTo: String(p.reportsTo), writes: p.writes as string[] | undefined, reads: p.reads as string[] | undefined, model, skills: p.skills as string[] | undefined, wakeOn: p.wakeOn as string[] | undefined, reason: p.reason as string | undefined });
+  if (typeof spec === "string") return `Rejected: ${spec}`;
+  const v = validateDelta(e, node.runId, { agents: [spec] });
+  if (!v.ok) return `Rejected: ${v.error}`;
+  const parent = e.node(node.runId, spec.parentId);
+  const what = `New agent: ${spec.name} · ${spec.title} → reports to ${e.label(parent)}`;
+  const need = e.repo.tx(() => e.raiseNeed(node.runId, { kind: "plan", nodeId: node.id, appId: spec.appId, title: what, body: `${spec.reason ? `${spec.reason}\n` : ""}Mission: ${spec.mission}`.slice(0, 1200), evidence: "", options: ["Approve new agent", "Deny"], dedupeKey: `agent:${spec.id}`, data: { delta: { agents: [spec] } } }));
+  if (!need) return `Already proposed ${spec.name}; waiting for the human.`;
+  const rename = `The human can rename it any time (ask you, or \`bb helm rename ${spec.id} "<name>"\`).`;
+  if (!e.autonomous(e.run(node.runId))) return `Raised ${need.id}: the human approves ${spec.name} in Needs you; you will be told the outcome. ${rename}`;
+  try {
+    await autoApprove(e, node.runId, need.id, what, e.label(node));
+  } catch (err) {
+    return `Rejected while applying: ${err instanceof Error ? err.message : String(err)}`;
+  }
+  const made = e.repo.getNode(node.runId, spec.id);
+  if (!made) return `Approved ${need.id}, but ${spec.name} was not created; check helm_world.`;
+  const m = made.model ?? e.effectiveModel(e.run(node.runId), made);
+  return `Created ${e.label(made)} (${made.id}), reporting to ${e.label(parent)}; ${made.status === "queued" ? "it starts now" : `it is ${made.status}`} on ${m ? `${m.providerId}/${m.modelId}${m.reasoning ? `:${m.reasoning}` : ""}` : "the default model"}${spec.wakeOn.length ? `, woken on ${spec.wakeOn.join(", ")}` : ""}. Its supervisor was told. Tell the human its name and job. ${rename}`;
 }
 
 function proposePlan(e: Engine, node: NodeInfo, p: Record<string, unknown>): string {

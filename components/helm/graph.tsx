@@ -667,7 +667,7 @@ export function GraphView({ active }: { active: boolean }) {
                 />
               );
             }
-            if (r.mode === "chip") return <ChipCard key={id} {...common} n={n} catalog={catalog} title={n.role === "orch" ? "Orchestrator" : `${data.managers.find((m) => m.id === id)?.name ?? n.label} manager`} />;
+            if (r.mode === "chip") return <ChipCard key={id} {...common} n={n} catalog={catalog} title={n.role === "orch" ? n.label : `${data.managers.find((m) => m.id === id)?.name ?? n.label} manager`} />;
             const app = n.appId ? data.apps[n.appId] : null;
             const kids = n.role === "lead" || (n.alsoLead && drill) ? (data.children[id] ?? []).map((c) => data.nodes[c]).filter((c) => c && c.appId === (app?.id ?? c.appId)) : [];
             return <AgentCard key={id} {...common} n={n} app={app} catalog={catalog} needs={der.needsByNode[id] ?? 0} kids={kids} lead={n.role === "lead" || (!!drill && id === leadOf(data, drill)?.id)} />;
@@ -987,12 +987,12 @@ const TierCard = memo(function TierCard(
 ) {
   const isM = p.r.mode === "mgr";
   return (
-    <div {...cardProps(p, cx("tier", `s-${p.n.status}`, p.n.touched && "touched-ring"), `${isM ? "Manager" : "Orchestrator"} ${p.sub}, ${statusLabel(p.n.status)}`)}>
+    <div {...cardProps(p, cx("tier", `s-${p.n.status}`, p.n.touched && "touched-ring"), `${isM ? "Manager" : p.n.label} ${p.sub}, ${statusLabel(p.n.status)}`)}>
       <Badges touched={p.n.touched ? 1 : 0} needs={p.needs} />
       <div className="n-head">
         <RoleTile node={p.n} />
         <div className="n-title">
-          <b>{isM ? "Manager" : "Orchestrator"}</b>
+          <b>{isM ? "Manager" : p.n.label}</b>
           <span className="n-sub">{p.sub}</span>
         </div>
         {p.onToggle ? (
@@ -1035,7 +1035,7 @@ const ChipCard = memo(function ChipCard(p: CardCommon & { n: SnapNode; catalog: 
 
 const AgentCard = memo(function AgentCard(p: CardCommon & { n: SnapNode; app: SnapApp | null; catalog: Catalog | null; needs: number; kids: SnapNode[]; lead: boolean }) {
   const n = p.n;
-  const title = n.role === "orch" ? "Orchestrator" : agentTitle(n);
+  const title = n.role === "orch" ? n.label : agentTitle(n);
   const sub = n.role === "orch" ? (p.app ? `also leads ${p.app.name}` : "Orchestrator") : `${p.app?.name ?? ""}${n.priority === "high" ? " · high priority" : n.priority === "low" ? " · low priority" : ""}`;
   return (
     <div {...cardProps(p, cx("agent", `s-${n.status}`, n.tier === "gate" && "gate", n.touched && "touched-ring"), `${title}${p.app ? `, ${p.app.name}` : ""}, ${statusLabel(n.status)}`)}>
@@ -1127,7 +1127,7 @@ function Outline({ data, catalog, sel, onSelect, onClose }: { data: RunState; ca
           </span>
           <RoleTile node={n} />
           <span className="grow trunc">
-            <b>{n.role === "orch" ? "Orchestrator" : n.role === "mgr" ? n.label : agentTitle(n)}</b>
+            <b>{n.role === "orch" ? n.label : n.role === "mgr" ? n.label : agentTitle(n)}</b>
             {app && n.role !== "orch" ? <span className="muted"> · {app.name}</span> : null}
             {n.role === "lead" && app ? <span className="muted"> · {stageLabel(app.stage)}</span> : null}
           </span>

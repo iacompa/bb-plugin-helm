@@ -278,6 +278,57 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             return out(i.options.json, { directive: d }, `${d.id}: ${d.summary}`);
           }),
       }),
+      ask: cliCommand({
+        summary: "Ask the run's Planner (Amer) a question or for a change: new agents, plan changes, models. Answers in its thread",
+        positionals: [{ name: "question", description: "Your question or request (or use --message-file)", required: false }] as const,
+        options: { "message-file": { type: "string", description: "File with the question", placeholder: "file" }, run: RUN, json: JSON_OPT },
+        run: (i, ctx) =>
+          guard(async () => {
+            const run = runOf(i.options.run);
+            const text = i.options["message-file"] ? await readText(i.options["message-file"], ctx, "question") : (i.positionals.question ?? "");
+            if (!text.trim()) throw new PluginCliError("Ask something: bb helm ask \"…\" or --message-file <file>.", { code: "invalid_value" });
+            const r = await svc.ask(run.id, text);
+            const who = svc.engine.label(r.planner);
+            return out(i.options.json, { planner: r.planner.id, threadId: r.planner.threadId, delivered: r.delivered }, r.delivered === "now" ? `Sent to ${who}. The answer appears in its thread ("${who} · ${run.name}" in BB's sidebar).` : `${who} is starting with your question; the answer appears in its thread ("${who} · ${run.name}" in BB's sidebar).`);
+          }),
+      }),
+      rename: cliCommand({
+        summary: "Give an agent a personal name (the Planner, the Orchestrator, a custom agent, anyone)",
+        positionals: [
+          { name: "agent", description: "Node id, current name, app name (its lead), orch or planner", required: true },
+          { name: "name", description: "The new name", required: true },
+        ] as const,
+        options: { run: RUN, json: JSON_OPT },
+        run: (i) =>
+          guard(async () => {
+            const run = runOf(i.options.run);
+            const label = svc.rename(run.id, i.positionals.agent!, i.positionals.name!);
+            return out(i.options.json, { label }, `Renamed: ${label}.`);
+          }),
+      }),
+      agents: cliCommand({
+        summary: "The Planner, the Orchestrator and the custom agents the Planner designed",
+        options: { run: RUN, json: JSON_OPT },
+        run: (i) =>
+          guard(async () => {
+            const run = runOf(i.options.run);
+            const list = svc.agents(run.id);
+            const lines = list.map((a) => `${a.id.padEnd(22)} ${a.label}  [${a.status}]${a.role === "custom" ? `  → reports to ${a.parent}${a.wakeOn.length ? ` · wakes on ${a.wakeOn.join(", ")}` : ""}` : ""}${a.mission ? `\n${" ".repeat(23)}${a.mission.slice(0, 160).replace(/\s+/g, " ")}${a.mission.length > 160 ? "…" : ""}` : ""}`);
+            return out(i.options.json, { agents: list }, [`${run.name}:`, ...lines, list.some((a) => a.role === "custom") ? "" : "No custom agents yet. Ask the Planner: bb helm ask \"…\"", "Rename any agent: bb helm rename <agent> <name>."].filter(Boolean).join("\n"));
+          }),
+      }),
+      retire: cliCommand({
+        summary: "Stop a custom agent for good (its thread is stopped and archived)",
+        positionals: [{ name: "agent", description: "The custom agent's id or name", required: true }] as const,
+        options: { reason: { type: "string", description: "Why (kept on the record)" }, yes: { type: "boolean", description: "Confirm" }, run: RUN, json: JSON_OPT },
+        run: (i) =>
+          guard(async () => {
+            const run = runOf(i.options.run);
+            if (!i.options.yes) throw new PluginCliError("Retiring stops the agent for good. Re-run with --yes.", { code: "confirm_required" });
+            const text = svc.retire(run.id, i.positionals.agent!, i.options.reason ?? "");
+            return out(i.options.json, { result: text }, text);
+          }),
+      }),
       needs: cliCommand({
         summary: "Open Needs-you items",
         options: { run: RUN, json: JSON_OPT },

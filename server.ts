@@ -13,6 +13,7 @@ import { installEventHandler, reconcile } from "./src/server/engine/events.ts";
 import { callTool, TOOL_DEFS } from "./src/server/agent/tools.ts";
 import { PLANNER_TOOLS, skillsFor, toolsForNode } from "./src/server/domain/roles.ts";
 import { getTask } from "./src/server/engine/tasks.ts";
+import { customMeta } from "./src/server/engine/custom.ts";
 import { instructionsFor, PLANNER_INSTRUCTIONS } from "./src/server/domain/briefs.ts";
 import { Planner } from "./src/server/engine/planner.ts";
 import { readMeta } from "./src/server/bb/port.ts";
@@ -110,13 +111,16 @@ export default async function plugin(bb: BbPluginApi) {
     if (!node) return { tools: [], skills: ["helm", "helm-planner"] };
     const parent = node.parentId ? repo.getNode(node.runId, node.parentId) : null;
     const app = node.appId ? repo.getApp(node.runId, node.appId) : null;
-    const skills = skillsFor(node, app);
-    const task = getTask(engine, node.runId, node.id);
-    const author = task ? repo.getNode(node.runId, task.by) : null;
+    const skills = skillsFor(node, app, node.role === "custom" ? customMeta(engine, node.runId, node.id).skills : []);
+    const stored = getTask(engine, node.runId, node.id);
+    // a custom agent's mission is its task until its supervisor writes one
+    const designer = node.createdBy ? repo.getNode(node.runId, node.createdBy) : null;
+    const task = stored ?? (node.role === "custom" && node.charter ? { text: node.charter, by: node.createdBy ?? "planner", at: 0 } : null);
+    const author = task ? repo.getNode(node.runId, task.by) ?? designer : null;
     return {
       tools: toolsForNode(node.tier, node.alsoLead),
       skills,
-      instructions: instructionsFor({ role: node.role, platform: node.platform, nodeId: node.id, parentLabel: parent ? engine.label(parent) : "the human", skills, alsoLead: node.alsoLead, task: task ? { text: task.text, byLabel: author ? engine.label(author) : "your supervisor" } : null, scope: engine.scopeLine(node) }),
+      instructions: instructionsFor({ role: node.role, platform: node.platform, nodeId: node.id, parentLabel: parent ? engine.label(parent) : "the human", skills, alsoLead: node.alsoLead, task: task ? { text: task.text, byLabel: author ? engine.label(author) : "your supervisor" } : null, scope: engine.scopeLine(node), displayName: node.role === "planner" || node.role === "custom" || node.role === "orch" || node.name ? engine.label(node) : null }),
     };
   });
 

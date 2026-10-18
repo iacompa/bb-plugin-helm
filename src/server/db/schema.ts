@@ -147,4 +147,13 @@ ALTER TABLE apps ADD COLUMN kind TEXT DEFAULT 'app';
 ALTER TABLE apps ADD COLUMN needs_json TEXT DEFAULT '[]';
 ALTER TABLE apps ADD COLUMN tools_json TEXT DEFAULT '[]';
 `,
+  // 7 — names and custom agents: every agent may have a personal name (Gestra the Orchestrator,
+  // Amer the Planner); a custom agent the Planner designed has a title, a mission and wake events.
+  `
+ALTER TABLE nodes ADD COLUMN name TEXT;
+ALTER TABLE nodes ADD COLUMN title TEXT;
+ALTER TABLE nodes ADD COLUMN charter TEXT;
+ALTER TABLE nodes ADD COLUMN wake_json TEXT DEFAULT '[]';
+ALTER TABLE nodes ADD COLUMN created_by TEXT;
+`,
 ];

@@ -128,7 +128,51 @@ bb helm priority <app|node> low|normal|high
   wakes it). `stop` ends it (bottom-up with a cascade). `retry` re-runs a failed/stalled one.
 - `priority` feeds the scheduler; `high` work starts first when capacity is short.
 - Questions for the Orchestrator ("what is blocking?") are not directives — read
-  `bb helm world` / `status` instead of `tell`-ing it a question.
+  `bb helm world` / `status` instead of `tell`-ing it a question, or ask the Planner.
+
+## Ask the Planner (Amer); names and custom agents
+
+```bash
+bb helm ask "Should we add a HIPAA reviewer for the clinic app?" [--run <id>]
+bb helm ask --message-file q.md
+bb helm agents [--run <id>] [--json]
+bb helm rename <agent> "<name>"
+bb helm retire <agent> --yes [--reason "<why>"]
+```
+
+- Every run has a **Planner** beside the Orchestrator: **Amer · Planner** and **Gestra ·
+  Orchestrator** by default (settings `plannerName`, `orchestratorName`). The Planner runs on a
+  stronger model (the `planner` slot, or the strongest model on the Orchestrator's provider at
+  its highest reasoning). It is idle until asked, so it uses no capacity while waiting.
+- `ask` sends the question to the Planner's thread (it is visible in the sidebar; the user
+  can also just type there). It is not a directive and steers nobody. The Planner answers from
+  live world state and, when asked for a change, makes it:
+  - plan changes, such as adding a project or adding the `hipaa` need, which brings a
+    Compliance agent;
+  - model changes;
+  - **custom agents**: new kinds of agent designed for this run, such as a GitHub sync agent, a
+    storage guard that keeps work on the external SSD, a HIPAA reviewer or a workflow debugger.
+- A custom agent reports to the Orchestrator, a manager or a lead. Its supervisor and the
+  Orchestrator get an FYI line. Events (stage changes, Ready, sign-off, failures) wake it; it
+  never polls. Anything leaving the machine (pushes, deploys, messages, spending) still needs
+  the human. With autonomy `ask`, a new agent waits in Needs you. A run holds at most 12.
+- The Planner names each agent and says the name; the user can change it. `rename` works on
+  any agent (node id, current name, an app's lead, `orch`, `planner`) and the thread title
+  follows. Names are unique in a run.
+- `agents` lists the Planner, the Orchestrator and every custom agent with mission and status.
+  `retire` stops and archives a custom agent; built-in agents change through the plan instead.
+
+### Who decides what
+
+Helm runs like a company:
+- Leads decide inside their apps; managers decide inside their groups.
+- With autonomy high, a lead's or manager's ordinary question stays with it. Only workers'
+  questions go to their lead.
+- Upward questions are capped at 3 waking messages an hour per manager or lead; more arrive
+  as FYI.
+- The Orchestrator oversees and delegates, and grants standing authority, not per-item GOs.
+- The human hears about credentials, spending, private data, access, and questions only the
+  owner can answer (`about: owner`).
 
 ## Answer Needs-you
 

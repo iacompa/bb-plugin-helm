@@ -4,6 +4,7 @@ import type { Catalog, CatalogModel, ModelRef, Role, SlotId, SlotMap } from "../
 
 export const SLOT_DEFS: Array<{ id: SlotId; group: "Coordination" | "Build" | "Gates" | "Support"; name: string; desc: string; role: Role | null }> = [
   { id: "orchestrator", group: "Coordination", name: "Orchestrator", desc: "Strategy, staffing and the portfolio view. Reads everything.", role: "orch" },
+  { id: "planner", group: "Coordination", name: "Planner", desc: "Amer: answers your questions about the run and designs new agents when they help. Idle until you ask. Leave empty to use the Orchestrator's model at its highest reasoning.", role: "planner" },
   { id: "manager", group: "Coordination", name: "Managers", desc: "Oversee up to four app leads each. Roll up status.", role: "mgr" },
   { id: "lead", group: "Coordination", name: "App leads", desc: "One per app: spec, contract, integration, decisions.", role: "lead" },
   { id: "ui", group: "Build", name: "UI builders", desc: "Design system, screens, motion. Asset builders use this model too.", role: "ui" },
@@ -51,6 +52,7 @@ export const SEED_PRESETS: Record<string, SlotMap> = {
   "Cheap dev run": Object.fromEntries(SLOT_IDS.map((s) => [s, ref("claude-code", "claude-haiku-5-5", "low")])) as SlotMap,
   "Max quality": {
     orchestrator: ref("claude-code", "claude-opus-5-5", "max"),
+    planner: ref("claude-code", "claude-opus-5-5", "max"),
     manager: ref("claude-code", "claude-opus-5-5", "high"),
     lead: ref("claude-code", "claude-opus-5-5", "high"),
     ui: ref("codex", "gpt-6.1-sol", "max"),
@@ -289,6 +291,8 @@ export const BASE_TOK: Record<Role, number> = {
   data: 700,
   compliance: 350,
   assets: 700,
+  planner: 400,
+  custom: 400,
 };
 
 export const RW: Record<string, number> = { none: 0.5, low: 0.7, medium: 0.85, high: 1, xhigh: 1.35, max: 1.7, ultra: 2.2, ultracode: 1.8 };

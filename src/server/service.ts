@@ -6,6 +6,7 @@ import type { Autonomy, DirectiveInfo, ModelRef, NodeInfo, PermissionMode, Portf
 import { PERMISSION_KEYS, type SettingsWriter } from "./settings.ts";
 import { SLOT_IDS, SEED_PRESETS, modelName, validateRef } from "./domain/models.ts";
 import { ORCH_ID } from "./domain/topology.ts";
+import { ensurePlanner, nameOf, renameNode, retireAgent } from "./engine/custom.ts";
 import { createDirective, previewDirective, resolveNeed, type DirectiveInput, type NeedResolution } from "./engine/direct.ts";
 import { HelmError, autonomyText, type Engine } from "./engine/engine.ts";
 import { reconcile, watchdog } from "./engine/events.ts";
@@ -96,6 +97,9 @@ export class HelmService {
     if (lower === "orchestrator") return this.repo.getNode(runId, ORCH_ID)!;
     const exact = nodes.find((n) => n.id === r) ?? nodes.find((n) => n.id.toLowerCase() === lower);
     if (exact) return exact;
+    // by personal name: "Gestra", "Amer", "Ledger"
+    const named = nodes.filter((n) => n.status !== "done" && nameOf(this.engine, n)?.toLowerCase() === lower);
+    if (named.length === 1) return named[0];
     const app = this.repo.listApps(runId).find((a) => a.id === lower || a.name.toLowerCase() === lower);
     if (app) {
       const lead = this.engine.leadOf(runId, app.id);
@@ -104,6 +108,41 @@ export class HelmService {
     const byLabel = nodes.filter((n) => this.engine.label(n).toLowerCase() === lower);
     if (byLabel.length === 1) return byLabel[0];
     throw new HelmError(`No agent ${JSON.stringify(ref)} in this run.`, "not_found", "Use a node id such as ledgerly.ui, an app name (its lead) or orch. `bb helm world` lists them.");
+  }
+
+  // ───────── the Planner, names and custom agents ─────────
+
+  /** Send the human's question to the run's Planner, creating and starting it if needed. */
+  async ask(runId: string, text: string): Promise<{ planner: NodeInfo; delivered: "now" | "at-start" }> {
+    const run = this.engine.run(runId);
+    const q = text.trim().slice(0, 8000);
+    if (!q) throw new HelmError("Ask something.", "invalid_value");
+    if (run.status !== "running" && run.status !== "paused") throw new HelmError(`${run.name} is ${run.status}; the Planner works in a running run.`, "bad_state", run.status === "planning" ? "Start the run first (bb helm start)." : undefined);
+    let p = await ensurePlanner(this.engine, runId);
+    if (p.threadId) {
+      this.engine.sendFromHelm(runId, p.id, `From the human (bb helm ask): ${q}`, { key: `ask:${runId}:${this.engine.now()}` });
+      this.repo.event(runId, p.id, "question", `the human: ${q.slice(0, 160)}`);
+      return { planner: p, delivered: "now" };
+    }
+    this.repo.setMeta(`planner-q:${runId}`, q);
+    p = await ensurePlanner(this.engine, runId, { queue: true });
+    return { planner: p, delivered: "at-start" };
+  }
+
+  rename(runId: string, ref: string, name: string): string {
+    const n = this.nodeFor(runId, ref);
+    return renameNode(this.engine, runId, n.id, name, "the human");
+  }
+
+  retire(runId: string, ref: string, reason: string): string {
+    const n = this.nodeFor(runId, ref);
+    return retireAgent(this.engine, runId, null, n.id, reason || "retired by the human");
+  }
+
+  /** The Planner, the Orchestrator and every custom agent, with names and who designed them. */
+  agents(runId: string) {
+    const nodes = this.repo.listNodes(runId).filter((n) => n.role === "planner" || n.role === "orch" || n.role === "custom");
+    return nodes.map((n) => ({ id: n.id, label: this.engine.label(n), role: n.role, name: nameOf(this.engine, n), title: n.title, status: n.status, parent: n.parentId, threadId: n.threadId, mission: n.charter, wakeOn: n.wakeOn, createdBy: n.createdBy }));
   }
 
   appFor(runId: string, ref: string) {
@@ -173,6 +212,9 @@ export class HelmService {
   async refresh(runId: string) {
     // check the run's tools first so the rewritten briefs say what is installed
     await this.engine.probeRun(runId).catch(() => undefined);
+    // runs started before the Planner existed get one (it introduces itself once, then idles)
+    const run = this.engine.run(runId);
+    if (run.status === "running" && !this.repo.getNode(runId, "planner")) await ensurePlanner(this.engine, runId, { queue: true });
     return refreshRun(this.engine, runId);
   }
 

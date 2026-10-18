@@ -3,6 +3,7 @@
 // Event handling, directives, gates and tools live in sibling modules that take
 // the engine as their first argument; nothing here touches api.sdk directly.
 
+import { authorityText } from "../domain/authority.ts";
 import type { OutboxRow, Repo } from "../db/repo.ts";
 import type { BbPort, EnvSpec, HelmEvent, PluginLite } from "../bb/port.ts";
 import type { HostOps } from "../../shared/host-contract.ts";
@@ -26,10 +27,11 @@ import { OutboxWorker, type HandlerResult } from "./outbox.ts";
 import { DEFAULT_SETTINGS, expandHome, newRunId, silentLogger, type HelmSettings, type Logger } from "./context.ts";
 import { parseBrief, withProfiles } from "../domain/brief.ts";
 import { ORCH_ID, planTopology, slugify, type TopologyPlan } from "../domain/topology.ts";
+import { ensurePlanner, nameOf, PLANNER_ID, threadTitle, wakeCustom, customMeta } from "./custom.ts";
 import { ROLES, roleLabel, scopeFor, tierOfRole } from "../domain/roles.ts";
 import { forecast, normalizeModel, PROVIDER_LABEL, requiredSlots, resolveModel, validateRef, modelName, unsetSlots, familyWarnings } from "../domain/models.ts";
 import { briefFor, escapeForPrompt, initialPortfolioMd, managerNotesMd, type BriefContext, type ProjectBrief } from "../domain/briefs.ts";
-import { BLOCKED_PLUGINS, PLUGIN_INFO, TOOL_INFO } from "../domain/profile.ts";
+import { BLOCKED_PLUGINS, PLUGIN_INFO, profileLine, TOOL_INFO } from "../domain/profile.ts";
 import { getTask, TASK_MAX } from "./tasks.ts";
 import { firstWave, wavesEstimate, admit, type Eligible, nextWave } from "../domain/scheduler.ts";
 import { RUN_CHECK_SH, CHECKS_JSON_SKELETON, GITIGNORE } from "../domain/checks.ts";
@@ -87,8 +89,8 @@ const FLUSH_MS = 120_000;
 export function autonomyText(orchestrator: boolean): string {
   const human = "credentials or API keys; anything that spends real money (paid services, purchases, a budget raise); anything that could expose private keys, secrets or personal data; access only the human can grant (permissions, accounts)";
   return orchestrator
-    ? `The human wants you to run this build. Decide everything yourself except: ${human}. Agents' questions come to you (through their managers) instead of the human: answer them with helm_message or helm_direct. Waves and plan changes go ahead without approval. When a call is uncertain, pick the safest reasonable option, write it under Decisions in PORTFOLIO.md, and keep going; the human reviews everything at sign-off. Use helm_need only for the exceptions above, and set \`about\` to say which.`
-    : `The human wants the Orchestrator to run this build. Ask your supervisor with helm_need as usual: unless it is about ${human}, it goes to your supervisor, not the human, and the answer comes back as a message. Keep working on whatever does not depend on the answer.`;
+    ? `The human wants you to run this build. Decide everything yourself except: ${human}. Managers and leads decide what is inside their groups and apps; only what crosses them comes to you. Waves and plan changes go ahead without approval. When a call is uncertain, pick the safest reasonable option, write it under Decisions in PORTFOLIO.md, and keep going; the human reviews everything at sign-off. Use helm_need only for the exceptions above, or a question only the owner can answer, and set \`about\` to say which.`
+    : `The human wants the Orchestrator to run this build. Workers' questions (helm_need) go to their supervisor, not the human, and the answer comes back as a message; a supervisor decides what is inside its own remit (see Your authority). Only ${human} reach the human. Keep working on whatever does not depend on the answer.`;
 }
 
 /** BB's refusal when a provider cannot run the requested permission mode. */
@@ -160,6 +162,23 @@ export class Engine {
     } catch (e) {
       this.log.warn(`publish failed: ${String(e)}`);
     }
+    // custom agents are woken by events, never by polling
+    try {
+      if (event === "stage.changed") {
+        const p = payload as { appId?: string; stage?: string };
+        const app = p.appId ? this.repo.getApp(runId, p.appId) : null;
+        if (app && p.stage) {
+          wakeCustom(this, runId, "stage", app.id, `${app.name} moved to ${p.stage}`);
+          if (p.stage === "ready") wakeCustom(this, runId, "ready", app.id, `${app.name} is Ready for the human's sign-off`);
+          if (p.stage === "done") wakeCustom(this, runId, "signoff", app.id, `the human signed off ${app.name}`);
+        }
+      } else if (event === "need.created") {
+        const need = payload as { kind?: string; appId?: string | null; nodeId?: string | null; title?: string };
+        if (need.kind === "failed") wakeCustom(this, runId, "failed", need.appId ?? null, `failure: ${String(need.title ?? "").slice(0, 160)}`);
+      }
+    } catch (e) {
+      this.log.warn(`wake failed: ${String(e)}`);
+    }
   }
 
   /** Start: recover the outbox, subscribe to events, reconcile live runs. */
@@ -227,13 +246,15 @@ export class Engine {
     return `You manage only these apps: ${names.join(", ") || "none yet"}. Other managers' apps are not yours: do not read their notes, branches or reports and do not direct their leads. Anything that crosses groups goes to the Orchestrator.`;
   }
 
-  /** "Lumen · UI builder", "Wellness manager", "Orchestrator". */
-  label(n: Pick<NodeInfo, "runId" | "id" | "role" | "platform" | "appId">): string {
-    if (n.role === "orch") return "Orchestrator";
-    if (n.role === "mgr") return `${this.managerName(n.runId, n.id)} manager`;
+  /** "Gestra · Orchestrator", "Amer · Planner", "Ledger · GitHub Sync (Tide)", "Lumen · UI builder", "Wellness manager". A personal name always comes with the role. */
+  label(n: Pick<NodeInfo, "runId" | "id" | "role" | "platform" | "appId"> & { name?: string | null; title?: string | null }): string {
+    const name = nameOf(this, n);
+    if (n.role === "orch") return name ? `${name} · Orchestrator` : "Orchestrator";
+    if (n.role === "planner") return `${name ?? "Amer"} · Planner`;
     const app = n.appId ? this.repo.getApp(n.runId, n.appId) : null;
-    const rl = n.role === "lead" ? "App lead" : roleLabel(n.role, n.platform);
-    return app ? `${app.name} · ${rl}` : rl;
+    if (n.role === "custom") return `${name ?? n.id} · ${n.title ?? "Custom agent"}${app ? ` (${app.name})` : ""}`;
+    const base = n.role === "mgr" ? `${this.managerName(n.runId, n.id)} manager` : app ? `${app.name} · ${n.role === "lead" ? "App lead" : roleLabel(n.role, n.platform)}` : n.role === "lead" ? "App lead" : roleLabel(n.role, n.platform);
+    return name ? `${name} · ${base}` : base;
   }
 
   /** The lead-equivalent node of an app: its lead, or the Orchestrator in a C1 run. */
@@ -529,7 +550,8 @@ export class Engine {
   /** Effective model for a node right now: node override > app override > run slots (§7.5). */
   effectiveModel(run: RunInfo, n: NodeInfo): ModelRef | null {
     const app = n.appId ? this.repo.getApp(run.id, n.appId) : null;
-    return resolveModel({ nodeOverride: n.modelOverride ? n.model : null, appOverride: app?.slotOverrides?.[n.slot] ?? null, runSlot: run.slots[n.slot] ?? null });
+    const runSlot = run.slots[n.slot] ?? (n.role === "planner" ? n.model ?? run.slots.orchestrator ?? null : null);
+    return resolveModel({ nodeOverride: n.modelOverride ? n.model : null, appOverride: app?.slotOverrides?.[n.slot] ?? null, runSlot });
   }
 
   /** §9.9 — what "Approve and start" does, in order. */
@@ -569,6 +591,8 @@ export class Engine {
         this.repo.updateNode(runId, n.id, { model: m, providerId: m?.providerId ?? null });
       }
     });
+    // the run's Planner (Amer): beside the Orchestrator, idle until someone writes to it
+    await ensurePlanner(this, runId, { catalog: cat });
     const fresh = this.run(runId);
     const studio = this.studioPath(fresh);
     const w = wavesEstimate(plan.apps.length, fresh.concurrency);
@@ -601,6 +625,7 @@ export class Engine {
       }
       this.repo.enqueue({ id: this.oid(), runId, kind: "project", nodeId: ORCH_ID, payload: { studio: true }, idemKey: `project:${runId}:studio` });
       this.repo.updateNode(runId, ORCH_ID, { status: "queued", firstInLine: true });
+      if (this.repo.getNode(runId, PLANNER_ID)) this.repo.updateNode(runId, PLANNER_ID, { status: "queued", firstInLine: true });
       for (const m of plan.managers) this.repo.updateNode(runId, m.id, { status: "queued", firstInLine: true });
       const apps = this.repo.listApps(runId);
       const wave = c1 ? apps : firstWave(apps.map((a) => ({ id: a.id, stage: a.stage, priority: a.priority, order: a.order, managerId: a.managerNodeId })), fresh.concurrency);
@@ -838,11 +863,34 @@ export class Engine {
     const appExtra = app ? this.repo.appExtra(run.id, app.id) : null;
     const lines: string[] = [];
     const studio = this.studioPath(run);
+    const planner = byId.get(PLANNER_ID);
+    if (n.role === "orch" && planner)
+      lines.push(`## The Planner\n${this.label(planner)} (node \`planner\`) sits beside you, outside the chain of command. It is idle until the human or you write to it: the human asks it questions, and it can add custom agents (new kinds of agents designed for this run) under you, a manager or a lead, change the plan and change models, all on the record. Ask it for a second opinion on a hard call with \`helm_message\` (to \`planner\`, kind \`ask\`). Custom agents report to their supervisor like anyone else; their supervisor reads their reports.`);
+    if (n.role === "planner") {
+      const custom = nodes.filter((x) => x.role === "custom" && x.status !== "done");
+      const orch = byId.get(ORCH_ID);
+      lines.push(`## Your place\nYou sit beside ${orch ? this.label(orch) : "the Orchestrator"} (node \`orch\`), outside the chain of command: nobody reports to you and you answer to the human. The human talks to you in this thread; the Orchestrator and supervisors may ask you with \`helm_message\`. You change the run only through your tools, and every change is on the record.`);
+      lines.push(`## Your notes\nKeep \`${studio}/PLANNER-NOTES.md\`: what the human asked, what you recommended, what you changed and why. Before answering anything about the run's state, call \`helm_world\` (and read \`${studio}/PORTFOLIO.md\` for strategy); never answer from memory.`);
+      lines.push(`## The run when you started\n${this.plannerSnapshot(run)}`);
+      const q = this.repo.getMeta(`planner-q:${run.id}`);
+      if (q && !n.threadId) lines.push(`## The human's question (answer it first)\n${escapeForPrompt(q, 8000)}`);
+      if (custom.length) lines.push(`## Custom agents now\n${custom.slice(0, 20).map((x) => `- ${this.label(x)} (${x.id}) → reports to ${x.parentId}, ${x.status}`).join("\n")}`);
+    }
+    if (n.role === "custom") {
+      const meta = customMeta(this, run.id, n.id);
+      lines.push(`## Where you work\n${app ? `In your own worktree of ${app.name}, branched off its integration branch. Commit there; report the commit as evidence. Your supervisor merges what should be merged.` : `In Helm's Studio folder \`${studio}\`, which the Orchestrator and managers share. Write only inside your scope; read anything there.`}`);
+      if (meta.reads.length) lines.push(`## Read-only folders\nYou may read these and never change them: ${meta.reads.map((r) => `\`${escapeForPrompt(r, 300)}\``).join(", ")}.`);
+      if (n.wakeOn.length) lines.push(`## When Helm wakes you\nHelm messages you when ${n.wakeOn.map((w) => ({ stage: "an app in your scope changes stage", ready: "an app in your scope is Ready", signoff: "the human signs an app off", failed: "an agent in your scope fails" })[w]).join(", ")}. Between wake-ups you are idle: never poll, loop or sleep waiting.`);
+      lines.push("## Real-world actions\nAnything that leaves this machine or touches a real account (pushing to a remote, publishing, deploying, sending messages or email, spending money, changing settings outside your workspace) needs the human: ask once with `helm_need` (about: access, credentials or spending) and stop, unless your mission says the human already approved exactly that action. Never handle credentials yourself.");
+    }
     if (n.role === "orch") {
       lines.push(`## Your memory\nRead \`${studio}/PORTFOLIO.md\` first, every time you start or after a compaction. Helm rewrites the block between the helm:world markers; keep strategy and decisions below it. \`helm_world\` is always current — prefer it to asking anyone.`);
       if (run.autoAdvance === "ask" && !this.autonomous(run)) lines.push("## Waves\nWhen apps wait in Intake and capacity frees up, Helm asks the human to approve the next wave. Use `helm_propose_wave` if you want to suggest a different set.");
     }
     if (this.autonomous(run)) lines.push(`## Autonomy\n${autonomyText(n.role === "orch")}`);
+    const remit = n.tier === "orchestrator" ? "the run" : n.tier === "manager" ? `your group (${this.repo.listApps(run.id).filter((a) => a.managerNodeId === n.id).map((a) => a.name).slice(0, 8).join(", ") || "its apps"})` : app?.name ?? "your app";
+    const authority = authorityText(this.isLeadNode(n) && n.tier !== "orchestrator" ? "lead" : n.tier, remit);
+    if (authority) lines.push(`## Your authority\n${authority}`);
     if (n.role === "mgr") lines.push(`## Your notes\nKeep \`${studio}/MANAGER-NOTES-${n.id}.md\` current: apps and status, cross-app dependencies, risks, asks of the Orchestrator.`);
     const wrapper = app?.adopted ? `"${this.wrapperPath(run)}"` : ".helm/run-check.sh";
     if (this.isLeadNode(n) && app?.adopted)
@@ -883,7 +931,9 @@ export class Engine {
       baseBranch: n.tier === "specialist" || n.tier === "gate" ? appExtra?.integrationBranch ?? null : null,
       repoPath: app?.repoPath ?? null,
       location: app && (app.adopted || app.reads.length) ? { adopted: app.adopted, userBranch: app.userBranch, helmBranch: app.helmBranch, reads: app.reads } : null,
-      project: app ? this.projectBrief(run, app, n) : null,
+      project: app && n.role !== "custom" ? this.projectBrief(run, app, n) : null,
+      displayName: n.role === "planner" || n.role === "custom" || n.name || n.role === "orch" ? this.label(n) : null,
+      mission: n.role === "custom" && n.charter ? { text: n.charter, by: (n.createdBy && byId.get(n.createdBy) ? this.label(byId.get(n.createdBy)!) : "the Planner") } : null,
       extra: lines,
       integrationCommit: extra.integrationCommit ?? null,
       scannerFindings: extra.scannerFindings ?? null,
@@ -891,6 +941,18 @@ export class Engine {
     };
     const nb = this.repo.getNode(run.id, n.id)!;
     return briefFor({ id: nb.id, role: nb.role, platform: nb.platform, briefVersion: nb.briefVersion, scopeGlobs: nb.scopeGlobs, alsoLead: nb.alsoLead }, ctx);
+  }
+
+  /** A compact picture of the run for the Planner's first prompt (it reads helm_world for anything current). */
+  plannerSnapshot(run: RunInfo): string {
+    const plan = this.plan(run.id);
+    const apps = this.repo.listApps(run.id);
+    const nodes = this.repo.listNodes(run.id);
+    const L = [`${run.name}: ${run.status}, ${apps.length} project${apps.length === 1 ? "" : "s"}, ${nodes.length} agents planned or running, autonomy ${run.limits.autonomy}.`];
+    if (plan.managers.length) L.push(`Managers: ${plan.managers.map((m) => `${m.name} (${m.id}: ${m.appIds.join(", ")})`).join("; ")}.`);
+    for (const a of apps.slice(0, 30)) L.push(`- ${a.name} (${a.id}): ${a.stage} · ${profileLine(a)} · ${a.shape}${a.targetPath ? ` · ${a.targetPath}` : ""}`);
+    if (apps.length > 30) L.push(`- … and ${apps.length - 30} more (helm_world).`);
+    return escapeForPrompt(L.join("\n"), 3000);
   }
 
   /** Policies whose scope node is this node or one of its ancestors. */
@@ -1011,7 +1073,7 @@ export class Engine {
 
   private envFor(run: RunInfo, n: NodeInfo, hostId: string | null): EnvSpec | { wait: string } {
     const c1 = n.alsoLead;
-    if ((n.role === "orch" && !c1) || n.role === "mgr") {
+    if ((n.role === "orch" && !c1) || n.role === "mgr" || n.role === "planner" || (n.role === "custom" && !n.appId)) {
       if (!run.studioProjectId) return { wait: "studio project" };
       return { kind: "path", hostId, path: this.studioPath(run) };
     }
@@ -1028,7 +1090,7 @@ export class Engine {
   }
 
   projectFor(run: RunInfo, n: NodeInfo): string | null {
-    if ((n.role === "orch" && !n.alsoLead) || n.role === "mgr") return run.studioProjectId;
+    if ((n.role === "orch" && !n.alsoLead) || n.role === "mgr" || n.role === "planner" || (n.role === "custom" && !n.appId)) return run.studioProjectId;
     const app = n.appId ? this.repo.getApp(run.id, n.appId) : n.alsoLead ? this.repo.listApps(run.id)[0] ?? null : null;
     return app?.projectId ?? null;
   }
@@ -1112,11 +1174,11 @@ export class Engine {
       const integrationCommit = n.tier === "gate" && n.appId ? this.repo.appExtra(run.id, n.appId).integrationHead : null;
       if (n.appId) await this.probeRun(run.id).catch(() => undefined);
       const prompt = this.buildBrief(run, n, { integrationCommit, scannerFindings: this.repo.getMeta(`scanner:${run.id}:${n.id}`), handover: typeof row.payload.handover === "string" ? row.payload.handover : null });
-      const visible = n.role === "orch" || (this.settings.showLeadsInSidebar && this.isLeadNode(n));
+      const visible = n.role === "orch" || n.role === "planner" || (this.settings.showLeadsInSidebar && this.isLeadNode(n));
       ref = await this.port.spawnThread({
         projectId,
         environment: env,
-        title: n.role === "orch" ? `Helm · ${run.name}` : this.label(n),
+        title: threadTitle(this, run, n),
         prompt,
         model,
         permissionMode,
@@ -1129,6 +1191,7 @@ export class Engine {
     const threadId = ref.threadId;
     this.repo.tx(() => {
       this.repo.deleteMeta(`reuse:${run.id}:${n.id}`);
+      if (n.role === "planner") this.repo.deleteMeta(`planner-q:${run.id}`);
       this.repo.updateNode(run.id, n.id, { ...(env.kind === "reuse" ? {} : { branch: null }), threadId, environmentId: ref!.environmentId, status: "running", spawnedAt: this.now(), lastActivityAt: this.now(), firstInLine: false, model, providerId: model.providerId, prevStatus: null });
       // directives stored before spawn were in the prompt: they are delivered now (§6.3)
       for (const d of this.repo.directivesBeforeSpawn(run.id, n.id)) this.repo.updateRecipient(run.id, d.id, n.id, { state: "delivered", deliveredAt: this.now() });

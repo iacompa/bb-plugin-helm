@@ -55,6 +55,10 @@ export const RPC_SCHEMAS = {
   run_start: { input: z.object({ runId: Id, dryRun: z.boolean().optional() }), output: Any },
   run_finish: { input: z.object({ runId: Id, status: z.enum(["done", "cancelled"]) }), output: Any },
   world_get: { input: Run, output: Any },
+  /** Create (and start) the run's Planner if needed; optionally send it the human's question. */
+  planner_open: { input: z.object({ runId: Id, question: z.string().max(8000).optional() }), output: Any },
+  node_rename: { input: z.object({ runId: Id, nodeId: Id, name: z.string().min(1).max(40) }), output: Any },
+  agent_retire: { input: z.object({ runId: Id, nodeId: Id, reason: z.string().max(300).optional() }), output: Any },
   node_get: { input: z.object({ runId: Id, nodeId: Id }), output: Any },
   directive_preview: { input: z.object({ runId: Id, type: DirectiveInputZ.shape.type, target: Id, cascade: CascadeZ.optional() }), output: Any },
   /** Read-only: the preview plus the exact notice each recipient would receive (no state change). */

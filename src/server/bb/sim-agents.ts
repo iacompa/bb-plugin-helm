@@ -64,7 +64,9 @@ export function createSimAgents(profileFor: (meta: HelmThreadMeta) => Profile = 
     if (/(Message from the human|The human |Your direct report|Direction from |Reminder: please call helm_ack|Changes made before you started)/.test(ctx.text)) for (const id of ids) await ctx.tool("helm_ack", { directiveId: id, note: "adapted my plan" });
     if (/^(The human paused you|The human stopped)/.test(ctx.text)) return "paused";
     const role = meta.role;
-    if (role === "planner") return planner(ctx, profile);
+    if (role === "planner" && meta.runId === "planner") return planner(ctx, profile);
+    if (role === "planner") return amer(ctx);
+    if (role === "custom") return custom(ctx);
     if (role === "watch") {
       // the sim Watcher restarts every agent in the packet
       const ids = [...ctx.text.matchAll(/^- id: (\S+)/gm)].map((x) => x[1]);
@@ -92,6 +94,19 @@ async function orchestrator(ctx: TurnContext): Promise<string> {
     await ctx.tool("helm_report", { status: "progress", summary: "Read the portfolio and world state; managers and leads are starting." });
   }
   return "watching the portfolio";
+}
+
+/** The run's Planner (Amer): idle until asked; answers from the world state. */
+async function amer(ctx: TurnContext): Promise<string> {
+  if (/From the human|Message from/.test(ctx.text)) await ctx.tool("helm_world", {});
+  return "I am the run's Planner; ask me anything.";
+}
+
+/** A custom agent: does its mission once per wake-up and reports. */
+async function custom(ctx: TurnContext): Promise<string> {
+  if (ctx.first) await ctx.tool("helm_context", {});
+  await ctx.tool("helm_report", { status: "done", summary: ctx.first ? "Mission understood; first pass done." : "Woken; checked and reported." });
+  return "done";
 }
 
 async function manager(ctx: TurnContext): Promise<string> {

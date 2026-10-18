@@ -13,7 +13,7 @@ import { scopeFor, skillsFor } from "../domain/roles.ts";
 import { profileLine } from "../domain/profile.ts";
 import { getTask, isAbove } from "./tasks.ts";
 
-const TIER_ORDER = ["orchestrator", "manager", "lead", "specialist", "gate"];
+const TIER_ORDER = ["orchestrator", "planner", "manager", "lead", "specialist", "custom", "gate"];
 
 export interface RefreshResult {
   restarted: string[];
@@ -53,6 +53,11 @@ export function refreshRun(e: Engine, runId: string): RefreshResult {
         res.skipped.push(`${n.id} (${n.status})`);
         continue;
       }
+      // the Planner idles between conversations: its rewritten brief is enough, waking it would cost a turn
+      if (n.role === "planner" && n.status === "waiting") {
+        res.skipped.push(`${n.id} (idle; loads the new version at its next conversation)`);
+        continue;
+      }
       const app = n.appId ? e.repo.getApp(runId, n.appId) : null;
       const skills = skillsFor(n, app);
       const L = [
@@ -66,6 +71,8 @@ export function refreshRun(e: Engine, runId: string): RefreshResult {
           L.push("Projects now have a kind (app, web, game, automation, review), needs (database, auth, payments, security, HIPAA, privacy, realtime, AI, automation, assets, multiplayer) and tools (Unreal, Blender, Docker, BB plugins). helm_world shows each project's profile; if one is wrong, change it with helm_propose_plan {delta: {profiles: {<appId>: {kind?, needs?, tools?}}}} and the squad follows.");
         else if (n.tier === "lead") L.push("If your project's profile (kind, needs, tools) is wrong or missing something, tell your parent: the Orchestrator can change it and the squad follows.");
       }
+      if (["orchestrator", "manager", "lead"].includes(n.tier) || n.alsoLead)
+        L.push(`New: you can change the models of the agents below you (helm_models, then helm_set_model), by agent, by role (e.g. all Slop Hunters) or by app. The run also has a Planner, ${e.label(e.repo.getNode(runId, "planner") ?? { runId, id: "planner", role: "planner", platform: null, appId: null })}, beside the Orchestrator: the human talks to it, and it can add custom agents designed for this run under any supervisor. Custom agents report to you like anyone below you.`);
       if (n.tier === "manager") L.push(e.scopeLine(n) ?? "");
       L.push("Report with helm_report when you are moving again.");
       if (n.status === "running") e.repo.enqueue({ id: e.oid(), runId, kind: "stop", nodeId: n.id, payload: { nodeIds: [n.id] }, idemKey: `refresh-stop:${runId}:${n.id}:${ts}` });

@@ -97,6 +97,8 @@ export const ROLE_LABEL: Record<Role, string> = {
   data: "Data builder",
   compliance: "Compliance",
   assets: "Asset builder",
+  planner: "Planner",
+  custom: "Custom agent",
 };
 
 /** Host icon names (only names from BB's verified icon list). */
@@ -116,6 +118,8 @@ export const ROLE_ICON: Record<Role, string> = {
   data: "Archive",
   compliance: "Lock",
   assets: "Palette",
+  planner: "AiBrain01",
+  custom: "Puzzle",
 };
 export function roleIcon(n: { role: Role; platform?: string | null }): string {
   if (n.role === "platform") return n.platform === "ios" || n.platform === "and" ? "Smartphone" : n.platform === "web" ? "Globe" : "Laptop";
@@ -290,7 +294,7 @@ export function modelText(cat: Catalog | null | undefined, r: ModelRef | null | 
 export const sameRef = (a: ModelRef | null | undefined, b: ModelRef | null | undefined) =>
   !!a && !!b && a.providerId === b.providerId && a.modelId === b.modelId && (a.reasoning ?? null) === (b.reasoning ?? null);
 
-export const BASE_TOK: Record<Role, number> = { orch: 1800, mgr: 700, lead: 1400, ui: 900, code: 1100, platform: 800, security: 350, test: 300, review: 500, slop: 300, research: 300, docs: 300, data: 700, compliance: 350, assets: 700 };
+export const BASE_TOK: Record<Role, number> = { orch: 1800, mgr: 700, lead: 1400, ui: 900, code: 1100, platform: 800, security: 350, test: 300, review: 500, slop: 300, research: 300, docs: 300, data: 700, compliance: 350, assets: 700, planner: 400, custom: 400 };
 export const RW: Record<string, number> = { none: 0.5, low: 0.7, medium: 0.85, high: 1, xhigh: 1.35, max: 1.7, ultra: 2.2, ultracode: 1.8 };
 export const UNIT_PER_KTOK = 0.0075;
 export const FORECAST_LOW = 0.7;
@@ -355,8 +359,8 @@ export function nodeLabel(n: { label?: string; id: string } | null | undefined):
 /** Breadcrumb label like the prototype: "Wellness manager", "Lumen lead". */
 export function trailLabel(n: SnapNode | null | undefined, apps?: Record<string, SnapApp>): string {
   if (!n) return "";
-  if (n.role === "orch") return "Orchestrator";
-  if (n.role === "lead" && n.appId && apps?.[n.appId]) return `${apps[n.appId].name} lead`;
+  if (n.role === "orch") return n.label || "Orchestrator";
+  if (n.role === "lead" && n.appId && apps?.[n.appId]) return n.name ? n.label || n.id : `${apps[n.appId].name} lead`;
   return n.label || n.id;
 }
 export function roleText(n: SnapNode): string {

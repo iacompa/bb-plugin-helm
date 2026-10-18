@@ -40,7 +40,8 @@ export function isAbove(e: Engine, by: NodeInfo, target: NodeInfo): boolean {
 
 /** Store a task without telling anyone (spawn time: the brief carries it). Returns an error or null. */
 export function storeTask(e: Engine, by: NodeInfo, target: NodeInfo, text: string): string | null {
-  if (!isAbove(e, by, target)) return `${e.label(target)} is not in your org; you can only write tasks for agents under you.`;
+  // the Planner may rewrite the task of a custom agent (it designed them)
+  if (!isAbove(e, by, target) && !(by.tier === "planner" && target.tier === "custom")) return `${e.label(target)} is not in your org; you can only write tasks for agents under you${by.tier === "planner" ? " (as the Planner: custom agents)" : ""}.`;
   const t = text.trim().slice(0, TASK_MAX);
   if (!t) return "The task is empty.";
   e.repo.setMeta(key(target.runId, target.id), JSON.stringify({ text: t, by: by.id, at: e.now() } satisfies AgentTask));

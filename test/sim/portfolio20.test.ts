@@ -50,7 +50,8 @@ test("A1/A2/A6: the 20-app sample brief runs to completion — 169 agents, waves
   const threads = h.sim.helmThreads().filter((t) => t.meta!.runId === runId);
   const keys = threads.map((t) => t.meta!.key);
   assert.equal(new Set(keys).size, keys.length);
-  assert.equal(new Set(threads.map((t) => t.meta!.nodeId)).size, 169);
+  // 169 plan agents plus the run's Planner
+  assert.equal(new Set(threads.map((t) => t.meta!.nodeId)).size, 170);
   // concurrency never exceeded
   assert.ok(maxActive <= conc, `max ${maxActive} active > concurrency ${conc}`);
   // every outbox row done (nothing silently pending or failed)

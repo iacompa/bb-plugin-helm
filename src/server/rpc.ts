@@ -2,6 +2,7 @@
 // returns the updated entity; the engine emits the realtime patches.
 
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import { ensurePlanner } from "./engine/custom.ts";
 import { RPC } from "../shared/protocol.ts";
 import type { SlotMap } from "../shared/types.ts";
 import type { HelmService } from "./service.ts";
@@ -37,6 +38,16 @@ export function registerRpc(bb: BbPluginApi, svc: HelmService): void {
     run_start: ({ runId, dryRun }) => svc.start(runId, { dryRun }),
     run_finish: ({ runId, status }) => svc.finish(runId, status),
     world_get: ({ runId }) => svc.world(runId),
+    planner_open: async ({ runId, question }) => {
+      if (question?.trim()) {
+        const r = await svc.ask(runId, question);
+        return { nodeId: r.planner.id, threadId: r.planner.threadId, label: e.label(r.planner), delivered: r.delivered };
+      }
+      const p = await ensurePlanner(e, runId, { queue: true });
+      return { nodeId: p.id, threadId: p.threadId, label: e.label(p), delivered: null };
+    },
+    node_rename: ({ runId, nodeId, name }) => ({ label: svc.rename(runId, nodeId, name) }),
+    agent_retire: ({ runId, nodeId, reason }) => ({ result: svc.retire(runId, nodeId, reason ?? "") }),
     node_get: ({ runId, nodeId }) => {
       const n = e.node(runId, nodeId);
       const run = e.run(runId);

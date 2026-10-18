@@ -1,7 +1,8 @@
 // Shared vocabulary for Helm: server, engine, agent tools, RPC and the app all
 // speak these types. Pure types only — no runtime imports from BB or the DB.
 
-export type Tier = "orchestrator" | "manager" | "lead" | "specialist" | "gate";
+/** planner: Amer, the run's advisor beside the Orchestrator; custom: an agent the Planner designed for this run. */
+export type Tier = "orchestrator" | "manager" | "lead" | "specialist" | "gate" | "planner" | "custom";
 export type Role =
   | "orch"
   | "mgr"
@@ -17,7 +18,9 @@ export type Role =
   | "compliance"
   | "assets"
   | "review"
-  | "slop";
+  | "slop"
+  | "planner"
+  | "custom";
 export type Platform = "mac" | "win" | "ios" | "and" | "web";
 
 /** What a project is (its mode). Helm decides it from the brief unless the human names it. */
@@ -83,7 +86,8 @@ export type SlotId =
   | "slop"
   | "research"
   | "docs"
-  | "watcher";
+  | "watcher"
+  | "planner";
 
 export interface ModelRef {
   providerId: string;
@@ -172,6 +176,8 @@ export type Autonomy = "high" | "ask";
 /** What may still reach the human when autonomy is high. */
 export const HUMAN_ONLY = ["credentials", "spending", "privacy", "access"] as const;
 export type HumanOnly = (typeof HUMAN_ONLY)[number];
+/** What a helm_need is about: the human-only four, a question only the owner can answer, or anything else. */
+export const NEED_ABOUT = [...HUMAN_ONLY, "owner", "other"] as const;
 
 export const LIMIT_DEFAULTS: HelmLimits = {
   managerSpan: 4,
@@ -279,12 +285,25 @@ export interface AppInfo {
   tools: string[];
 }
 
+/** What wakes a custom agent (instead of polling): a stage change, an app reaching Ready, a sign-off, a failure, in its scope. */
+export type WakeEvent = "stage" | "ready" | "signoff" | "failed";
+export const WAKE_EVENTS: WakeEvent[] = ["stage", "ready", "signoff", "failed"];
+
 export interface NodeInfo {
   id: string;
   runId: string;
   appId: string | null;
   tier: Tier;
   role: Role;
+  /** A personal name ("Gestra", "Amer", "Ledger"); the human or the Planner can change it. */
+  name: string | null;
+  /** A custom agent's job title ("GitHub Sync"). */
+  title: string | null;
+  /** A custom agent's mission, as the Planner wrote it. */
+  charter: string | null;
+  wakeOn: WakeEvent[];
+  /** Who designed it (a custom agent: the Planner's node id). */
+  createdBy: string | null;
   platform: Platform | null;
   parentId: string | null;
   threadId: string | null;

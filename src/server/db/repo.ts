@@ -318,6 +318,11 @@ export class Repo {
       appId: s(r.app_id),
       tier: r.tier as NodeInfo["tier"],
       role: r.role as NodeInfo["role"],
+      name: s(r.name),
+      title: s(r.title),
+      charter: s(r.charter),
+      wakeOn: j(r.wake_json, []),
+      createdBy: s(r.created_by),
       platform: (s(r.platform) as NodeInfo["platform"]) ?? null,
       parentId: s(r.parent_id),
       threadId: s(r.thread_id),
@@ -343,11 +348,12 @@ export class Repo {
       lastActivityAt: n(r.last_activity_at),
     };
   }
-  insertNode(x: { runId: string; id: string; appId: string | null; tier: string; role: string; platform: string | null; parentId: string | null; slot: string; alsoLead: boolean; model: ModelRef | null; scopeGlobs: string[]; branch: string | null; briefMd: string | null }): void {
+  insertNode(x: { runId: string; id: string; appId: string | null; tier: string; role: string; platform: string | null; parentId: string | null; slot: string; alsoLead: boolean; model: ModelRef | null; scopeGlobs: string[]; branch: string | null; briefMd: string | null; name?: string | null; title?: string | null; charter?: string | null; wakeOn?: string[]; createdBy?: string | null; modelOverride?: boolean }): void {
     this.run(
-      `INSERT INTO nodes(id, run_id, app_id, tier, role, platform, parent_id, status, also_lead, slot, model_json, scope_globs, branch, brief_md, created_at, provider_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO nodes(id, run_id, app_id, tier, role, platform, parent_id, status, also_lead, slot, model_json, scope_globs, branch, brief_md, created_at, provider_id, name, title, charter, wake_json, created_by, model_override)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       x.id, x.runId, x.appId, x.tier, x.role, x.platform, x.parentId, x.alsoLead ? 1 : 0, x.slot, js(x.model), js(x.scopeGlobs), x.branch, x.briefMd, this.now(), x.model?.providerId ?? null,
+      x.name ?? null, x.title ?? null, x.charter ?? null, js(x.wakeOn ?? []), x.createdBy ?? null, x.modelOverride ? 1 : 0,
     );
   }
   getNode(runId: string, id: string): NodeInfo | null {
@@ -384,7 +390,7 @@ export class Repo {
   countAllNonPlanned(): number {
     return Number(this.get1("SELECT COUNT(*) AS c FROM nodes n JOIN runs r ON r.id = n.run_id WHERE r.status IN ('running','paused') AND n.status <> 'planned'")?.c ?? 0);
   }
-  updateNode(runId: string, id: string, patch: Partial<{ status: NodeStatus; threadId: string | null; model: ModelRef | null; modelOverride: boolean; briefMd: string; briefVersion: number; scopeGlobs: string[]; branch: string | null; environmentId: string | null; priority: string; nowLine: string | null; topics: string[]; tokens: number; turns: number; cost: number; spawnedAt: number; endedAt: number | null; lastActivityAt: number; touched: boolean; warning: string | null; firstInLine: boolean; nudgedAt: number | null; lastReportForwardAt: number; parentId: string | null; prevStatus: NodeStatus | null; providerId: string | null }>): void {
+  updateNode(runId: string, id: string, patch: Partial<{ status: NodeStatus; threadId: string | null; model: ModelRef | null; modelOverride: boolean; briefMd: string; briefVersion: number; scopeGlobs: string[]; branch: string | null; environmentId: string | null; priority: string; nowLine: string | null; topics: string[]; tokens: number; turns: number; cost: number; spawnedAt: number; endedAt: number | null; lastActivityAt: number; touched: boolean; warning: string | null; firstInLine: boolean; nudgedAt: number | null; lastReportForwardAt: number; parentId: string | null; prevStatus: NodeStatus | null; providerId: string | null; name: string | null; title: string | null; charter: string | null; wakeOn: string[] }>): void {
     const map: Record<string, [string, (v: never) => Param]> = {
       status: ["status", (v: string) => v],
       threadId: ["thread_id", (v: string | null) => v],
@@ -412,6 +418,10 @@ export class Repo {
       parentId: ["parent_id", (v: string | null) => v],
       prevStatus: ["prev_status", (v: string | null) => v],
       providerId: ["provider_id", (v: string | null) => v],
+      name: ["name", (v: string | null) => v],
+      title: ["title", (v: string | null) => v],
+      charter: ["charter", (v: string | null) => v],
+      wakeOn: ["wake_json", (v: string[]) => js(v)],
     };
     const sets: string[] = [];
     const vals: Param[] = [];
@@ -451,6 +461,9 @@ export class Repo {
   }
   comms(runId: string, c: { from: string; to: string; kind: string; summary: string; directiveId?: string | null }): void {
     this.run("INSERT INTO comms(run_id, ts, from_node, to_node, kind, summary, directive_id) VALUES (?, ?, ?, ?, ?, ?, ?)", runId, this.now(), c.from, c.to, c.kind, c.summary.slice(0, 600), c.directiveId ?? null);
+  }
+  countComms(runId: string, from: string, to: string, kind: string, since: number): number {
+    return Number((this.get1("SELECT COUNT(*) AS c FROM comms WHERE run_id = ? AND from_node = ? AND to_node = ? AND kind = ? AND ts >= ?", runId, from, to, kind, since) as { c: number } | null)?.c ?? 0);
   }
   commsFor(runId: string, nodeId: string, limit = 100): CommsInfo[] {
     return this.all("SELECT * FROM comms WHERE run_id = ? AND (from_node = ? OR to_node = ?) ORDER BY id DESC LIMIT ?", runId, nodeId, nodeId, limit).map((r) => ({
@@ -692,6 +705,9 @@ export class Repo {
   }
   nextOutboxAttempt(): number | null {
     return n(this.get1("SELECT MIN(next_attempt_at) AS t FROM outbox WHERE state = 'pending'")?.t);
+  }
+  nextOutboxAttemptAfter(t: number): number | null {
+    return n(this.get1("SELECT MIN(next_attempt_at) AS t FROM outbox WHERE state = 'pending' AND next_attempt_at > ?", t)?.t);
   }
   markOutbox(id: string, patch: Partial<{ state: string; attempts: number; nextAttemptAt: number | null; lastError: string | null; doneAt: number; result: unknown }>): void {
     const map: Record<string, [string, (v: never) => Param]> = {

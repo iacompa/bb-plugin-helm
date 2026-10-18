@@ -81,6 +81,7 @@ export class OutboxWorker {
       return;
     }
     this.draining = true;
+    let dispatched = 0;
     try {
       do {
         this.again = false;
@@ -102,6 +103,7 @@ export class OutboxWorker {
             this.inflightNodes.add(nodeKey);
           }
           this.inflight.add(row.id);
+          dispatched++;
           this.repo.markOutbox(row.id, { state: "inflight" });
           void this.execute(row, nodeKey);
         }
@@ -109,8 +111,13 @@ export class OutboxWorker {
     } finally {
       this.draining = false;
     }
-    const next = this.repo.nextOutboxAttempt();
-    if (next !== null && this.inflight.size < MAX_INFLIGHT) this.schedule(Math.max(next, this.timers.now()));
+    const now = this.timers.now();
+    let next = this.repo.nextOutboxAttempt();
+    // Due rows that could not go (behind an older row for the same node that is not due yet, or
+    // behind one in flight) must not re-arm the timer at "now": that would spin. Wait for the
+    // next row that becomes due later; finishing an in-flight row drains again by itself.
+    if (next !== null && next <= now && dispatched === 0) next = this.repo.nextOutboxAttemptAfter(now);
+    if (next !== null && this.inflight.size < MAX_INFLIGHT) this.schedule(Math.max(next, now));
     this.maybeIdle();
   }
 

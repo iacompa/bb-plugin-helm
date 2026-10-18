@@ -18,11 +18,14 @@ export interface HelmSettings {
   autoAdvance: "ask" | "auto";
   /** Who answers an agent's BB permission prompt: its supervisor (escalating only what the human must decide) or the human. */
   approvePrompts: "supervisor" | "human";
+  /** Default personal names for new runs; any agent can be renamed later. */
+  names: { planner: string; orchestrator: string };
 }
 
 export const DEFAULT_SETTINGS: HelmSettings = {
   limits: LIMIT_DEFAULTS,
-  permissionMode: { orchestrator: "auto", manager: "auto", lead: "auto", specialist: "auto", gate: "auto" },
+  permissionMode: { orchestrator: "auto", manager: "auto", lead: "auto", specialist: "auto", gate: "auto", planner: "auto", custom: "auto" },
+  names: { planner: "Amer", orchestrator: "Gestra" },
   showLeadsInSidebar: false,
   appsRoot: "~/Projects/helm",
   weights: SEED_WEIGHTS,

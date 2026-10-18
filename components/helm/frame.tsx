@@ -226,6 +226,18 @@ function TopBar() {
       toast.error("Could not open the simulators", { description: errMsg(err) });
     }
   };
+  const planner = data?.nodes.planner ?? null;
+  const plannerName = planner?.label.split(" · ")[0] ?? "Amer";
+  const openPlanner = async () => {
+    if (!data?.run) return;
+    try {
+      const r = (await h.rpc.call("planner_open", { runId: data.run.id })) as { threadId: string | null; label: string };
+      if (r.threadId) nav.toThread(r.threadId, { split: true });
+      else toast.success(`${r.label} is starting`, { description: "Its thread appears in the sidebar in a moment. Ask it anything there." });
+    } catch (err) {
+      toast.error("Could not open the Planner", { description: errMsg(err) });
+    }
+  };
   const run = data?.run ?? null;
   const nodes = useMemo(() => (data ? data.nodeOrder.map((id) => data.nodes[id]) : []), [data, h.rev]); // eslint-disable-line react-hooks/exhaustive-deps
   const open = data ? openNeeds(data).length : 0;
@@ -316,6 +328,12 @@ function TopBar() {
             </span>
           </span>
         </>
+      ) : null}
+      {run && (run.status === "running" || run.status === "paused") ? (
+        <button type="button" className="btn" onClick={() => void openPlanner()} title={`${planner?.label ?? "Amer · Planner"}: ask about the run, change it, or have it design a new agent`} aria-label={`Ask ${plannerName}, the Planner`} data-testid="planner">
+          <Ic name="AiBrain01" size="sm" />
+          <span className="btn-lbl"> {plannerName}</span>
+        </button>
       ) : null}
       <button type="button" className="btn" onClick={() => void openSims()} title="Simulators: watch and drive the apps in BB's browser (iOS, Android, macOS; Windows screenshots)" aria-label="Simulators" data-testid="simulators">
         <Ic name="Smartphone" size="sm" />

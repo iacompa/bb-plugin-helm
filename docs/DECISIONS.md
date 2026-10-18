@@ -223,3 +223,33 @@ The open decisions from the brief (§17.2) took their defaults. Where reality on
 
 
 42. **Supervisors change the models below them (user request).** "Each agent is able to change the models of the people below them … the manager can't switch the model of the orchestrator or other managers … I need to be able to tell the orchestrator, change all the slop hunters to this model, or this one manager to this model and this other manager to the other model." Two tools for the Orchestrator, Managers and Leads: `helm_models` (the live catalog and the model of every agent below the caller) and `helm_set_model` (one call, up to 10 changes; each selects by node ids, or by role narrowed by app, `under` a report, or platform). Helm enforces the hierarchy: every selected agent must be strictly below the caller, so a Manager never reaches the Orchestrator, itself or another group, and a Lead only its squad and gates. Model changes, unlike `helm_direct`, may reach gates: a model is not a verdict. Each change is one model directive (actor `agent`, `byNode` set) applied exactly like a human model change: same provider switches at the next turn, another provider moves the agent to a new thread with a hand-over. Nobody is woken: changed agents and the chain above get one FYI line. A failed agent retries on its new model. When the Orchestrator moves every agent that uses a slot, the slot's default moves too, so later agents of that role follow; Managers and Leads never move run defaults. One invalid change rejects the whole call; at most 10 model changes per supervisor per 10 minutes.
+
+43. **The Planner (Amer) and custom agents (user request).** "Add a planner agent we can talk to … this planner agent can make new agents that have never existed … an agent that makes sure we send things to GitHub, or makes sure we are using the SSD … call the planner agent Amer, the orchestrator Gestra, but show they are the planner, orchestrator."
+    - **Who it is.** Every run gets a `planner` node (tier and role `planner`, no parent) when it starts. Older running runs get one on the next refresh.
+      - Labels show name and role: "Amer · Planner", "Gestra · Orchestrator". Default names are settings (`plannerName`, `orchestratorName`); any agent can be renamed (`bb helm rename`, `node_rename`, `helm_rename_agent`). Names are unique among live agents, and the BB thread title follows.
+      - Its thread is visible in the sidebar.
+      - Its model is the new `planner` slot. When that is empty, it uses the highest-weight live model on the Orchestrator's provider at its highest reasoning, so it is stronger than the Orchestrator.
+    - **Idle by design.** It answers, acts, writes PLANNER-NOTES.md and stops.
+      - An idle Planner holds no concurrency, since only running agents count.
+      - Refresh does not restart it. The Watcher ignores it.
+      - Its thread messages are questions, not directives.
+      - `bb helm ask` delivers to its thread, or queues the question as its first message if it has not spawned.
+    - **Its tools.** `helm_world`, `helm_models`/`helm_set_model` (reaching everyone but itself), `helm_propose_plan`, `helm_set_task` (custom agents), `helm_create_agent`, `helm_rename_agent`, `helm_retire_agent`, and `helm_message` to anyone. Supervisors and custom agents may message it. It has no `helm_direct`: it does not steer.
+    - **Custom agents** (tier and role `custom`, migration 7 adds `name`, `title`, `charter`, `wake_json`, `created_by` to nodes) ride the plan-change flow (`PlanDelta.agents`), so autonomy approves them at once and autonomy `ask` puts them in Needs you.
+      - Each reports to the Orchestrator, a manager or a lead. Under a lead it works in its own worktree of that app; otherwise in the Studio.
+      - Its write scope defaults to `agents/<name>/**` or `reports/<name>/**`; read-only folders must be absolute; up to 4 craft skills from an allowlist; its mission becomes its task.
+      - Its supervisor and the Orchestrator get an FYI line.
+      - It is woken by `stage`, `ready`, `signoff` or `failed` events in its scope through the engine's emit hook, never by polling.
+      - Real-world actions (pushes, deploys, messages, spending) need the human unless the mission quotes the human's exact approval.
+      - At most 12 live per run. `retire` stops and archives one.
+    - The skills `helm-planner-agent` and `helm-custom` carry the protocols, with example missions (GitHub Sync, Storage Guard).
+
+44. **Decision rights: run it like a company (user request).** "Whatever the manager can handle, they should handle … the lead does not have to go to the manager for the most part, until it finishes or needs permission or a key, or something to clarify with me … the orchestrator is mostly to make sure things are going right and to delegate."
+    - **Live evidence.** In one live run, managers had sent the Orchestrator 577 waking "ask" messages, mostly "requesting per-item GO", because the Orchestrator had made per-item GOs a rule.
+    - **Who keeps a question.** With autonomy high, a lead's or manager's ordinary `helm_need` is no longer sent up. Helm tells it the call is its own (`decideYourselfText`). Workers' questions still go to their lead, now marked "inside your remit".
+    - **The owner's call.** A new `about: owner` covers questions only the owner can answer. It reaches the human from the Orchestrator or a manager; a lead's goes to its manager first.
+    - **A cap on upward questions.** Waking `ask` messages from a lead to its manager, or a manager to the Orchestrator, are capped at 3 per hour (a sliding window over `comms`). Beyond that they arrive as FYI, and the sender is told to decide and batch.
+    - **Briefs.** Supervisors' briefs gain "Your authority": what each level decides alone and when it goes up. The Orchestrator's says to grant standing authority and never require per-item GOs.
+    - **Skills.** The orchestrator, manager, lead and helm skills carry the same table.
+
+45. **Outbox spin fix.** A due row for an agent queued behind an older row for the same agent that was not yet due (per-node FIFO) re-armed the outbox timer at "now" forever, which would busy-loop the server. When a drain dispatches nothing, the next wake-up is now the next row that becomes due later; finishing an in-flight row drains again by itself. Found by the custom-agent tests.

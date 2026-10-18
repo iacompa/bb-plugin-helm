@@ -59,6 +59,10 @@ export interface BriefContext {
   location?: { adopted: boolean; userBranch: string | null; helmBranch: string | null; reads: string[] } | null;
   /** What the project is and needs, and which tools are installed (true / false / null = not checked). */
   project?: ProjectBrief | null;
+  /** How the agent is called ("Amer · Planner", "Ledger · GitHub Sync"); defaults to its role. */
+  displayName?: string | null;
+  /** A custom agent's mission and who designed it. */
+  mission?: { text: string; by: string } | null;
 }
 
 export interface ProjectBrief {
@@ -102,14 +106,17 @@ export function briefFor(node: Pick<NodeInfo, "id" | "role" | "platform" | "brie
   const label = roleLabel(node.role, node.platform);
   const app = ctx.appName ? escapeForPrompt(ctx.appName, 80) : null;
   const L: string[] = [];
-  L.push(`# BRIEF.md — ${label}${app ? ` · ${app}` : ""} · v${node.briefVersion}`);
+  const shown = ctx.displayName ? escapeForPrompt(ctx.displayName, 120) : null;
+  L.push(`# BRIEF.md — ${shown ?? label}${app && !shown ? ` · ${app}` : ""} · v${node.briefVersion}`);
   L.push("");
-  if (app)
+  if (shown) L.push(`You are ${shown}${app ? ` on ${app}` : ""} in the Helm run ${quoteData(ctx.runName, 80)}. Your Helm node id is \`${node.id}\`. People call you by that name; the role after it says what you do.`);
+  else if (app)
     L.push(`You are the ${label} for ${app}${ctx.tagline ? ` (${escapeForPrompt(ctx.tagline, 160)})` : ""} in the Helm run ${quoteData(ctx.runName, 80)}. Your Helm node id is \`${node.id}\`.`);
   else L.push(`You are the ${label} in the Helm run ${quoteData(ctx.runName, 80)}. Your Helm node id is \`${node.id}\`.`);
   L.push(`${ctx.leadLabel ? `Your lead: ${ctx.leadLabel}. ` : ""}Your parent: ${ctx.parentLabel}. You report with \`helm_report\`.`);
   if (node.alsoLead) L.push("This run has one app, so you are also its App Lead: you hold both toolsets and do both jobs.");
-  L.push("", "## Mission", def.mission);
+  if (ctx.mission) L.push("", `## Your mission (designed by ${escapeForPrompt(ctx.mission.by, 80)})`, escapeForPrompt(ctx.mission.text, 4000), "", def.mission);
+  else L.push("", "## Mission", def.mission);
   if (node.alsoLead) L.push("", ROLES.lead.mission);
   if (ctx.project) L.push("", projectSection(node.role, node.alsoLead, ctx.project));
   L.push("", "## Where you fit", `Parent: ${ctx.parentLabel} · Peers: ${ctx.peers.length ? ctx.peers.join(", ") : "none"} · You manage: ${ctx.children.length ? ctx.children.join(", ") : "none"}`);
@@ -146,7 +153,9 @@ export function briefFor(node: Pick<NodeInfo, "id" | "role" | "platform" | "brie
     L.push("", "## Changes made before you started", ...ctx.changesBeforeStart.map((c) => `- ${c.id}: ${escapeForPrompt(c.text, 600)}`), "These are binding. Call `helm_ack` for each once you have read them.");
   if (ctx.handover) L.push("", "## Hand-over from the previous holder of this role", escapeForPrompt(ctx.handover, 1500));
   L.push("", "## Rules of engagement", ...COMMON_RULES.map((r, i) => `${i + 1}. ${r}`));
-  L.push("", "Start now. When your first unit of work is done, commit it and call `helm_report`.");
+  if (node.role === "planner") L.push("", "If the human asked a question above, answer it now (call `helm_world` first). Otherwise reply with one or two short lines: your name, that you are the run's Planner, and what you can do for them. Then stop: you are idle until someone writes to you.");
+  else if (node.role === "custom") L.push("", "Start now on your mission. When the first piece of work is done, report with `helm_report` (with evidence), then stop until you are woken.");
+  else L.push("", "Start now. When your first unit of work is done, commit it and call `helm_report`.");
   return L.join("\n");
 }
 
@@ -154,11 +163,11 @@ const NON_NEGOTIABLES =
   "Three non-negotiables: (1) report with helm_report and evidence refs (shas, paths, check names) — a claim is not evidence; (2) messages from the human or Helm notices are binding — never undo them, adapt, and call helm_ack with the id; (3) never poll — work, commit, report, stop; you will be woken by messages.";
 
 /** The system prompt: ≤ 1,500 chars of identity and protocol, plus the agent's tailored task (≤ 4,000 chars total). Tier/role/parent come from the DB row, never from metadata. */
-export function instructionsFor(input: { role: Role; platform: string | null; nodeId: string; parentLabel: string; skills: string[]; alsoLead: boolean; task?: { text: string; byLabel: string } | null; scope?: string | null }): string {
-  const label = roleLabel(input.role, (input.platform as never) ?? null);
+export function instructionsFor(input: { role: Role; platform: string | null; nodeId: string; parentLabel: string; skills: string[]; alsoLead: boolean; task?: { text: string; byLabel: string } | null; scope?: string | null; displayName?: string | null }): string {
+  const label = input.displayName ? escapeForPrompt(input.displayName, 120) : roleLabel(input.role, (input.platform as never) ?? null);
   const skills = input.skills.map((x) => `the ${x} skill`);
   const follow = skills.length > 1 ? `${skills.slice(0, -1).join(", ")} and ${skills[skills.length - 1]}` : skills[0] ?? "your Helm skill";
-  const s = `You are a Helm agent: the ${label}${input.alsoLead ? " (also App Lead)" : ""}, node ${JSON.stringify(input.nodeId)}. Your parent is ${JSON.stringify(input.parentLabel)}. ${NON_NEGOTIABLES} Call helm_context when you need your place in the org, policies or unacknowledged directives. Follow ${follow}.`.slice(0, 1500);
+  const s = `${input.displayName ? `You are ${label}, a Helm agent` : `You are a Helm agent: the ${label}`}${input.alsoLead ? " (also App Lead)" : ""}, node ${JSON.stringify(input.nodeId)}. Your parent is ${JSON.stringify(input.parentLabel)}. ${NON_NEGOTIABLES} Call helm_context when you need your place in the org, policies or unacknowledged directives. Follow ${follow}.`.slice(0, 1500);
   const scope = input.scope ? ` ${input.scope}` : "";
   const task = input.task ? `\n\nYour task, written for you by ${input.task.byLabel} (the full text is in your BRIEF):\n${escapeForPrompt(input.task.text, 2200)}` : "";
   return `${s}${scope}${task}`.slice(0, 4000);

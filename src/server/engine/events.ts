@@ -206,6 +206,11 @@ async function onDispatch(e: Engine, node: NodeInfo, ev: Extract<HelmEvent, { ty
   const text = ev.text.trim();
   if (!text) return;
   if (isHelmText(e, node, text)) return;
+  // the Planner is a conversation with the human, not a chain of command: nothing to record or relay
+  if (node.role === "planner") {
+    e.repo.event(node.runId, node.id, "question", `the human: ${text.slice(0, 160)}`);
+    return;
+  }
   if (node.role === "orch" && isQuestion(text)) {
     e.repo.event(node.runId, node.id, "question", `the human asked: ${text.slice(0, 160)}`);
     return;

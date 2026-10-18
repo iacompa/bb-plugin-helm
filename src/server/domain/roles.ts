@@ -212,6 +212,31 @@ export const ROLES: Record<Role, RoleDef> = {
     doneMeans: ["a valid verdict bound to a commit"],
     skill: "helm-slop-hunter",
   },
+  planner: {
+    role: "planner",
+    tier: "planner",
+    slot: "planner",
+    label: "Planner",
+    mission:
+      "Be the human's strategist for this run. Answer their questions about it, and when something would help (a new project, a different profile, a model change, or an agent that has never existed: a GitHub sync agent, a storage guard, a HIPAA reviewer, a workflow debugger) design it and add it, on the record. You are idle until the human or the Orchestrator writes to you. You do not write app code.",
+    scope: ["PLANNER-NOTES.md", "agents/**"],
+    inputs: ["the human's question", "helm_world", "PORTFOLIO.md", "PLANNER-NOTES.md"],
+    outputs: ["answers to the human", "custom agents (helm_create_agent)", "plan changes (helm_propose_plan)", "model changes (helm_set_model)", "PLANNER-NOTES.md"],
+    doneMeans: ["the human's question is answered, or the change they asked for is made and on the record"],
+    skill: "helm-planner-agent",
+  },
+  custom: {
+    role: "custom",
+    tier: "custom",
+    slot: "code",
+    label: "Custom agent",
+    mission: "Do the job the Planner designed you for (your mission below), report to your supervisor with evidence, and stay ready to be woken.",
+    scope: ["agents/<you>/**"],
+    inputs: ["your mission (in this brief)", "your supervisor's messages", "Helm's wake-up notices"],
+    outputs: ["what your mission asks for", "reports with evidence (helm_report)"],
+    doneMeans: ["each piece of work your mission asks for is done, with evidence, and reported to your supervisor"],
+    skill: "helm-custom",
+  },
 };
 
 export const COMMON_RULES = [
@@ -307,6 +332,22 @@ export const TOOLS_BY_TIER: Record<Tier, string[]> = {
     "helm_existing_docs",
   ],
   specialist: ["helm_context", "helm_report", "helm_ack", "helm_need", "helm_message", "helm_slop_scan"],
+  planner: [
+    "helm_context",
+    "helm_report",
+    "helm_ack",
+    "helm_need",
+    "helm_message",
+    "helm_world",
+    "helm_models",
+    "helm_set_model",
+    "helm_set_task",
+    "helm_propose_plan",
+    "helm_create_agent",
+    "helm_rename_agent",
+    "helm_retire_agent",
+  ],
+  custom: ["helm_context", "helm_report", "helm_ack", "helm_need", "helm_message"],
   gate: [
     "helm_context",
     "helm_report",
@@ -366,7 +407,16 @@ export function craftSkill(role: Role, platform: Platform | null, kind: ProjectK
  * craft of every part it builds. In a review project specialists audit (helm-audit) with
  * their craft as the standard to audit against.
  */
-export function skillsFor(n: { role: Role; platform: Platform | null; alsoLead: boolean }, app: SkillProfile | null): string[] {
+/** Craft skills the Planner may give a custom agent. */
+export const CUSTOM_SKILLS = [
+  "helm-ui", "helm-code", "helm-backend", "helm-web", "helm-data", "helm-payments", "helm-compliance", "helm-security",
+  "helm-test", "helm-research", "helm-docs", "helm-automation", "helm-game", "helm-unreal", "helm-assets", "helm-audit",
+  "helm-ios", "helm-android", "helm-macos", "helm-windows",
+];
+
+export function skillsFor(n: { role: Role; platform: Platform | null; alsoLead: boolean }, app: SkillProfile | null, extra: string[] = []): string[] {
+  if (n.role === "planner") return ["helm-planner-agent"];
+  if (n.role === "custom") return [...new Set(["helm-custom", ...extra.filter((x) => CUSTOM_SKILLS.includes(x)).slice(0, 4)])];
   const kind = app?.kind ?? "app";
   const needs = app?.needs ?? [];
   const tools = app?.tools ?? [];

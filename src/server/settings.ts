@@ -16,6 +16,8 @@ const PERM = {
 } as const;
 
 export const SETTINGS_DESCRIPTORS = {
+  plannerName: { type: "string", label: "Planner's name", description: "What new runs call their Planner, the advisor you talk to (it can design new agents). Rename one run's Planner with bb helm rename planner <name>.", default: DEFAULT_SETTINGS.names.planner },
+  orchestratorName: { type: "string", label: "Orchestrator's name", description: "What new runs call their Orchestrator. Rename one run's with bb helm rename orch <name>.", default: DEFAULT_SETTINGS.names.orchestrator },
   appsRoot: { type: "string", label: "Apps root folder", description: "Default parent folder for new app repositories: <root>/<run>/<app>. An app can also name its own folder or an existing repository anywhere (brief: \"- Name — tagline · macOS · /path/to/repo\"), and bb helm plan --root sets this per run.", default: DEFAULT_SETTINGS.appsRoot },
   concurrency: { type: "number", label: "Concurrent agents", description: `Default for new runs: how many of a run's agents may run at once (max ${LIMIT_CEILINGS.concurrency}). Change a running run with bb helm limits or the capacity chip.`, default: LIMIT_DEFAULTS.concurrency },
   maxTotalAgents: { type: "number", label: "Agent cap per run", description: `Upper bound on a plan's size (max ${LIMIT_CEILINGS.maxTotalAgents}).`, default: LIMIT_DEFAULTS.maxTotalAgents },
@@ -89,13 +91,18 @@ export function toHelmSettings(v: Values, warn: (m: string) => void = () => {}):
     lead: perm(v.permissionLead),
     specialist: perm(v.permissionSpecialist),
     gate: perm(v.permissionGate),
+    // the Planner runs like the Orchestrator, custom agents like specialists
+    planner: perm(v.permissionOrchestrator),
+    custom: perm(v.permissionSpecialist),
   };
+  const nm = (x: unknown, d: string) => (typeof x === "string" && x.trim() ? x.trim().slice(0, 40) : d);
   return {
     ...DEFAULT_SETTINGS,
     limits,
     permissionMode,
     showLeadsInSidebar: v.showLeadsInSidebar === true,
     appsRoot: typeof v.appsRoot === "string" && v.appsRoot.trim() ? v.appsRoot.trim() : DEFAULT_SETTINGS.appsRoot,
+    names: { planner: nm(v.plannerName, DEFAULT_SETTINGS.names.planner), orchestrator: nm(v.orchestratorName, DEFAULT_SETTINGS.names.orchestrator) },
     weights,
     zeroTolerance: typeof v.zeroTolerance === "string" ? v.zeroTolerance.split(/[,\s]+/).filter((x) => /^S\d+$/.test(x)) : DEFAULT_SETTINGS.zeroTolerance,
     createRemote: v.createRemote === true,
@@ -122,4 +129,4 @@ export async function bindSettings(bb: BbPluginApi): Promise<(() => HelmSettings
 }
 
 /** The setting key for each tier's permission mode. */
-export const PERMISSION_KEYS = { orchestrator: "permissionOrchestrator", manager: "permissionManager", lead: "permissionLead", specialist: "permissionSpecialist", gate: "permissionGate" } as const;
+export const PERMISSION_KEYS: Partial<Record<Tier, string>> = { orchestrator: "permissionOrchestrator", manager: "permissionManager", lead: "permissionLead", specialist: "permissionSpecialist", gate: "permissionGate" };

@@ -10,6 +10,7 @@ import { applyProfile } from "../domain/brief.ts";
 import { profileLine } from "../domain/profile.ts";
 import { scopeFor, slotOfRole, tierOfRole } from "../domain/roles.ts";
 import { bottomUp } from "../domain/directives.ts";
+import { applyAgentsTx, recheckSpec, type CustomAgentSpec } from "./custom.ts";
 
 export interface PlanDelta {
   add?: PortfolioApp[];
@@ -17,6 +18,8 @@ export interface PlanDelta {
   shapes?: Record<string, Shape>;
   /** Change a project's kind, needs or tools; named fields replace the old ones. */
   profiles?: Record<string, ProfileChange>;
+  /** New custom agents the Planner designed (validated by buildSpec). */
+  agents?: CustomAgentSpec[];
 }
 
 export interface ProfileChange {
@@ -56,6 +59,11 @@ export function validateDelta(e: Engine, runId: string, delta: PlanDelta): { ok:
     const app = apps.find((x) => x.id === id)!;
     agents += squadOf({ ...app, ...c }).length - squadOf(app).length;
   }
+  for (const s of delta.agents ?? []) {
+    const problem = recheckSpec(e, runId, s);
+    if (problem) return { ok: false, error: `${s.name}: ${problem}` };
+    agents++;
+  }
   const total = e.repo.listNodes(runId).length + agents;
   if (total > run.limits.maxTotalAgents) return { ok: false, error: `The plan would have ${total} agents, over the cap of ${run.limits.maxTotalAgents}.` };
   const addN = delta.add?.length ?? 0;
@@ -69,6 +77,10 @@ export function validateDelta(e: Engine, runId: string, delta: PlanDelta): { ok:
   }
   const parts: string[] = [];
   if (addN) parts.push(`add ${delta.add!.map((a) => a.name).join(", ")}`);
+  for (const s of delta.agents ?? []) {
+    const parent = e.repo.getNode(runId, s.parentId);
+    parts.push(`new agent ${s.name} · ${s.title} → ${parent ? e.label(parent) : s.parentId}`);
+  }
   if (delta.drop?.length) parts.push(`drop ${delta.drop.join(", ")}`);
   for (const [id, c] of changes) {
     const app = apps.find((x) => x.id === id)!;
@@ -125,6 +137,7 @@ export async function applyDelta(e: Engine, runId: string, delta: PlanDelta): Pr
     }
     for (const appId of delta.drop ?? []) dropAppTx(e, runId, appId);
     for (const [appId, c] of changesOf(delta)) reshapeTx(e, runId, appId, c, plan);
+    if (delta.agents?.length) applyAgentsTx(e, runId, delta.agents);
     recount(plan);
     e.repo.db.prepare("UPDATE runs SET plan_json = ? WHERE id = ?").run(JSON.stringify(plan), runId);
   });

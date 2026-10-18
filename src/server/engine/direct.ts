@@ -464,6 +464,12 @@ export function resolveModelWord(cat: Catalog, s: string): { ref: ModelRef } | {
   return p ? { problem: p.message } : { ref };
 }
 
+/** Whose models an agent may change: everyone below it; the Planner, everyone but itself. */
+function reach(e: Engine, by: NodeInfo): string[] {
+  if (by.tier === "planner") return e.repo.listNodes(by.runId).filter((n) => n.id !== by.id).map((n) => n.id);
+  return descendants(e.tree(by.runId), by.id);
+}
+
 export interface ModelChange {
   nodes?: string[];
   role?: string;
@@ -486,7 +492,7 @@ export async function agentSetModel(e: Engine, by: NodeInfo, changes: ModelChang
   const tree = e.tree(runId);
   const all = e.repo.listNodes(runId);
   const byId = new Map(all.map((n) => [n.id, n]));
-  const below = new Set(descendants(tree, by.id));
+  const below = new Set(reach(e, by));
   const apps = e.repo.listApps(runId);
 
   // validate everything first: either every change applies or none does
@@ -552,10 +558,10 @@ export async function agentSetModel(e: Engine, by: NodeInfo, changes: ModelChang
     ids = ids.filter((id) => !same(byId.get(id)!.model));
     // the Orchestrator moving every agent that uses a slot moves that slot's default too
     let slots: SlotMap | undefined;
-    if (by.id === ORCH_ID && ids.length) {
+    if ((by.id === ORCH_ID || by.tier === "planner") && ids.length) {
       const chosen = new Set(ids);
-      for (const slot of new Set(ids.map((id) => byId.get(id)!.slot))) {
-        const users = all.filter((n) => n.slot === slot && n.status !== "done" && n.id !== ORCH_ID);
+      for (const slot of new Set(ids.filter((id) => byId.get(id)!.role !== "custom").map((id) => byId.get(id)!.slot))) {
+        const users = all.filter((n) => n.slot === slot && n.status !== "done" && n.id !== by.id && n.role !== "custom");
         if (users.every((n) => chosen.has(n.id) || same(n.model))) slots = { ...(slots ?? {}), [slot]: res.ref };
       }
     }
@@ -597,8 +603,7 @@ export async function agentModels(e: Engine, by: NodeInfo): Promise<string> {
       for (const m of cat.models.filter((x) => x.providerId === p.id && !x.hidden).slice(0, 20))
         out.push(`  ${p.id}/${m.modelId}  ${m.name}  reasoning: ${m.reasoning.join("/") || "—"}${m.defaultReasoning ? ` (default ${m.defaultReasoning})` : ""}`);
     }
-  const tree = e.tree(runId);
-  const below = descendants(tree, by.id)
+  const below = reach(e, by)
     .map((id) => e.repo.getNode(runId, id)!)
     .filter((n) => n && n.status !== "done");
   out.push("", below.length ? `Agents below you (${below.length}): id · role · model · status` : "Nobody is below you.");
