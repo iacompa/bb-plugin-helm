@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRealtime } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
-import type { ModelRef, PlanPreview, PlannedApp, Portfolio, Shape, SlotId, SlotMap } from "./types.ts";
-import { PLAT, SEED_PRESETS, SLOT_DEFS, clamp, errMsg, familyWarnings, fmtUnits, plural } from "./format.ts";
+import type { ModelRef, PlanPreview, PlannedApp, Portfolio, ProjectKind, ProjectNeed, Shape, SlotId, SlotMap } from "./types.ts";
+import { KINDS, NEEDS, PLAT, SEED_PRESETS, SLOT_DEFS, clamp, errMsg, familyWarnings, fmtUnits, needLabel, plural, toolLabel } from "./format.ts";
 import { useHelm } from "./ctx.tsx";
 import { Banner, Ic, Modal, ModelChip, askConfirm, cx } from "./ui.tsx";
 import { StudioPanel } from "./studio.tsx";
@@ -538,6 +538,7 @@ function StepPortfolio(p: {
       <div className="trunc">
         <b>{a.name}</b> <span className="muted">{a.tagline}</span>
         <FolderField app={a} onChange={(path) => p.editApp(a.name, { path: path || null })} />
+        <ProfileField app={a} onKind={(kind) => p.editApp(a.name, { kind })} onNeeds={(needs) => p.editApp(a.name, { needs })} />
       </div>
       <span className="plt">
         {a.platforms.map((x) => (
@@ -581,7 +582,7 @@ function StepPortfolio(p: {
         <label className="lbl" htmlFor="wzRoot">
           New app folders go under <span className="faint">(optional)</span>
         </label>
-        <input id="wzRoot" className="input mono" value={p.appsRoot} maxLength={500} placeholder="Default: the apps root in Helm settings — or e.g. /Volumes/Work/apps" onChange={(e) => p.setAppsRoot(e.target.value)} />
+        <input id="wzRoot" className="input mono" value={p.appsRoot} maxLength={500} placeholder="Default: the apps root in Helm settings — or e.g. ~/code/apps" onChange={(e) => p.setAppsRoot(e.target.value)} />
         <span className="hint-t">Apps without their own folder get a new repository here. Give an app its own folder below to use an existing repository (Helm works on a new helm/… branch and never touches your checkout) or a new folder anywhere.</span>
       </div>
       <Banner tone={plan.ok ? "info" : "crit"} icon={plan.ok ? "Workflow" : "AlertTriangle"}>
@@ -846,6 +847,39 @@ function StepApprove(p: {
         </Banner>
       ) : null}
       {p.err ? <Banner tone="crit">{p.err}</Banner> : null}
+    </div>
+  );
+}
+
+/** The project's kind and needs as Helm decided them; the human corrects them here before Approve. */
+function ProfileField(p: { app: PlannedApp; onKind: (k: ProjectKind) => void; onNeeds: (n: ProjectNeed[]) => void }) {
+  const needs = p.app.needs ?? [];
+  const rest = NEEDS.filter(([id]) => !needs.includes(id));
+  return (
+    <div className="profile row" style={{ gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+      <select className="kindsel" aria-label={`Kind of project for ${p.app.name}`} value={p.app.kind ?? "app"} onChange={(e) => p.onKind(e.target.value as ProjectKind)}>
+        {KINDS.map(([id, label]) => (
+          <option key={id} value={id}>
+            {label}
+          </option>
+        ))}
+      </select>
+      {needs.map((n) => (
+        <button key={n} type="button" className="needchip" title={`Remove ${needLabel(n)}`} aria-label={`Remove need ${needLabel(n)} from ${p.app.name}`} onClick={() => p.onNeeds(needs.filter((x) => x !== n))}>
+          {needLabel(n)} ×
+        </button>
+      ))}
+      {rest.length ? (
+        <select className="needadd" aria-label={`Add a need to ${p.app.name}`} value="" onChange={(e) => e.target.value && p.onNeeds([...needs, e.target.value as ProjectNeed])}>
+          <option value="">+ need</option>
+          {rest.map(([id, label]) => (
+            <option key={id} value={id}>
+              {label}
+            </option>
+          ))}
+        </select>
+      ) : null}
+      {(p.app.tools ?? []).length ? <span className="muted" style={{ fontSize: 11.5 }}>uses {(p.app.tools ?? []).map(toolLabel).join(", ")}</span> : null}
     </div>
   );
 }

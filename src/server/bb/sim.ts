@@ -3,7 +3,7 @@
 // native interactions, failures on demand, and scriptable agents. The big
 // scenarios (20 apps, 169 agents, crashes) run here, never on real providers.
 
-import type { BbPort, EnvInfo, ForeignThread, HelmEvent, HelmThreadMeta, InteractionAnswer, InteractionLite, RawCatalog, SendResult, SpawnSpec, ThreadRef, ThreadState } from "./port.ts";
+import type { BbPort, EnvInfo, ForeignThread, HelmEvent, HelmThreadMeta, InteractionAnswer, InteractionLite, PluginLite, RawCatalog, SendResult, SpawnSpec, ThreadRef, ThreadState } from "./port.ts";
 import type { HostOps } from "../../shared/host-contract.ts";
 import { FakeGit } from "./sim-git.ts";
 
@@ -463,6 +463,13 @@ export class SimBB implements BbPort {
     t.interactions.splice(i, 1);
     const answer = args.answer.kind === "allow" ? "approved" : args.answer.kind === "deny" ? "denied" : JSON.stringify(args.answer);
     this.startTurn(t, `interaction ${args.interactionId} → ${answer}`, false, null, "system", null);
+  }
+
+  async listPlugins(): Promise<PluginLite[]> {
+    return [
+      { id: "browser-automation", name: "Browser automation", description: "Persistent DevBrowser desktop and headless sessions", command: "bb browser-automation" },
+      { id: "automations", name: "Automations", description: "Scheduled agent/script runs", command: "bb automation" },
+    ];
   }
 
   async countActive(args: { providerId?: string } = {}): Promise<number> {

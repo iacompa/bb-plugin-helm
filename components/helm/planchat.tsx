@@ -58,7 +58,7 @@ export function PlanChat(p: { model: ModelRef | null; setModel: (m: ModelRef) =>
           <label className="lbl" htmlFor="wzIdea">
             What do you want to build? <span className="faint">(optional — you can also just start talking)</span>
           </label>
-          <textarea id="wzIdea" className="textarea" rows={5} spellCheck={false} value={idea} onChange={(e) => setIdea(e.target.value)} placeholder="For example: finish the 3 apps in /Volumes/Work/apps (tide, lumen, sprout). They all use the shared library in /Volumes/Work/core. Use Codex for reviews." />
+          <textarea id="wzIdea" className="textarea" rows={5} spellCheck={false} value={idea} onChange={(e) => setIdea(e.target.value)} placeholder="For example: finish the 3 apps in ~/code (pebble, lumen, stride), build a booking website with payments, and audit the existing game in ~/code/arena. The apps use the shared library in ~/code/core. Use Codex for reviews." />
         </div>
         {err ? <Banner tone="crit">{err}</Banner> : null}
         <div className="row" style={{ gap: 10 }}>

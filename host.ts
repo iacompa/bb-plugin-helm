@@ -23,6 +23,7 @@ export default experimental_defineHostEntry({
     log: (input) => ops.log(input),
     scan: (input) => ops.scan(input),
     probe: (input) => ops.probe(input),
+    toolProbe: (input) => ops.toolProbe(input),
     simList: (input) => ops.simList(input),
     simBoot: (input) => ops.simBoot(input),
     simShutdown: (input) => ops.simShutdown(input),

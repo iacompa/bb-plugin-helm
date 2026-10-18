@@ -7,6 +7,8 @@ import type {
   DirectiveType,
   ModelRef,
   NodeStatus,
+  ProjectKind,
+  ProjectNeed,
   Role,
   SlotId,
   SlotMap,
@@ -52,7 +54,32 @@ export const ST: Record<string, string> = {
 };
 export const statusLabel = (s: string | null | undefined) => (s ? ST[s] ?? s : "Unknown");
 
-export const PLAT: Record<string, string> = { mac: "macOS", win: "Windows", ios: "iOS", and: "Android" };
+export const PLAT: Record<string, string> = { mac: "macOS", win: "Windows", ios: "iOS", and: "Android", web: "Web" };
+
+/** Project kinds and needs (mirrors src/shared/types.ts; the app imports nothing from the server at runtime). */
+export const KINDS: Array<[ProjectKind, string]> = [
+  ["app", "App"],
+  ["web", "Website"],
+  ["game", "Game"],
+  ["automation", "Automation"],
+  ["review", "Review"],
+];
+export const NEEDS: Array<[ProjectNeed, string]> = [
+  ["database", "Database"],
+  ["auth", "Accounts"],
+  ["payments", "Payments"],
+  ["security", "Security"],
+  ["hipaa", "HIPAA"],
+  ["privacy", "Privacy law"],
+  ["realtime", "Realtime"],
+  ["ai", "AI features"],
+  ["automation", "Automation"],
+  ["assets", "Art assets"],
+  ["multiplayer", "Multiplayer"],
+];
+export const kindLabel = (k: ProjectKind | undefined) => KINDS.find(([id]) => id === (k ?? "app"))?.[1] ?? "App";
+export const needLabel = (n: ProjectNeed) => NEEDS.find(([id]) => id === n)?.[1] ?? n;
+export const toolLabel = (t: string) => (t.startsWith("plugin:") ? `${t.slice(7)} plugin` : ({ blender: "Blender", unreal: "Unreal", unity: "Unity", godot: "Godot", docker: "Docker", ffmpeg: "FFmpeg" } as Record<string, string>)[t] ?? t);
 
 export const ROLE_LABEL: Record<Role, string> = {
   orch: "Orchestrator",
@@ -67,6 +94,9 @@ export const ROLE_LABEL: Record<Role, string> = {
   slop: "Slop Hunter",
   research: "Research",
   docs: "Docs",
+  data: "Data builder",
+  compliance: "Compliance",
+  assets: "Asset builder",
 };
 
 /** Host icon names (only names from BB's verified icon list). */
@@ -83,9 +113,12 @@ export const ROLE_ICON: Record<Role, string> = {
   slop: "Clean",
   research: "Explore",
   docs: "FileText",
+  data: "Archive",
+  compliance: "Lock",
+  assets: "Palette",
 };
 export function roleIcon(n: { role: Role; platform?: string | null }): string {
-  if (n.role === "platform") return n.platform === "ios" || n.platform === "and" ? "Smartphone" : "Laptop";
+  if (n.role === "platform") return n.platform === "ios" || n.platform === "and" ? "Smartphone" : n.platform === "web" ? "Globe" : "Laptop";
   return ROLE_ICON[n.role] ?? "Bot";
 }
 
@@ -134,10 +167,10 @@ export const SLOT_DEFS: Array<{ id: SlotId; group: "Coordination" | "Build" | "G
   { id: "orchestrator", group: "Coordination", name: "Orchestrator", desc: "Strategy, staffing and the portfolio view. Reads everything.", role: "orch" },
   { id: "manager", group: "Coordination", name: "Managers", desc: "Oversee up to four app leads each. Roll up status.", role: "mgr" },
   { id: "lead", group: "Coordination", name: "App leads", desc: "One per app: spec, contract, integration, decisions.", role: "lead" },
-  { id: "ui", group: "Build", name: "UI builders", desc: "Design system, screens, motion.", role: "ui" },
-  { id: "code", group: "Build", name: "Code builders", desc: "Core logic, data layer, functionality.", role: "code" },
-  { id: "platform", group: "Build", name: "Platform builders", desc: "macOS · Windows · iOS · Android glue.", role: "platform" },
-  { id: "security", group: "Build", name: "Security", desc: "Threat model, dependency and secrets audit.", role: "security" },
+  { id: "ui", group: "Build", name: "UI builders", desc: "Design system, screens, motion. Asset builders use this model too.", role: "ui" },
+  { id: "code", group: "Build", name: "Code builders", desc: "Core logic, backend, data layer. Data builders use this model too.", role: "code" },
+  { id: "platform", group: "Build", name: "Platform builders", desc: "macOS · Windows · iOS · Android · Web glue.", role: "platform" },
+  { id: "security", group: "Build", name: "Security", desc: "Threat model, dependency and secrets audit. Compliance uses this model too.", role: "security" },
   { id: "test", group: "Build", name: "Test", desc: "Test plans and UI tests (optional per app).", role: "test" },
   { id: "review", group: "Gates", name: "Reviewer", desc: "Independent code and UI review, one per app.", role: "review" },
   { id: "slop", group: "Gates", name: "Slop Hunter", desc: "AI-slop check: filler, fakes, dead code, invented APIs.", role: "slop" },
@@ -257,7 +290,7 @@ export function modelText(cat: Catalog | null | undefined, r: ModelRef | null | 
 export const sameRef = (a: ModelRef | null | undefined, b: ModelRef | null | undefined) =>
   !!a && !!b && a.providerId === b.providerId && a.modelId === b.modelId && (a.reasoning ?? null) === (b.reasoning ?? null);
 
-export const BASE_TOK: Record<Role, number> = { orch: 1800, mgr: 700, lead: 1400, ui: 900, code: 1100, platform: 800, security: 350, test: 300, review: 500, slop: 300, research: 300, docs: 300 };
+export const BASE_TOK: Record<Role, number> = { orch: 1800, mgr: 700, lead: 1400, ui: 900, code: 1100, platform: 800, security: 350, test: 300, review: 500, slop: 300, research: 300, docs: 300, data: 700, compliance: 350, assets: 700 };
 export const RW: Record<string, number> = { none: 0.5, low: 0.7, medium: 0.85, high: 1, xhigh: 1.35, max: 1.7, ultra: 2.2, ultracode: 1.8 };
 export const UNIT_PER_KTOK = 0.0075;
 export const FORECAST_LOW = 0.7;

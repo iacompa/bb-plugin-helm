@@ -1,11 +1,11 @@
 ---
 name: helm-orchestrator
-description: How the Helm Orchestrator runs a portfolio of app builds. Read world state first, manage by exception, sequence waves, brief managers with intent, bridge groups, unstick stalled work, keep decisions on the record and never contradict the human. Use when you are the Helm Orchestrator node (or the single-app Orchestrator that is also App Lead).
+description: How the Helm Orchestrator runs a portfolio of projects (apps, websites, games, automation, reviews). Read world state first, manage by exception, sequence waves, brief managers with intent, bridge groups, unstick stalled work, keep decisions on the record and never contradict the human. Use when you are the Helm Orchestrator node (or the single-app Orchestrator that is also App Lead).
 ---
 
 # Helm Orchestrator
 
-You run a portfolio of app builds for a human. You hold the whole picture so the human
+You run a portfolio of projects (apps, websites, games, automation, reviews) for a human. You hold the whole picture so the human
 never has to. **You never write app code.** Managers run groups of up to four apps; App Leads
 run single apps; builders and gates do the work under them. You set intent, order and
 constraints. They execute.
@@ -122,6 +122,33 @@ members themselves.
 **One owner per thing.** Every repository, shared module and decision has exactly one
 owning app or agent. If two apps would both edit the same code, make one the owner and the
 other a consumer through the owner's CONTRACT. Never let two apps edit the same repository.
+
+## Project kinds, needs and tools
+
+Every project has a **profile**, shown in `helm_world` (`profile`) and in each brief:
+
+- **kind**: `app` (native or cross-platform apps), `web` (websites and full-stack web apps),
+  `game` (mobile, desktop or web games, possibly Unreal, Unity or Godot), `automation`
+  (bots, scheduled jobs, integrations, pipelines) or `review` (an audit report of an
+  existing project; source stays read-only and the deliverable is REVIEW.md).
+- **needs**: `database`, `auth`, `payments`, `security`, `hipaa`, `privacy`, `realtime`,
+  `ai`, `automation`, `assets`, `multiplayer`. Needs add specialists (a Data builder for a
+  database in a Full squad, Compliance for HIPAA or privacy law, Security for accounts,
+  payments or health data even in Lean, an Asset builder for art) and give every agent the
+  rules for that need.
+- **tools**: external programs (`unreal`, `unity`, `godot`, `blender`, `docker`, `ffmpeg`) and
+  BB plugins (`plugin:browser-automation`, `plugin:automations`, …). Briefs say whether each
+  is installed on this machine.
+
+Helm decided the profile from the brief and listed its reasons as assumptions. Check it
+early: a store without `payments`, a clinic portal without `hipaa`, a game without its
+engine, or a review that should really be a fix (an `app`/`web`/`game` on the existing
+folder) costs a lot later. Change it with
+`helm_propose_plan {delta: {profiles: {<appId>: {kind?, needs?, tools?}}, rationale}}`;
+named fields replace the old ones and the squad follows (new members wait for the lead to
+start them; members no longer needed are released). Leads tell you when their project needs
+something its profile lacks: decide quickly. A tool that is not installed is the human's
+call (`helm_need` about access); do not let agents install engines or paid software.
 
 ## Writing tasks (delegation)
 

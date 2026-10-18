@@ -4,7 +4,7 @@
 // the engine as their first argument; nothing here touches api.sdk directly.
 
 import type { OutboxRow, Repo } from "../db/repo.ts";
-import type { BbPort, EnvSpec, HelmEvent } from "../bb/port.ts";
+import type { BbPort, EnvSpec, HelmEvent, PluginLite } from "../bb/port.ts";
 import type { HostOps } from "../../shared/host-contract.ts";
 import type {
   AppInfo,
@@ -24,11 +24,12 @@ import type {
 import { LIMIT_DEFAULTS, PERMISSION_LABEL } from "../../shared/types.ts";
 import { OutboxWorker, type HandlerResult } from "./outbox.ts";
 import { DEFAULT_SETTINGS, expandHome, newRunId, silentLogger, type HelmSettings, type Logger } from "./context.ts";
-import { parseBrief } from "../domain/brief.ts";
+import { parseBrief, withProfiles } from "../domain/brief.ts";
 import { ORCH_ID, planTopology, slugify, type TopologyPlan } from "../domain/topology.ts";
 import { ROLES, roleLabel, scopeFor, tierOfRole } from "../domain/roles.ts";
 import { forecast, normalizeModel, PROVIDER_LABEL, requiredSlots, resolveModel, validateRef, modelName, unsetSlots, familyWarnings } from "../domain/models.ts";
-import { briefFor, escapeForPrompt, initialPortfolioMd, managerNotesMd, type BriefContext } from "../domain/briefs.ts";
+import { briefFor, escapeForPrompt, initialPortfolioMd, managerNotesMd, type BriefContext, type ProjectBrief } from "../domain/briefs.ts";
+import { BLOCKED_PLUGINS, PLUGIN_INFO, TOOL_INFO } from "../domain/profile.ts";
 import { getTask, TASK_MAX } from "./tasks.ts";
 import { firstWave, wavesEstimate, admit, type Eligible, nextWave } from "../domain/scheduler.ts";
 import { RUN_CHECK_SH, CHECKS_JSON_SKELETON, GITIGNORE } from "../domain/checks.ts";
@@ -103,6 +104,8 @@ export class Engine {
   private rand: () => number;
   private catalogs = new Map<string, Catalog>();
   private homes = new Map<string, string | null>();
+  private toolCache = new Map<string, { at: number; found: Record<string, boolean> }>();
+  private pluginCache: { at: number; list: PluginLite[] } | null = null;
   private plans = new Map<string, TopologyPlan>();
   /** Threads Helm is archiving right now — their thread.archived events are expected. */
   readonly archiving = new Set<string>();
@@ -400,10 +403,66 @@ export class Engine {
     }
   }
 
+  // ───────────────────────────── tools and plugins ─────────────────────────────
+
+  /** Enabled BB plugins a project may use: not BB's own infrastructure, never the orchestration plugins Helm replaces. Cached 10 minutes. */
+  async usefulPlugins(): Promise<PluginLite[]> {
+    if (this.pluginCache && this.now() - this.pluginCache.at < 600_000) return this.pluginCache.list;
+    const infra = /^(provider-|environment-|bb-|bb--)/;
+    const quiet = new Set(["account-pool", "agent-annotations", "ask-user-question", "concurrency-limit", "keep-awake", "push-notifications", "custom-instructions", "handoff", "connect", "drafts", "scheduled-send", "provider-retry", "inline-vis", "pdf-preview", "mcp", "prompt-library", "storage-retention"]);
+    let list: PluginLite[] = [];
+    try {
+      list = (await this.port.listPlugins()).filter((p) => !BLOCKED_PLUGINS.has(p.id) && !infra.test(p.id) && !quiet.has(p.id));
+    } catch (err) {
+      this.log.warn(`listing BB plugins failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    this.pluginCache = { at: this.now(), list };
+    return list;
+  }
+
+  /** One line per useful plugin, for the planner and leads. */
+  async pluginLines(): Promise<Array<{ id: string; line: string }>> {
+    return (await this.usefulPlugins()).map((p) => ({ id: p.id, line: `${PLUGIN_INFO[p.id]?.desc ?? p.description}${p.command ? ` (\`${p.command}\`)` : ""}`.slice(0, 220) }));
+  }
+
+  /** Check which of the run's external tools are installed on its host, and which plugins are enabled. Cached 10 minutes per host. */
+  async probeRun(runId: string): Promise<void> {
+    const hostId = this.repo.runHost(runId) ?? (await this.port.primaryHostId());
+    const key = hostId ?? "_";
+    const all = [...new Set(this.repo.listApps(runId).flatMap((a) => a.tools))];
+    const tools = all.filter((t) => !t.startsWith("plugin:"));
+    await this.usefulPlugins();
+    const hit = this.toolCache.get(key);
+    const missing = tools.filter((t) => hit?.found[t] === undefined);
+    if (hit && this.now() - hit.at < 600_000 && !missing.length) return;
+    const ask = tools.map((id) => ({ id, bins: TOOL_INFO[id]?.probe?.bins ?? [id], paths: TOOL_INFO[id]?.probe?.paths ?? [] }));
+    if (!ask.length) return;
+    try {
+      const { found } = await this.port.host(hostId).toolProbe({ tools: ask });
+      this.toolCache.set(key, { at: this.now(), found: Object.fromEntries(Object.entries(found).map(([k, v]) => [k, !!v])) });
+    } catch (err) {
+      this.log.warn(`tool probe failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /** Installed (true), missing (false) or not checked yet (null), from the caches. */
+  installed(runId: string, tools: string[]): Record<string, boolean | null> {
+    const found = this.toolCache.get(this.repo.runHost(runId) ?? "_")?.found ?? this.toolCache.values().next().value?.found ?? {};
+    const plugins = this.pluginCache ? new Set(this.pluginCache.list.map((p) => p.id)) : null;
+    return Object.fromEntries(tools.map((t) => [t, t.startsWith("plugin:") ? (plugins ? plugins.has(t.slice(7)) : null) : found[t] ?? null]));
+  }
+
+  /** The project block of an agent's brief. */
+  projectBrief(run: RunInfo, app: AppInfo, n: NodeInfo): ProjectBrief {
+    const leads = this.isLeadNode(n);
+    const plugins = leads && this.pluginCache ? this.pluginCache.list.filter((p) => !app.tools.includes(`plugin:${p.id}`)).map((p) => ({ id: p.id, line: `${PLUGIN_INFO[p.id]?.desc ?? p.description}${p.command ? ` (\`${p.command}\`)` : ""}`.slice(0, 220) })) : undefined;
+    return { kind: app.kind, needs: app.needs, tools: app.tools, installed: this.installed(run.id, app.tools), ...(plugins?.length ? { plugins } : {}) };
+  }
+
   // ───────────────────────────── planning ─────────────────────────────
 
   preview(input: { brief?: string; portfolio?: Portfolio; slots?: SlotMap; limits?: Partial<HelmLimits> }, catalog: Catalog | null = null): PlanPreview {
-    const parsed = input.portfolio ? { portfolio: input.portfolio, assumed: [] as string[] } : parseBrief(input.brief ?? "");
+    const parsed = input.portfolio ? { portfolio: withProfiles(input.portfolio), assumed: [] as string[] } : parseBrief(input.brief ?? "");
     const limits = { ...LIMIT_DEFAULTS, ...this.settings.limits, ...(input.limits ?? {}) };
     const plan = planTopology(parsed.portfolio.apps, limits);
     const slots = input.slots ?? {};
@@ -444,7 +503,8 @@ export class Engine {
         hostId: input.hostId ?? null,
       });
       for (const a of plan.apps)
-        this.repo.insertApp({ runId, id: a.id, name: a.name, tagline: a.tagline, platforms: a.platforms, platformsAssumed: a.platformsAssumed, shape: a.shape, managerNodeId: a.managerId, order: a.order, test: a.test, priority: a.priority, notes: a.notes, targetPath: a.path, reads: a.reads });
+        this.repo.insertApp({ runId, id: a.id, name: a.name, tagline: a.tagline, platforms: a.platforms, platformsAssumed: a.platformsAssumed, shape: a.shape, managerNodeId: a.managerId, order: a.order, test: a.test, priority: a.priority, notes: a.notes, targetPath: a.path, reads: a.reads, kind: a.kind, needs: a.needs, tools: a.tools });
+      const kindOf = new Map(plan.apps.map((a) => [a.id, a.kind]));
       for (const n of plan.nodes)
         this.repo.insertNode({
           runId,
@@ -457,7 +517,7 @@ export class Engine {
           slot: n.slot,
           alsoLead: n.alsoLead,
           model: null,
-          scopeGlobs: scopeFor(n.role, n.platform),
+          scopeGlobs: scopeFor(n.role, n.platform, (n.appId && kindOf.get(n.appId)) || "app"),
           branch: null,
           briefMd: null,
         });
@@ -480,7 +540,7 @@ export class Engine {
     // 1. re-validate the plan and every slot against the live catalog
     const problems: string[] = [];
     const replan = planTopology(
-      this.repo.listApps(runId).map((a) => ({ name: a.name, tagline: a.tagline, platforms: a.platforms, shape: a.shape, test: a.test, priority: a.priority })),
+      this.repo.listApps(runId).map((a) => ({ name: a.name, tagline: a.tagline, platforms: a.platforms, shape: a.shape, test: a.test, priority: a.priority, kind: a.kind, needs: a.needs, tools: a.tools })),
       run.limits,
     );
     if (!replan.ok) problems.push(replan.error ?? "plan invalid");
@@ -791,7 +851,7 @@ export class Engine {
       );
     else if (this.isLeadNode(n) && app)
       lines.push(
-        `## Your squad\nShape: ${app.shape}. Planned squad: ${nodes.filter((x) => x.appId === app.id && x.tier === "specialist").map((x) => roleLabel(x.role, x.platform)).join(", ") || "none (solo — you build it yourself)"}. Gates: Reviewer, Slop Hunter (Helm spawns them when you reach Review).\nYour own worktree branch is the app's **integration branch**. Commit SPEC.md, ARCHITECTURE.md, CONTRACT.md and ACCEPTANCE.md there, then \`helm_publish_contract\`, \`helm_stage\` to build and \`helm_spawn_squad\`.\nChecks are declared in \`.helm/checks.json\`; run each through \`.helm/run-check.sh <name> -- <command…>\` and record it with \`helm_record_check\`.`,
+        `## Your squad\nShape: ${app.shape}. Planned squad: ${nodes.filter((x) => x.appId === app.id && x.tier === "specialist").map((x) => roleLabel(x.role, x.platform)).join(", ") || "none (solo — you build it yourself)"}. Gates: Reviewer, Slop Hunter (Helm spawns them when you reach Review).\nYour own worktree branch is the app's **integration branch**. ${app.kind === "review" ? "Commit ACCEPTANCE.md (the review plan) there, then \`helm_stage\` to build and \`helm_spawn_squad\` (each auditor's task names its area, the pinned commit and its reports folder). When every auditor has reported, compile REVIEW.md, record the project's checks (a failure is a finding), and \`helm_stage\` to review." : "Commit SPEC.md, ARCHITECTURE.md, CONTRACT.md and ACCEPTANCE.md there, then \`helm_publish_contract\`, \`helm_stage\` to build and \`helm_spawn_squad\`."}\nChecks are declared in \`.helm/checks.json\`; run each through \`.helm/run-check.sh <name> -- <command…>\` and record it with \`helm_record_check\`.`,
       );
     if (n.tier === "specialist") lines.push(`## Your branch\nYou work in your own worktree branched off the app's integration branch. Commit there; your lead merges it. Report done with the commit sha as evidence.${app?.adopted ? ` Run checks through ${wrapper} <name> -- <command…>.` : ""}`);
     if (n.tier === "gate")
@@ -823,6 +883,7 @@ export class Engine {
       baseBranch: n.tier === "specialist" || n.tier === "gate" ? appExtra?.integrationBranch ?? null : null,
       repoPath: app?.repoPath ?? null,
       location: app && (app.adopted || app.reads.length) ? { adopted: app.adopted, userBranch: app.userBranch, helmBranch: app.helmBranch, reads: app.reads } : null,
+      project: app ? this.projectBrief(run, app, n) : null,
       extra: lines,
       integrationCommit: extra.integrationCommit ?? null,
       scannerFindings: extra.scannerFindings ?? null,
@@ -1049,6 +1110,7 @@ export class Engine {
       // a specialist's "done" must cite work made after this point (gates.report)
       if (n.tier === "specialist" && n.appId) await this.recordSpawnBase(run.id, n.id, n.appId);
       const integrationCommit = n.tier === "gate" && n.appId ? this.repo.appExtra(run.id, n.appId).integrationHead : null;
+      if (n.appId) await this.probeRun(run.id).catch(() => undefined);
       const prompt = this.buildBrief(run, n, { integrationCommit, scannerFindings: this.repo.getMeta(`scanner:${run.id}:${n.id}`), handover: typeof row.payload.handover === "string" ? row.payload.handover : null });
       const visible = n.role === "orch" || (this.settings.showLeadsInSidebar && this.isLeadNode(n));
       ref = await this.port.spawnThread({

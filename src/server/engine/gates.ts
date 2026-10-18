@@ -7,7 +7,7 @@ import { getTask, storeTask } from "./tasks.ts";
 import type { AppInfo, CheckInfo, DirectiveInfo, EvidenceRef, FindingInfo, NodeInfo, Stage } from "../../shared/types.ts";
 import type { Engine } from "./engine.ts";
 import type { ScanOutput } from "../../shared/host-contract.ts";
-import { leadTransition, readyAllowed, SPEC_FILES, stageLabel, stagePct } from "../domain/stages.ts";
+import { leadTransition, readyAllowed, REVIEW_FILE, specFilesFor, stageLabel, stagePct } from "../domain/stages.ts";
 import { missingChecks, parseChecksJson, verifyCheckClaim, type ChecksDecl } from "../domain/checks.ts";
 import { validateVerdict, blocksReady, type Verdict, shaMatches } from "../domain/verdict.ts";
 import { admissibleSpecialists, nodeIdFor, squadFor, type SquadMember } from "../domain/topology.ts";
@@ -353,8 +353,9 @@ export async function stageRequest(e: Engine, lead: NodeInfo, to: Stage, evidenc
   const extra = e.repo.appExtra(lead.runId, app.id);
   const committed = new Set<string>();
   const existing = app.adopted ? existingFor(e, lead.runId, app.id) : null;
+  const review = app.kind === "review";
   if (head)
-    for (const f of SPEC_FILES) {
+    for (const f of [...specFilesFor(app.kind), ...(review && to === "review" ? [REVIEW_FILE] : [])]) {
       // an existing repository may reuse its own documents (helm_existing_docs)
       const mapped = existing ? Object.entries(DOC_FILE).find(([, file]) => file === f)?.[0] : undefined;
       const alt = mapped ? existing!.docs[mapped as keyof typeof DOC_FILE] : undefined;
@@ -385,7 +386,7 @@ export async function stageRequest(e: Engine, lead: NodeInfo, to: Stage, evidenc
   let checksMissing: string[] = [];
   let checksFailing: string[] = [];
   let extraProblem: string | null = null;
-  if (to === "review" && head) {
+  if (to === "review" && head && !review) {
     const declText = (await host.fileAt({ repo: app.repoPath, ref: head, path: ".helm/checks.json" })).content;
     const decl = parseChecksJson(declText) ?? existing?.checks ?? null;
     const placeholders = decl ? Object.entries(decl).filter(([, d]) => (d.tier ?? "local") === "local" && PLACEHOLDER_CMD.test(d.command)).map(([k]) => k) : [];
@@ -401,7 +402,7 @@ export async function stageRequest(e: Engine, lead: NodeInfo, to: Stage, evidenc
       if (hard.length) extraProblem = `The deterministic scanner found ${hard.length} zero-tolerance item${hard.length === 1 ? "" : "s"} on ${head.slice(0, 9)}: ${hard.slice(0, 6).map((f) => `${f.rule} ${f.path}:${f.line}`).join(", ")}${hard.length > 6 ? "…" : ""}. Fix them first (helm_slop_scan lists them).`;
     }
   }
-  const check = leadTransition(app.stage, to, { committedFiles: committed, buildersDone: pending.length === 0, buildersPending: pending, checksGreen, checksMissing, checksFailing, integrationHead: head });
+  const check = leadTransition(app.stage, to, { committedFiles: committed, buildersDone: pending.length === 0, buildersPending: pending, checksGreen, checksMissing, checksFailing, integrationHead: head, kind: app.kind });
   if (!check.ok) return `Rejected: ${check.reason}`;
   if (extraProblem) return `Rejected: ${extraProblem}`;
   const { verified, problems } = await verifyEvidence(e, lead, evidence);
@@ -599,7 +600,8 @@ async function tryReady(e: Engine, runId: string, appId: string, verdictId: stri
   const head = e.repo.appExtra(runId, appId).integrationHead;
   const verdicts = e.repo.verdicts(runId, appId).filter((v) => v.accepted && v.verdict === "pass");
   const checks = e.repo.checks(runId, appId);
-  const greenAt = head && checks.some((c) => c.commitSha && shaMatches(c.commitSha, head) && c.exitCode === 0) ? head : null;
+  // a review project's checks are evidence for its findings, not a bar its report must clear
+  const greenAt = head && (app.kind === "review" || checks.some((c) => c.commitSha && shaMatches(c.commitSha, head) && c.exitCode === 0)) ? head : null;
   const zt = e.repo.findings(runId, appId).filter((f) => f.status === "open" && blocksReady(f, e.settings.zeroTolerance)).length;
   const r = readyAllowed({
     commit: head,
@@ -615,7 +617,7 @@ async function tryReady(e: Engine, runId: string, appId: string, verdictId: stri
     if (lead) e.repo.event(runId, lead.id, "ready.blocked", r.reason);
     return;
   }
-  const ciPlatforms = app.platforms.filter((p) => p === "win" || p === "and");
+  const ciPlatforms = app.kind === "review" ? [] : app.platforms.filter((p) => p === "win" || p === "and");
   const unverified = e.repo.verdicts(runId, appId).filter((v) => v.accepted && head && shaMatches(v.commit, head)).flatMap((v) => v.unverified.map((u) => `${u.what}: ${u.reason}`));
   e.repo.tx(() => {
     setStage(e, runId, appId, "ready", { verdict: verdictId, commit: head });
@@ -627,7 +629,9 @@ async function tryReady(e: Engine, runId: string, appId: string, verdictId: stri
       title: `${app.name} is ready for sign-off`,
       body: [
         ...e.repo.verdicts(runId, appId).filter((v) => v.accepted && head && shaMatches(v.commit, head)).map((v) => `${v.gate === "review" ? "Reviewer" : "Slop Hunter"}: ${v.verdict} — ${v.summary}`),
-        `Checks green on ${head?.slice(0, 9)}: ${[...new Set(checks.filter((c) => c.commitSha && head && shaMatches(c.commitSha, head) && c.exitCode === 0).map((c) => c.name))].join(", ")}`,
+        app.kind === "review"
+          ? `The report: ${REVIEW_FILE} at ${head?.slice(0, 9)} (source untouched; the auditors' evidence is under reports/).`
+          : `Checks green on ${head?.slice(0, 9)}: ${[...new Set(checks.filter((c) => c.commitSha && head && shaMatches(c.commitSha, head) && c.exitCode === 0).map((c) => c.name))].join(", ")}`,
         ...notes,
         `Result: ${extraBranch(e, runId, appId)} in ${app.repoPath ?? "the app repository"}.${app.adopted ? ` Helm never merges into your branches; merge it into ${app.userBranch ?? "your branch"} yourself when you are happy.` : ""}`,
       ].join("\n"),

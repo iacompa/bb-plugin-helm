@@ -115,6 +115,13 @@ export const HOST_CONTRACT = defineRpcContract({
       dotnet: z.string().nullable(),
     }),
   },
+  /** Which external tools (Blender, Unreal, Docker…) are installed: a binary on PATH or an app bundle path (one `*` per path). */
+  toolProbe: {
+    input: z.object({
+      tools: z.array(z.object({ id: z.string().max(60), bins: z.array(z.string().regex(/^[\w.+-]+$/).max(60)).max(6), paths: z.array(z.string().max(300)).max(6).default([]) })).max(24),
+    }),
+    output: z.object({ found: z.record(z.string(), z.string().nullable()) }),
+  },
   // ── simulator view (the human watches and drives the apps) ──
   simList: {
     input: z.object({}),

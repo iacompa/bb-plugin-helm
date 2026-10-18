@@ -5,6 +5,7 @@ import type { Engine } from "./engine.ts";
 import type { AppInfo, DirectiveInfo, NodeInfo, Stage } from "../../shared/types.ts";
 import { STAGES } from "../domain/stages.ts";
 import { forecast, fmtUnits } from "../domain/models.ts";
+import { profileLine } from "../domain/profile.ts";
 
 const age = (e: Engine, ts: number) => Math.max(0, Math.round((e.now() - ts) / 60_000));
 
@@ -35,7 +36,7 @@ export function world(e: Engine, runId: string, opts: { appsPage?: number } = {}
     ].slice(0, 4);
     // where the app lives, so the chain of command can check each agent works in the right place
     const where = { repo: a.repoPath ?? a.targetPath ?? null, existingRepo: a.adopted, helmBranch: a.helmBranch, humanBranch: a.userBranch, reads: a.reads };
-    return { id: a.id, name: a.name, stage: a.stage, status: lead?.status ?? "planned", priority: a.priority, blockers, where };
+    return { id: a.id, name: a.name, profile: profileLine(a), stage: a.stage, status: lead?.status ?? "planned", priority: a.priority, blockers, where };
   };
   const pageApps = (ids: string[]) => ids.slice(page * 30, page * 30 + 30);
   const managers = plan.managers.map((m) => ({ id: m.id, name: m.name, apps: pageApps(m.appIds).map((id) => apps.find((a) => a.id === id)).filter((a): a is AppInfo => !!a).map(appLine) }));

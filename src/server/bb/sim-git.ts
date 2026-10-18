@@ -303,6 +303,7 @@ export class FakeGit {
       simBuilds: async () => ({ builds: [] }),
       simInstall: async () => ({ ok: false, message: "no simulators in the simulation", match: null }),
       simImage: async () => ({ data: null, mime: "" }),
+      toolProbe: async (input: { tools: Array<{ id: string }> }) => ({ found: Object.fromEntries(input.tools.map((t) => [t.id, t.id === "docker" ? "/usr/local/bin/docker" : null])) }),
       probe: async () => ({ platform: "darwin", home, git: "git version 2.50.0 (sim)", xcode: "Xcode 27.0 (sim)", swift: "Swift 6.3 (sim)", gradle: null, androidSdk: false, dotnet: null }),
     };
   }

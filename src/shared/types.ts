@@ -13,9 +13,40 @@ export type Role =
   | "test"
   | "research"
   | "docs"
+  | "data"
+  | "compliance"
+  | "assets"
   | "review"
   | "slop";
-export type Platform = "mac" | "win" | "ios" | "and";
+export type Platform = "mac" | "win" | "ios" | "and" | "web";
+
+/** What a project is (its mode). Helm decides it from the brief unless the human names it. */
+export type ProjectKind = "app" | "web" | "game" | "automation" | "review";
+export const PROJECT_KINDS: ProjectKind[] = ["app", "web", "game", "automation", "review"];
+export const KIND_LABEL: Record<ProjectKind, string> = {
+  app: "App",
+  web: "Website",
+  game: "Game",
+  automation: "Automation",
+  review: "Review",
+};
+
+/** What a project needs beyond its kind. Each need can add a specialist, a craft skill and brief guidance. */
+export type ProjectNeed = "database" | "auth" | "payments" | "security" | "hipaa" | "privacy" | "realtime" | "ai" | "automation" | "assets" | "multiplayer";
+export const PROJECT_NEEDS: ProjectNeed[] = ["database", "auth", "payments", "security", "hipaa", "privacy", "realtime", "ai", "automation", "assets", "multiplayer"];
+export const NEED_LABEL: Record<ProjectNeed, string> = {
+  database: "Database",
+  auth: "Accounts",
+  payments: "Payments",
+  security: "Security",
+  hipaa: "HIPAA",
+  privacy: "Privacy law",
+  realtime: "Realtime",
+  ai: "AI features",
+  automation: "Automation",
+  assets: "Art assets",
+  multiplayer: "Multiplayer",
+};
 export type Shape = "solo" | "lean" | "full";
 export type Stage =
   | "intake"
@@ -180,6 +211,11 @@ export interface PortfolioApp {
   path?: string | null;
   /** Other folders the app's agents may read (never write), e.g. a shared core library. */
   reads?: string[];
+  /** The project's mode. Default: decided from the name, tagline and notes. */
+  kind?: ProjectKind;
+  needs?: ProjectNeed[];
+  /** External programs ("blender", "unreal") and BB plugins ("plugin:browser-automation") the agents should use. */
+  tools?: string[];
 }
 
 export interface Portfolio {
@@ -238,6 +274,9 @@ export interface AppInfo {
   /** Adopted repos: the branch Helm created for the run, and the branch the human had checked out. */
   helmBranch: string | null;
   userBranch: string | null;
+  kind: ProjectKind;
+  needs: ProjectNeed[];
+  tools: string[];
 }
 
 export interface NodeInfo {

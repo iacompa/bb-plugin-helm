@@ -236,6 +236,14 @@ again, read the new diff (`git diff <old>..<sha>`), re-run the checks, one new v
 Fixes made in a hurry are where new slop appears (a catch added to silence a test), so
 grep the new diff with the table above.
 
+## Review projects
+
+When the project's kind is **review**, the deliverable is REVIEW.md. Hunt report slop:
+generic findings that would fit any project ("consider adding more tests"), findings with no
+location or evidence, invented file paths or line numbers, severity inflation, padding,
+copy-pasted tool output with no judgement, and claims of checks that the evidence files do
+not show. Every finding you flag needs the REVIEW.md line and why it cannot be verified.
+
 ## Waivers
 
 Only the human waives ("The human waived a finding (D-…)"), with a recorded reason (≥ 20

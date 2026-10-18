@@ -140,4 +140,11 @@ ALTER TABLE directives ADD COLUMN by_node TEXT;
 CREATE TABLE IF NOT EXISTS errors(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, level TEXT, source TEXT, at TEXT, run_id TEXT, message TEXT, detail TEXT);
 CREATE INDEX IF NOT EXISTS errors_ts ON errors(ts);
 `,
+  // 6 — project profiles: each project's kind (app, web, game, automation, review), its needs
+  // (database, payments, HIPAA…) and the tools its agents use (Unreal, Blender, BB plugins).
+  `
+ALTER TABLE apps ADD COLUMN kind TEXT DEFAULT 'app';
+ALTER TABLE apps ADD COLUMN needs_json TEXT DEFAULT '[]';
+ALTER TABLE apps ADD COLUMN tools_json TEXT DEFAULT '[]';
+`,
 ];

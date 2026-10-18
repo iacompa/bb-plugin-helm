@@ -139,7 +139,7 @@ export class HelmService {
     const run = this.engine.run(runId);
     const loc = await this.engine.locationReport(runId);
     const problems = [...(await this.slotProblems(run)), ...loc.problems];
-    return { runId, plan, forecast: pre.forecast, assumed: pre.assumed, problems, locations: loc.notes, runFolder: run.appsRoot };
+    return { runId, plan, forecast: pre.forecast, assumed: [...pre.portfolio.assumptions, ...pre.assumed], problems, locations: loc.notes, runFolder: run.appsRoot };
   }
 
   /**
@@ -170,7 +170,9 @@ export class HelmService {
   openSimulators: (runId?: string | null, appId?: string | null) => Promise<{ url: string; threadId: string | null; message: string }> = async () => ({ url: "", threadId: null, message: "The simulator view is not available here." });
 
   /** Restart a running run's live agents so they load the installed Helm version (skills, tools, prompt). */
-  refresh(runId: string) {
+  async refresh(runId: string) {
+    // check the run's tools first so the rewritten briefs say what is installed
+    await this.engine.probeRun(runId).catch(() => undefined);
     return refreshRun(this.engine, runId);
   }
 

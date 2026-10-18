@@ -391,6 +391,37 @@ export function createHostOps(): HostOps {
       return { commit, findings, filesScanned: res.filesScanned, shippedFiles: res.shippedFiles, exempted: res.exempted, unverified: res.unverified };
     },
 
+    async toolProbe({ tools }) {
+      const dirs = (process.env.PATH ?? "").split(platform() === "win32" ? ";" : ":").filter(Boolean);
+      const exts = platform() === "win32" ? [".exe", ".cmd", ".bat", ""] : [""];
+      const onPath = (bin: string) => {
+        for (const d of dirs) for (const x of exts) if (existsSync(join(d, bin + x))) return join(d, bin + x);
+        return null;
+      };
+      const atPath = async (p: string) => {
+        const full = p.startsWith("~/") ? join(homedir(), p.slice(2)) : p;
+        const star = full.indexOf("*");
+        if (star < 0) return existsSync(full) ? full : null;
+        // one wildcard segment: list its parent and try each entry, newest name last
+        const parent = full.slice(0, full.lastIndexOf(sep, star));
+        const segEnd = full.indexOf(sep, star);
+        const seg = full.slice(parent.length + 1, segEnd < 0 ? undefined : segEnd);
+        const rest = segEnd < 0 ? "" : full.slice(segEnd);
+        const re = new RegExp(`^${seg.split("*").map((x) => x.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`);
+        const names = await readdir(parent).catch(() => [] as string[]);
+        for (const n of names.filter((x) => re.test(x)).sort().reverse()) if (existsSync(join(parent, n) + rest)) return join(parent, n) + rest;
+        return null;
+      };
+      const found: Record<string, string | null> = {};
+      for (const t of tools) {
+        let hit: string | null = null;
+        for (const b of t.bins) hit ??= onPath(b);
+        for (const p of t.paths ?? []) hit ??= await atPath(p);
+        found[t.id] = hit;
+      }
+      return { found };
+    },
+
     async probe() {
       const plat = platform();
       const [gitV, xcode, swift, gradle, dotnet] = await Promise.all([

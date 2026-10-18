@@ -2,8 +2,10 @@
 // short per-session instructions string, standing-policy blocks and the
 // PORTFOLIO.md world block. Pure string building; all human free text and
 // metadata is escaped before interpolation.
-import type { NodeInfo, PolicyInfo, Role } from "../../shared/types.ts";
+import type { NodeInfo, PolicyInfo, ProjectKind, ProjectNeed, Role } from "../../shared/types.ts";
+import { KIND_LABEL, NEED_LABEL } from "../../shared/types.ts";
 import { COMMON_RULES, ROLES, roleLabel } from "./roles.ts";
+import { KIND_INFO, NEED_INFO, PLUGIN_INFO, TOOL_INFO, toolLabel } from "./profile.ts";
 
 /** Neutralize text that came from a human or metadata so it reads as data. */
 export function escapeForPrompt(s: string, max = 4000): string {
@@ -55,6 +57,44 @@ export interface BriefContext {
   handover?: string | null;
   /** Apps outside Helm's apps root: an adopted repository and/or read-only reference folders. */
   location?: { adopted: boolean; userBranch: string | null; helmBranch: string | null; reads: string[] } | null;
+  /** What the project is and needs, and which tools are installed (true / false / null = not checked). */
+  project?: ProjectBrief | null;
+}
+
+export interface ProjectBrief {
+  kind: ProjectKind;
+  needs: ProjectNeed[];
+  tools: string[];
+  installed: Record<string, boolean | null>;
+  /** Other enabled BB plugins (shown to leads), id → one line. */
+  plugins?: Array<{ id: string; line: string }>;
+}
+
+/** "## The project": the kind and what it delivers, each need with its rules, each tool with how to use it and whether it is installed. */
+export function projectSection(role: Role, alsoLead: boolean, p: ProjectBrief): string {
+  const leads = role === "lead" || alsoLead;
+  const L = [`## The project`, `${KIND_LABEL[p.kind]}: ${KIND_INFO[p.kind].desc} Deliverable: ${KIND_INFO[p.kind].deliverable}.`];
+  if (p.kind === "review") {
+    if (leads) L.push("This is a review: the source is read-only for everyone. Commit ACCEPTANCE.md as the review plan (what is audited at which commit, by whom, and what counts as evidence), have each auditor write its findings under `reports/<role>/`, then compile REVIEW.md. Failing checks are findings, not blockers. Follow helm-audit.");
+    else if (ROLES[role].tier === "specialist") L.push("This is a review: the source is read-only. Audit your area against your craft skill's standard and write findings with evidence under your reports folder. Follow helm-audit.");
+    else L.push("This is a review: judge REVIEW.md. Every finding must be backed by evidence at the audited commit; vague or unverifiable findings fail.");
+  }
+  if (p.needs.length) {
+    L.push("", "Needs (Helm decided these from the brief; if one is wrong or missing, tell your lead, who can ask the Orchestrator to change it):");
+    for (const n of p.needs) L.push(`- ${NEED_LABEL[n]}: ${NEED_INFO[n]}`);
+  }
+  if (p.tools.length) {
+    L.push("", "Tools:");
+    for (const t of p.tools) {
+      const plugin = t.startsWith("plugin:") ? t.slice(7) : null;
+      const how = plugin ? PLUGIN_INFO[plugin]?.use ?? "Use it through its CLI (see `bb guide`) or its agent tools." : TOOL_INFO[t]?.use ?? "Use it from the terminal if it is installed.";
+      const have = p.installed[t];
+      const state = have === true ? "installed" : have === false ? (plugin ? "not enabled in BB — work without it and say so in your report" : "not found on this machine — do not rely on it; tell your lead, who can ask the human, and meanwhile work without it") : "not checked";
+      L.push(`- ${toolLabel(t)} (${state}). ${how}`);
+    }
+  }
+  if (leads && p.plugins?.length) L.push("", "Other BB plugins enabled here (use them when they help; never act on real accounts without the human):", ...p.plugins.slice(0, 8).map((x) => `- ${x.id}: ${x.line}`));
+  return L.join("\n");
 }
 
 export function briefFor(node: Pick<NodeInfo, "id" | "role" | "platform" | "briefVersion" | "scopeGlobs" | "alsoLead">, ctx: BriefContext): string {
@@ -71,6 +111,7 @@ export function briefFor(node: Pick<NodeInfo, "id" | "role" | "platform" | "brie
   if (node.alsoLead) L.push("This run has one app, so you are also its App Lead: you hold both toolsets and do both jobs.");
   L.push("", "## Mission", def.mission);
   if (node.alsoLead) L.push("", ROLES.lead.mission);
+  if (ctx.project) L.push("", projectSection(node.role, node.alsoLead, ctx.project));
   L.push("", "## Where you fit", `Parent: ${ctx.parentLabel} · Peers: ${ctx.peers.length ? ctx.peers.join(", ") : "none"} · You manage: ${ctx.children.length ? ctx.children.join(", ") : "none"}`);
   const inputs = [...def.inputs];
   if (ctx.contractVersion > 0 && node.role !== "orch" && node.role !== "mgr") inputs.push(`CONTRACT.md v${ctx.contractVersion}`);
@@ -123,11 +164,20 @@ export function instructionsFor(input: { role: Role; platform: string | null; no
   return `${s}${scope}${task}`.slice(0, 4000);
 }
 
-export const PLANNER_INSTRUCTIONS =
-  "You are Helm's planner. Read the human's brief and call helm_propose_plan exactly once with the portfolio: every app (name, one-line tagline, platforms from ios/android/macos/windows, optional group, the folder it lives in as \"path\" only when the brief names one, and \"reads\" for other folders the brief says it should use or read), the groups, any assumptions you made, and at most 3 clarifying questions. Do not write code, do not spawn agents, do not ask anything outside the tool call. Then stop.";
+export const PLANNER_INSTRUCTIONS = [
+  "You are Helm's planner. Read the human's brief and call helm_propose_plan exactly once with the portfolio: every project (name, one-line tagline, optional group, the folder it lives in as \"path\" only when the brief names one, and \"reads\" for other folders the brief says it should use or read), the groups, any assumptions you made, and at most 3 clarifying questions.",
+  "For each project decide, and record each decision you inferred (not stated) under assumptions:",
+  "- kind: app (native or cross-platform apps), web (websites and full-stack web apps), game (mobile, desktop or web games), automation (bots, scheduled jobs, integrations, pipelines, workflow tools) or review (an audit report of an existing project, no code changes; to fix an existing project instead, make it an app/web/game with its path).",
+  "- platforms from ios, android, macos, windows, web. Websites run on web (add mobile platforms only if asked). Automation and reviews may have none.",
+  "- needs, only what the project really requires: database, auth, payments, security, hipaa (protected health information), privacy (GDPR/CCPA/children), realtime, ai, automation, assets (3D/2D/audio art), multiplayer. Each need adds specialists and rules, so do not pad.",
+  "- tools, only when useful: unreal, unity, godot (game engines; follow the brief), blender (3D art), docker (local databases and services), ffmpeg, or an enabled BB plugin as plugin:<id> (for example plugin:browser-automation to check websites in a browser, plugin:automations to run scheduled jobs in BB).",
+  "- shape: solo (one agent), lean or full; leave it out to use the default.",
+  "Do not write code, do not spawn agents, do not ask anything outside the tool call. Then stop.",
+].join("\n");
 
-export function plannerPrompt(brief: string): string {
-  return `Read this brief and propose the portfolio with helm_propose_plan. Use group names from the brief's headings or themes. If a platform is unclear, assume iOS and Android and record that under assumptions.\n\n<brief>\n${escapeForPrompt(brief, 20000)}\n</brief>`;
+export function plannerPrompt(brief: string, plugins: Array<{ id: string; line: string }> = []): string {
+  const pl = plugins.length ? `\n\nBB plugins enabled on this machine (usable as plugin:<id> tools):\n${plugins.slice(0, 12).map((p) => `- ${p.id}: ${escapeForPrompt(p.line, 160)}`).join("\n")}` : "";
+  return `Read this brief and propose the portfolio with helm_propose_plan. Use group names from the brief's headings or themes. If a platform is unclear, use the kind's default (apps and mobile games: iOS and Android; websites: web) and record that under assumptions.${pl}\n\n<brief>\n${escapeForPrompt(brief, 20000)}\n</brief>`;
 }
 
 export const WORLD_START = "<!-- helm:world -->";

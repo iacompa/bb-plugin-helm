@@ -129,6 +129,6 @@ test("refresh restarts live agents on the new version: supervisors first, told w
   assert.ok(toLead, "the lead was told");
   assert.match(toLead!.text, /helm_set_task/);
   assert.match(toLead!.text, new RegExp(`${ios.id.replace(/\./g, "\\.")} \\(`), "it names the builders without a task");
-  if (r.restarted.includes(ios.id)) assert.ok(sent.some((m) => m.threadId === h.repo.getNode(runId, ios.id)!.threadId && /helm-ios is new/.test(m.text)));
+  if (r.restarted.includes(ios.id)) assert.ok(sent.some((m) => m.threadId === h.repo.getNode(runId, ios.id)!.threadId && /Your skills: .*helm-ios/.test(m.text)));
   assert.throws(() => refreshRun(h.engine, "run_nope"));
 });

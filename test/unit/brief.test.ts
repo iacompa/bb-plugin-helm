@@ -22,7 +22,7 @@ test("§7.7 SAMPLE_BRIEF: 20 apps in 5 groups, ΣP = 43, nothing assumed", () =>
   assert.deepEqual(p.questions, []);
   for (const g of p.groups) assert.equal(p.apps.filter((a) => a.group === g).length, 4, g);
   const by = Object.fromEntries(p.apps.map((a) => [a.name, a]));
-  assert.deepEqual(by["Lumen"], { name: "Lumen", tagline: "Sleep & light tracker", platforms: ["ios", "and", "mac"], platformsAssumed: false, group: "Wellness" });
+  assert.deepEqual(by["Lumen"], { name: "Lumen", tagline: "Sleep & light tracker", platforms: ["ios", "and", "mac"], platformsAssumed: false, group: "Wellness", kind: "app", needs: [], tools: [] });
   assert.deepEqual(by["Ledgerly"].platforms, ["ios", "mac", "win"], "platforms come back in canonical order");
   assert.deepEqual(by["Hush"].platforms, ["ios", "mac"]);
   assert.equal(by["Mint Jar"].tagline, "Savings goals");
@@ -34,7 +34,7 @@ test("§7.7 SAMPLE_BRIEF: 20 apps in 5 groups, ΣP = 43, nothing assumed", () =>
 test("§7.7 SMALL_BRIEF: one ungrouped macOS app", () => {
   const r = parseBrief(SMALL_BRIEF);
   assert.equal(r.structured, true);
-  assert.deepEqual(r.portfolio.apps, [{ name: "Pebble", tagline: "A one-screen habit counter", platforms: ["mac"], platformsAssumed: false, group: "Ungrouped" }]);
+  assert.deepEqual(r.portfolio.apps, [{ name: "Pebble", tagline: "A one-screen habit counter", platforms: ["mac"], platformsAssumed: false, group: "Ungrouped", kind: "app", needs: [], tools: [] }]);
   assert.deepEqual(r.portfolio.groups, ["Ungrouped"]);
 });
 
@@ -129,7 +129,7 @@ test("PortfolioSchema accepts the planner's shape and loose platform words", () 
   const n = normalizePortfolio(p);
   assert.deepEqual(n.apps[0].platforms, ["ios", "and", "mac"], "duplicates removed");
   assert.equal(n.apps[0].platformsAssumed, false);
-  assert.deepEqual(n.apps[1], { name: "Quill", tagline: "", platforms: ["win", "mac"], platformsAssumed: false, group: null, shape: undefined, notes: null });
+  assert.deepEqual(n.apps[1], { name: "Quill", tagline: "", platforms: ["win", "mac"], platformsAssumed: false, group: null, shape: undefined, notes: null, kind: "app", needs: [], tools: [] });
   assert.deepEqual(n.apps[2].platforms, ["ios", "and"]);
   assert.equal(n.apps[2].platformsAssumed, true);
   assert.deepEqual(n.questions, ["Should Mint Jar also ship on Android?"]);
@@ -144,7 +144,8 @@ test("PortfolioSchema rejects bad planner output", () => {
     ["unknown app key", { apps: [{ ...app, priority: "high" }] }],
     ["unknown top-level key", { apps: [app], managers: [] }],
     ["bad shape", { apps: [{ ...app, shape: "huge" }] }],
-    ["more than 4 platforms", { apps: [{ name: "X", platforms: ["ios", "and", "mac", "win", "ios"] }] }],
+    ["more than 5 platforms", { apps: [{ name: "X", platforms: ["ios", "and", "mac", "win", "web", "ios"] }] }],
+    ["unknown kind", { apps: [{ ...app, kind: "spaceship" }] }],
     ["more than 3 questions", { apps: [app], questions: ["a", "b", "c", "d"] }],
     ["more than 60 apps", { apps: Array.from({ length: 61 }, (_, i) => ({ name: `A${i}` })) }],
     ["apps missing", { groups: [] }],
@@ -161,7 +162,7 @@ test("PortfolioSchema rejects bad planner output", () => {
 // ───────────────────────────── property: render → parse round trip ─────────────────────────────
 
 const WORDS = ["Sleep", "budget", "notes", "photo", "tracker", "planner", "log", "routes", "focus", "sketch", "invoices", "habit", "timer", "music", "garden"];
-const ALIASES: Record<Platform, string[]> = { ios: ["iOS", "iPhone", "ios", "iPad"], and: ["Android", "android", "ANDROID"], mac: ["macOS", "Mac", "mac", "OSX"], win: ["Windows", "Win", "windows"] };
+const ALIASES: Record<Platform, string[]> = { ios: ["iOS", "iPhone", "ios", "iPad"], and: ["Android", "android", "ANDROID"], mac: ["macOS", "Mac", "mac", "OSX"], win: ["Windows", "Win", "windows"], web: ["Web", "web"] };
 const BULLETS = ["-", "*", "•"];
 const SEPS = ["—", "–", "-", "--"];
 

@@ -3,7 +3,7 @@
 
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { HOST_CONTRACT, type HostOps } from "../../shared/host-contract.ts";
-import type { BbPort, EnvInfo, ForeignThread, HelmEvent, InteractionAnswer, InteractionLite, RawCatalog, SendResult, SpawnSpec, ThreadRef, ThreadState } from "./port.ts";
+import type { BbPort, EnvInfo, ForeignThread, HelmEvent, InteractionAnswer, InteractionLite, PluginLite, RawCatalog, SendResult, SpawnSpec, ThreadRef, ThreadState } from "./port.ts";
 import { readMeta } from "./port.ts";
 
 type Sdk = BbPluginApi["sdk"];
@@ -322,6 +322,13 @@ export class RealBB implements BbPort {
 
   async respondInteraction(args: { threadId: string; interactionId: string; answer: InteractionAnswer }): Promise<void> {
     await this.sdk.threads.interactions.resolve({ threadId: args.threadId, interactionId: args.interactionId, resolution: toResolution(args.answer) as never });
+  }
+
+  async listPlugins(): Promise<PluginLite[]> {
+    const r = (await this.sdk.plugins.list()) as unknown as { plugins: Array<{ id: string; name: string | null; description: string | null; enabled: boolean; status: string; cliCommand: { name: string; summary: string } | null }> };
+    return r.plugins
+      .filter((p) => p.enabled && p.status === "running")
+      .map((p) => ({ id: p.id, name: p.name ?? p.id, description: (p.description ?? "").slice(0, 200), command: p.cliCommand ? `bb ${p.cliCommand.name}` : null }));
   }
 
   async countActive(args: { providerId?: string } = {}): Promise<number> {

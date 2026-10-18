@@ -170,7 +170,7 @@ export class Planner {
         projectId,
         environment: { kind: "path", hostId, path },
         title: "Helm · planner",
-        prompt: `${PLANNER_INSTRUCTIONS}\n\n${plannerPrompt(brief)}`,
+        prompt: `${PLANNER_INSTRUCTIONS}\n\n${plannerPrompt(brief, await this.e.pluginLines().catch(() => []))}`,
         model: input.model,
         permissionMode: this.e.settings.permissionMode.orchestrator ?? "auto",
         visibility: "hidden",

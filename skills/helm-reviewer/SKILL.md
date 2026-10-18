@@ -214,6 +214,18 @@ about taste is not a finding. A gap between the promise and the screen is.
 For a UI finding, the quote is the line that causes the defect (the view, the missing
 label, the hard-coded colour), and `why` names the screenshot in `reports/review/`.
 
+## Review projects
+
+When the project's kind is **review** (your brief says so), you judge the report, not a
+product. The commit Helm names contains REVIEW.md and the auditors' evidence under
+`reports/`; source must be unchanged from the audited commit (`git diff <audited>..<judged>
+-- . ':!reports' ':!REVIEW.md' ':!ACCEPTANCE.md' ':!DECISIONS.md'` is empty). Pass only if
+every area in ACCEPTANCE.md was covered or explicitly marked not checked with a reason;
+every finding has a location at the audited commit, evidence that exists and shows what it
+claims, a severity that matches its impact, and a concrete recommendation; and spot checks
+of at least three findings reproduce. Failing project checks are expected findings, not a
+reason to fail the report.
+
 ## Severity
 
 - **blocker**: crash, data loss, security hole, contract break, a failed acceptance criterion.

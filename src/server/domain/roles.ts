@@ -1,6 +1,6 @@
 // Role registry (appendix A1/A3). Roles are data: briefs, Settings → Roles and
 // the per-tier tool sets all read from here.
-import type { Platform, Role, SlotId, Tier } from "../../shared/types.ts";
+import type { Platform, ProjectKind, ProjectNeed, Role, SlotId, Tier } from "../../shared/types.ts";
 
 export interface RoleDef {
   role: Role;
@@ -20,9 +20,10 @@ export const PLATFORM_LABEL: Record<Platform, string> = {
   win: "Windows",
   ios: "iOS",
   and: "Android",
+  web: "Web",
 };
 
-export const PLATFORM_ORDER: Platform[] = ["mac", "win", "ios", "and"];
+export const PLATFORM_ORDER: Platform[] = ["mac", "win", "ios", "and", "web"];
 
 export const ROLES: Record<Role, RoleDef> = {
   orch: {
@@ -83,7 +84,7 @@ export const ROLES: Record<Role, RoleDef> = {
     slot: "code",
     label: "Core builder",
     mission: "Build the logic, data layer and functionality exactly as the CONTRACT says.",
-    scope: ["packages/core/**", "packages/data/**"],
+    scope: ["packages/core/**", "packages/data/**", "reports/core/**"],
     inputs: ["CONTRACT.md", "ARCHITECTURE.md", "ACCEPTANCE.md"],
     outputs: ["models, storage and migrations", "validation and error handling", "meaningful unit tests", "a README section for the public API"],
     doneMeans: ["CONTRACT fully implemented", "meaningful tests that can fail", "no fake data on shipped paths"],
@@ -150,6 +151,42 @@ export const ROLES: Record<Role, RoleDef> = {
     doneMeans: ["docs match what the code actually does"],
     skill: "helm-specialist",
   },
+  data: {
+    role: "data",
+    tier: "specialist",
+    slot: "code",
+    label: "Data builder",
+    mission: "Own the database: schema, migrations, indexes, access rules, seed data and backups, exactly as the CONTRACT says.",
+    scope: ["db/**", "migrations/**", "prisma/**", "supabase/**", "drizzle/**", "packages/db/**", "reports/data/**"],
+    inputs: ["CONTRACT.md (data model)", "ARCHITECTURE.md", "ACCEPTANCE.md"],
+    outputs: ["schema and versioned migrations", "indexes justified by queries", "row-level access rules where data is shared", "clearly fake seed data", "a tested backup and restore"],
+    doneMeans: ["migrations apply from empty and from the previous version", "every list query has an index", "a restore was tested"],
+    skill: "helm-specialist",
+  },
+  compliance: {
+    role: "compliance",
+    tier: "specialist",
+    slot: "security",
+    label: "Compliance",
+    mission: "Decide which rules apply (HIPAA, privacy law, PCI), map each to a control in the code or configuration, and file the gaps. Not legal advice: the human and their counsel decide.",
+    scope: ["COMPLIANCE.md", "docs/compliance/**", "reports/compliance/**"],
+    inputs: ["SPEC.md", "ARCHITECTURE.md", "CONTRACT.md", "SECURITY.md"],
+    outputs: ["COMPLIANCE.md: applicability, data inventory, control matrix with path:line evidence, vendor list, human decisions", "findings filed to the lead"],
+    doneMeans: ["every applicable requirement maps to evidence or a filed gap", "decisions only the human can make are raised once"],
+    skill: "helm-specialist",
+  },
+  assets: {
+    role: "assets",
+    tier: "specialist",
+    slot: "ui",
+    label: "Asset builder",
+    mission: "Make the art: 3D models, sprites, textures, animation and audio within the budgets, with sources and licences recorded.",
+    scope: ["assets/**", "art/**", "game/Content/**", "game/assets/**", "reports/assets/**"],
+    inputs: ["SPEC.md (asset list)", "ARCHITECTURE.md (engine, formats, budgets)"],
+    outputs: ["source files and engine-ready exports", "assets/LICENSES.md", "renders and an import check in reports/assets/"],
+    doneMeans: ["every asset in SPEC exists within budget and imports cleanly", "every third-party asset has a recorded licence"],
+    skill: "helm-specialist",
+  },
   review: {
     role: "review",
     tier: "gate",
@@ -201,7 +238,17 @@ export function slotOfRole(role: Role): SlotId {
   return ROLES[role].slot;
 }
 
-export function scopeFor(role: Role, platform: Platform | null): string[] {
+export function scopeFor(role: Role, platform: Platform | null, kind: ProjectKind = "app"): string[] {
+  if (kind === "review") {
+    // an audit: source is read-only, every auditor writes its part of the report
+    if (ROLES[role].tier === "specialist") return [`reports/${role === "platform" && platform ? platform : role}/**`];
+    if (role === "lead") return [...ROLES.lead.scope.filter((g) => g !== "integration merges"), "REVIEW.md"];
+  }
+  if (role === "platform" && platform === "web") return ["apps/web/**", "infra/**", "deploy/**", "reports/web/**"];
+  if (kind === "web" && role === "ui") return ["apps/web/**", "packages/ui/**", "reports/ui/**"];
+  if (kind === "web" && role === "code") return ["apps/api/**", "packages/core/**", "packages/server/**", "reports/core/**"];
+  if (kind === "game" && role === "code") return ["game/**", "packages/core/**", "reports/core/**"];
+  if (kind === "game" && role === "ui") return ["game/**/UI/**", "game/**/ui/**", "reports/ui/**"];
   const base = ROLES[role].scope;
   if (role === "platform" && platform) return base.map((g) => g.replace("<platform>", platform));
   return base;
@@ -275,21 +322,77 @@ export function toolsForNode(tier: Tier, alsoLead: boolean): string[] {
   return [...set];
 }
 
-const PLATFORM_SKILL: Record<Platform, string> = { mac: "helm-macos", win: "helm-windows", ios: "helm-ios", and: "helm-android" };
-const CRAFT_SKILL: Partial<Record<Role, string>> = { ui: "helm-ui", code: "helm-code", security: "helm-security", test: "helm-test", research: "helm-research", docs: "helm-docs" };
+const PLATFORM_SKILL: Record<Platform, string> = { mac: "helm-macos", win: "helm-windows", ios: "helm-ios", and: "helm-android", web: "helm-web" };
+const CRAFT_SKILL: Partial<Record<Role, string>> = {
+  ui: "helm-ui",
+  code: "helm-code",
+  security: "helm-security",
+  test: "helm-test",
+  research: "helm-research",
+  docs: "helm-docs",
+  data: "helm-data",
+  compliance: "helm-compliance",
+  assets: "helm-assets",
+};
+/** The Core builder's craft follows the project's kind. */
+const CORE_SKILL: Record<ProjectKind, string> = { app: "helm-code", web: "helm-backend", game: "helm-game", automation: "helm-automation", review: "helm-code" };
+/** A server is part of the project when it needs any of these. */
+const SERVER_NEEDS: ProjectNeed[] = ["database", "auth", "payments", "realtime", "ai", "multiplayer"];
+
+export interface SkillProfile {
+  shape: string;
+  platforms: Platform[];
+  kind?: ProjectKind;
+  needs?: ProjectNeed[];
+  tools?: string[];
+}
 
 /** The craft skill a builder loads next to its protocol skill (helm-specialist): how to do its kind of work well. */
-export function craftSkill(role: Role, platform: Platform | null): string | null {
+export function craftSkill(role: Role, platform: Platform | null, kind: ProjectKind = "app"): string | null {
   if (role === "platform") return platform ? PLATFORM_SKILL[platform] : null;
+  if (role === "code") return CORE_SKILL[kind];
   return CRAFT_SKILL[role] ?? null;
 }
 
-/** Every skill an agent loads: its protocol skill, its craft skill, and for a solo lead (who builds the app itself) its platforms' skills. */
-export function skillsFor(n: { role: Role; platform: Platform | null; alsoLead: boolean }, app: { shape: string; platforms: Platform[] } | null): string[] {
+/**
+ * Every skill an agent loads: its protocol skill, its craft skill, the skills its project's
+ * kind, needs and tools call for, and for a solo lead (who builds the project itself) the
+ * craft of every part it builds. In a review project specialists audit (helm-audit) with
+ * their craft as the standard to audit against.
+ */
+export function skillsFor(n: { role: Role; platform: Platform | null; alsoLead: boolean }, app: SkillProfile | null): string[] {
+  const kind = app?.kind ?? "app";
+  const needs = app?.needs ?? [];
+  const tools = app?.tools ?? [];
+  const has = (x: ProjectNeed) => needs.includes(x);
   const out = [ROLES[n.role].skill];
-  const craft = craftSkill(n.role, n.platform);
+  const tier = ROLES[n.role].tier;
+  if (kind === "review" && (tier === "specialist" || n.role === "lead" || n.alsoLead)) out.push("helm-audit");
+  const craft = craftSkill(n.role, n.platform, kind);
   if (craft) out.push(craft);
   if (n.alsoLead) out.push("helm-lead");
-  if ((n.role === "lead" || n.alsoLead) && app?.shape === "solo") for (const p of app.platforms.slice(0, 2)) out.push(PLATFORM_SKILL[p]);
+  const leads = n.role === "lead" || n.alsoLead;
+  const solo = app?.shape === "solo";
+  if (app && kind !== "review") {
+    // the extra craft a role needs for this project
+    if (n.role === "code") {
+      if (kind === "app" && needs.some((x) => SERVER_NEEDS.includes(x))) out.push("helm-backend");
+      if (has("database") && app.shape !== "full") out.push("helm-data");
+      if (has("payments")) out.push("helm-payments");
+      if (has("automation") && kind !== "automation") out.push("helm-automation");
+    }
+    if (n.role === "security" && has("payments")) out.push("helm-payments");
+    if (n.role === "platform" && kind === "game") out.push("helm-game");
+  }
+  if (tools.includes("unreal") && (leads || n.role === "code" || n.role === "platform")) out.push("helm-unreal");
+  if (leads && solo && app) {
+    for (const p of app.platforms.slice(0, 2)) out.push(PLATFORM_SKILL[p]);
+    if (kind !== "app" && kind !== "review") out.push(CORE_SKILL[kind]);
+    if (kind === "app" && needs.some((x) => SERVER_NEEDS.includes(x))) out.push("helm-backend");
+    if (has("database")) out.push("helm-data");
+    if (has("payments")) out.push("helm-payments");
+    if (has("hipaa") || has("privacy")) out.push("helm-compliance");
+    if (has("assets")) out.push("helm-assets");
+  }
   return [...new Set(out)];
 }

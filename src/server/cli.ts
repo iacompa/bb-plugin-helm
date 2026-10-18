@@ -10,6 +10,8 @@ import { Planner } from "./engine/planner.ts";
 import { HelmError } from "./engine/engine.ts";
 import { parseSlotArg, type HelmService } from "./service.ts";
 import { fmtUnits } from "./domain/models.ts";
+import { profileLine } from "./domain/profile.ts";
+import { PLATFORM_LABEL, roleLabel } from "./domain/roles.ts";
 import { errorsText } from "./journal.ts";
 
 const MAX_TEXT = 20_000;
@@ -82,7 +84,7 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
 
   return defineCli({
     name: "helm",
-    summary: "Run a portfolio of app builds with a supervised hierarchy of agents",
+    summary: "Run a portfolio of apps, websites, games, automation and reviews with a supervised hierarchy of agents",
     description: "Helm plans an org (Orchestrator, Managers, App Leads, Specialists, gates), spawns it lazily and lets you steer any agent; every change reaches its whole chain of command.",
     commands: {
       status: cliCommand({
@@ -145,6 +147,8 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             const lines = [
               `Plan ${r.runId}: ${c.apps} apps · ${c.managers} managers · ${c.leads} leads · ${c.specialists} specialists · ${c.gates} gates · ${c.total} agents (${r.plan.rule})`,
               r.plan.why,
+              "Projects:",
+              ...r.plan.apps.slice(0, 40).map((a) => `  · ${a.name} — ${profileLine(a)}${a.platforms.length ? ` · ${a.platforms.map((x) => PLATFORM_LABEL[x]).join(" ")}` : ""} · ${a.shape}: ${a.squad.filter((m) => m.role !== "review" && m.role !== "slop").map((m) => roleLabel(m.role, m.platform)).join(", ") || "the lead builds it"} (+ Reviewer, Slop Hunter)`),
               `Forecast: ${fmtUnits(r.forecast.low)}–${fmtUnits(r.forecast.high)} (estimate)`,
               ...(portfolio ? [`Read by the planner: ${portfolio.apps.map((a) => a.name).join(", ")}`] : []),
               ...(questions.length ? ["The planner asks:", ...questions.map((q) => `  ? ${q}`)] : []),
@@ -372,7 +376,7 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
           guard(async () => {
             const run = runOf(i.options.run);
             if (!i.options.yes) throw new PluginCliError(`This stops each running agent of ${run.name} at its current step and resumes it on the installed Helm version (committed and uncommitted work stays in its worktree). Supervisors go first and are told which agents still need a task.`, { code: "confirmation_required", hint: "Re-run with --yes." });
-            const r = svc.refresh(run.id);
+            const r = await svc.refresh(run.id);
             return out(i.options.json, r, `${run.name}: ${r.restarted.length} agents restarting on the new version · ${r.briefs} briefs rewritten${r.scopes ? ` · ${r.scopes} platform scopes widened to reports/<platform>/**` : ""}${r.skipped.length ? ` · not restarted (pick it up when they next start): ${r.skipped.slice(0, 12).join(", ")}` : ""}.`);
           }),
       }),

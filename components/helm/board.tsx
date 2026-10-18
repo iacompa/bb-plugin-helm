@@ -7,7 +7,7 @@ import { useHelm } from "./ctx.tsx";
 import type { SnapApp, SnapNode, Stage } from "./types.ts";
 import type { RunState } from "./store.ts";
 import { appMembers, leadOf, managerOfApp, openNeeds } from "./store.ts";
-import { STAGES, TASK_COLS, appMoveRule, appStatus, colOfStatus, errMsg, mgrHue, plural, statusLabel, taskMoveRule, type TaskCol } from "./format.ts";
+import { STAGES, TASK_COLS, appMoveRule, appStatus, colOfStatus, errMsg, kindLabel, mgrHue, plural, statusLabel, taskMoveRule, type TaskCol } from "./format.ts";
 import { Dot, Ic, ModelChip, RoleTile, StagePill, StatusPill, askConfirm, askReason, cx } from "./ui.tsx";
 
 type Drag = { kind: "app"; id: string } | { kind: "task"; id: string };
@@ -300,6 +300,7 @@ function AppCard({ data, a, dragProps, dragging }: { data: RunState; a: SnapApp;
           </span>
         )}
         <span className="plt">
+          {a.kind && a.kind !== "app" ? <i className="kind">{kindLabel(a.kind)}</i> : null}
           {a.platforms.map((p) => (
             <i key={p} className={a.platformsAssumed ? "assumed" : ""} title={a.platformsAssumed ? "Platform assumed by the planner" : undefined}>
               {p}

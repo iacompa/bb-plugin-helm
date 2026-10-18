@@ -4,6 +4,8 @@
 import type {
   Platform,
   PortfolioApp,
+  ProjectKind,
+  ProjectNeed,
   Role,
   Shape,
   SlotId,
@@ -41,6 +43,9 @@ export interface PlannedApp {
   /** The folder the human named (unexpanded), or null for <apps root>/<run>/<app>. */
   path: string | null;
   reads: string[];
+  kind: ProjectKind;
+  needs: ProjectNeed[];
+  tools: string[];
   /** All agents this app can ever have (lead + squad + gates), per its shape. */
   agents: number;
   squad: SquadMember[];
@@ -122,21 +127,84 @@ function orderedPlatforms(ps: Platform[]): Platform[] {
   return PLATFORM_ORDER.filter((p) => ps.includes(p));
 }
 
-/** Squad members below the lead for a shape (C6). Gates are always present. */
-export function squadFor(shape: Shape, platforms: Platform[], test: boolean): SquadMember[] {
+export interface SquadProfile {
+  kind?: ProjectKind;
+  needs?: ProjectNeed[];
+  tools?: string[];
+}
+
+/**
+ * Squad members below the lead (C6): the shape sets the size, the project's kind sets who
+ * builds, and its needs add specialists (a Data builder for a database in Full, Compliance
+ * for HIPAA or privacy law, Security for accounts, payments or health data even in Lean, an
+ * Asset builder for art). Solo leads build alone. Gates are always present.
+ */
+export function squadFor(shape: Shape, platforms: Platform[], test: boolean, profile: SquadProfile = {}): SquadMember[] {
   const ps = orderedPlatforms(platforms);
+  const kind = profile.kind ?? "app";
+  const needs = profile.needs ?? [];
+  const has = (n: ProjectNeed) => needs.includes(n);
+  const sensitive = has("auth") || has("payments") || has("hipaa") || has("security");
+  const full = shape === "full";
   const out: SquadMember[] = [];
-  if (shape === "full") {
-    out.push({ role: "ui", platform: null }, { role: "code", platform: null });
-    for (const p of ps) out.push({ role: "platform", platform: p });
-    out.push({ role: "security", platform: null });
-  } else if (shape === "lean") {
-    out.push({ role: "ui", platform: null }, { role: "code", platform: null });
-    if (ps.length > 1) for (const p of ps) out.push({ role: "platform", platform: p });
+  const add = (role: Role, platform: Platform | null = null) => {
+    if (!out.some((m) => m.role === role && m.platform === platform)) out.push({ role, platform });
+  };
+  const builders = () => {
+    for (const p of ps) add("platform", p);
+  };
+  if (shape !== "solo") {
+    if (kind === "review") {
+      // auditors: read-only on source, each writes its part of the report
+      add("code");
+      if (full) add("ui");
+      if (full && has("database")) add("data");
+      if (full) builders();
+      add("security");
+      if (has("hipaa") || has("privacy")) add("compliance");
+      if (full) add("test");
+    } else if (kind === "automation") {
+      add("code");
+      if (full && has("database")) add("data");
+      if (full && ps.length) builders();
+      if (full || sensitive) add("security");
+      if (has("hipaa") || (full && has("privacy"))) add("compliance");
+      if (full) add("test");
+      if (full) add("docs");
+    } else if (kind === "game") {
+      add("ui");
+      add("code");
+      if (full && has("database")) add("data");
+      if (full || ps.length > 1) builders();
+      if (full || has("assets") || (profile.tools ?? []).includes("blender")) add("assets");
+      if (full ? sensitive || has("multiplayer") : sensitive) add("security");
+      if (has("hipaa") || (full && has("privacy"))) add("compliance");
+    } else {
+      // app and web: UI, Core, the platform builders, Security
+      add("ui");
+      add("code");
+      if (full && has("database")) add("data");
+      if (full || ps.length > 1) builders();
+      if (full || sensitive) add("security");
+      if (has("hipaa") || (full && has("privacy"))) add("compliance");
+      if (full && has("assets")) add("assets");
+    }
+    if (test) add("test");
   }
-  if (test && shape !== "solo") out.push({ role: "test", platform: null });
   out.push({ role: "review", platform: null }, { role: "slop", platform: null });
   return out;
+}
+
+/** The squad of a stored app or a planned one. */
+export function squadOf(a: { shape: Shape; platforms: Platform[]; test: boolean; kind?: ProjectKind; needs?: ProjectNeed[]; tools?: string[] }): SquadMember[] {
+  return squadFor(a.shape, a.platforms, a.test, { kind: a.kind, needs: a.needs, tools: a.tools });
+}
+
+/** Platforms when none were named: a website runs on the web, apps and games on phones; automation and reviews need none. */
+export function defaultPlatforms(kind: ProjectKind): Platform[] {
+  if (kind === "web") return ["web"];
+  if (kind === "app" || kind === "game") return ["ios", "and"];
+  return [];
 }
 
 export function nodeIdFor(appId: string, m: SquadMember): string {
@@ -199,16 +267,19 @@ export function planTopology(input: PortfolioApp[], settings: TopologySettings):
   const ids = uniqueSlugs(input.map((a) => a.name));
   const apps: PlannedApp[] = input.map((a, i) => {
     const shape = a.shape ?? defaultShape;
-    const platforms = orderedPlatforms(a.platforms.length ? a.platforms : ["ios", "and"]);
+    const kind = a.kind ?? "app";
+    const platforms = orderedPlatforms(a.platforms.length ? a.platforms : defaultPlatforms(kind));
     const test = a.test ?? false;
-    const squad = squadFor(shape, platforms, test);
+    const needs = a.needs ?? [];
+    const tools = a.tools ?? [];
+    const squad = squadFor(shape, platforms, test, { kind, needs, tools });
     const builders = squad.filter((m) => tierOfRole(m.role) === "specialist").length;
     return {
       id: ids[i],
       name: a.name,
       tagline: a.tagline,
       platforms,
-      platformsAssumed: a.platformsAssumed ?? a.platforms.length === 0,
+      platformsAssumed: a.platformsAssumed ?? (a.platforms.length === 0 && platforms.length > 0),
       shape,
       group: a.group ?? null,
       managerId: null,
@@ -218,6 +289,9 @@ export function planTopology(input: PortfolioApp[], settings: TopologySettings):
       notes: a.notes ?? null,
       path: a.path?.trim() || null,
       reads: a.reads ?? [],
+      kind,
+      needs,
+      tools,
       agents: 1 + squad.length,
       squad,
       staggered: builders > settings.leadSpan,
@@ -252,7 +326,7 @@ export function planTopology(input: PortfolioApp[], settings: TopologySettings):
 
   if (n === 0) {
     result.ok = false;
-    result.why = "No apps found yet. Add lines like “- Name — tagline · iOS Android”.";
+    result.why = "No projects found yet. Add lines like “- Name — tagline · iOS Android” or “- Name — tagline · Website”.";
     finishCounts(result);
     return result;
   }
@@ -378,7 +452,7 @@ export function admissibleSpecialists(
   staggered: boolean,
   coreContractPublished: boolean,
 ): { start: SquadMember[]; deferred: Array<{ member: SquadMember; reason: string }> } {
-  const order: Role[] = ["code", "ui", "security", "test", "research", "docs", "platform"];
+  const order: Role[] = ["code", "data", "ui", "security", "compliance", "assets", "test", "research", "docs", "platform"];
   const sorted = [...pending].sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role));
   const start: SquadMember[] = [];
   const deferred: Array<{ member: SquadMember; reason: string }> = [];

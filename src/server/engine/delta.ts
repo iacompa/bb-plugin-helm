@@ -1,10 +1,13 @@
-// Changing the plan mid-run (§4.5): add apps, drop apps, change shapes.
+// Changing the plan mid-run (§4.5): add apps, drop apps, change shapes, and change a
+// project's kind, needs or tools (its squad follows: a new need can add a specialist).
 // Live reporting lines are never rebalanced (V10): new apps join a manager with
 // room, else attach to the Orchestrator, else get a new manager if the span allows.
 
-import type { NodeInfo, PortfolioApp, Shape } from "../../shared/types.ts";
+import type { NodeInfo, PortfolioApp, ProjectKind, ProjectNeed, Shape } from "../../shared/types.ts";
 import { HelmError, type Engine } from "./engine.ts";
-import { leadIdFor, nodeIdFor, ORCH_ID, slugify, squadFor, type PlannedApp, type PlannedNode, type TopologyPlan } from "../domain/topology.ts";
+import { leadIdFor, nodeIdFor, ORCH_ID, slugify, squadOf, type PlannedApp, type PlannedNode, type TopologyPlan } from "../domain/topology.ts";
+import { applyProfile } from "../domain/brief.ts";
+import { profileLine } from "../domain/profile.ts";
 import { scopeFor, slotOfRole, tierOfRole } from "../domain/roles.ts";
 import { bottomUp } from "../domain/directives.ts";
 
@@ -12,6 +15,29 @@ export interface PlanDelta {
   add?: PortfolioApp[];
   drop?: string[];
   shapes?: Record<string, Shape>;
+  /** Change a project's kind, needs or tools; named fields replace the old ones. */
+  profiles?: Record<string, ProfileChange>;
+}
+
+export interface ProfileChange {
+  kind?: ProjectKind;
+  needs?: ProjectNeed[];
+  tools?: string[];
+}
+
+type AppChange = ProfileChange & { shape?: Shape };
+
+/** Shape and profile changes per app, merged. */
+function changesOf(delta: PlanDelta): Map<string, AppChange> {
+  const out = new Map<string, AppChange>();
+  for (const [id, shape] of Object.entries(delta.shapes ?? {})) out.set(id, { ...(out.get(id) ?? {}), shape });
+  for (const [id, p] of Object.entries(delta.profiles ?? {})) out.set(id, { ...(out.get(id) ?? {}), ...p });
+  return out;
+}
+
+/** A new app gets its profile decided like any app in a brief. */
+function profiled(a: PortfolioApp): PortfolioApp {
+  return applyProfile({ ...a, platformsAssumed: a.platformsAssumed ?? a.platforms.length === 0 }).app;
 }
 
 export function validateDelta(e: Engine, runId: string, delta: PlanDelta): { ok: true; summary: string; agents: number } | { ok: false; error: string } {
@@ -19,12 +45,16 @@ export function validateDelta(e: Engine, runId: string, delta: PlanDelta): { ok:
   const plan = e.plan(runId);
   const apps = e.repo.listApps(runId);
   for (const id of delta.drop ?? []) if (!apps.find((a) => a.id === id)) return { ok: false, error: `No app ${id} to drop.` };
-  for (const id of Object.keys(delta.shapes ?? {})) if (!apps.find((a) => a.id === id)) return { ok: false, error: `No app ${id} to reshape.` };
+  const changes = changesOf(delta);
+  for (const id of changes.keys()) if (!apps.find((a) => a.id === id)) return { ok: false, error: `No app ${id} to change.` };
   let agents = 0;
-  for (const a of delta.add ?? []) agents += 1 + squadFor(a.shape ?? "full", a.platforms, !!a.test).length;
-  for (const [id, shape] of Object.entries(delta.shapes ?? {})) {
+  for (const raw of delta.add ?? []) {
+    const a = profiled(raw);
+    agents += 1 + squadOf({ shape: a.shape ?? "full", platforms: a.platforms, test: !!a.test, kind: a.kind, needs: a.needs, tools: a.tools }).length;
+  }
+  for (const [id, c] of changes) {
     const app = apps.find((x) => x.id === id)!;
-    agents += squadFor(shape, app.platforms, app.test).length - squadFor(app.shape, app.platforms, app.test).length;
+    agents += squadOf({ ...app, ...c }).length - squadOf(app).length;
   }
   const total = e.repo.listNodes(runId).length + agents;
   if (total > run.limits.maxTotalAgents) return { ok: false, error: `The plan would have ${total} agents, over the cap of ${run.limits.maxTotalAgents}.` };
@@ -40,7 +70,11 @@ export function validateDelta(e: Engine, runId: string, delta: PlanDelta): { ok:
   const parts: string[] = [];
   if (addN) parts.push(`add ${delta.add!.map((a) => a.name).join(", ")}`);
   if (delta.drop?.length) parts.push(`drop ${delta.drop.join(", ")}`);
-  for (const [id, s] of Object.entries(delta.shapes ?? {})) parts.push(`${id} → ${s}`);
+  for (const [id, c] of changes) {
+    const app = apps.find((x) => x.id === id)!;
+    const bits = [c.shape && c.shape !== app.shape ? c.shape : null, c.kind || c.needs || c.tools ? profileLine({ ...app, ...c }) : null].filter(Boolean);
+    parts.push(`${id} → ${bits.join(", ") || "unchanged"}`);
+  }
   return { ok: true, summary: parts.join("; "), agents };
 }
 
@@ -52,7 +86,7 @@ export async function applyDelta(e: Engine, runId: string, delta: PlanDelta): Pr
   e.repo.tx(() => {
     const existing = new Set(e.repo.listApps(runId).map((a) => a.id));
     let order = e.repo.listApps(runId).length;
-    for (const a of delta.add ?? []) {
+    for (const a of (delta.add ?? []).map(profiled)) {
       let id = slugify(a.name);
       for (let k = 2; existing.has(id); k++) id = `${slugify(a.name)}-${k}`;
       existing.add(id);
@@ -76,20 +110,21 @@ export async function applyDelta(e: Engine, runId: string, delta: PlanDelta): Pr
       }
       const m = plan.managers.find((x) => x.id === parent);
       if (m) m.appIds.push(id);
-      e.repo.insertApp({ runId, id, name: a.name, tagline: a.tagline, platforms: a.platforms, platformsAssumed: !!a.platformsAssumed, shape, managerNodeId: m ? m.id : null, order: order++, test: !!a.test, priority: a.priority ?? "normal", notes: a.notes ?? null, targetPath: a.path ?? null, reads: a.reads ?? [] });
-      const squad = squadFor(shape, a.platforms, !!a.test);
+      e.repo.insertApp({ runId, id, name: a.name, tagline: a.tagline, platforms: a.platforms, platformsAssumed: !!a.platformsAssumed, shape, managerNodeId: m ? m.id : null, order: order++, test: !!a.test, priority: a.priority ?? "normal", notes: a.notes ?? null, targetPath: a.path ?? null, reads: a.reads ?? [], kind: a.kind, needs: a.needs, tools: a.tools });
+      const kind = a.kind ?? "app";
+      const squad = squadOf({ shape, platforms: a.platforms, test: !!a.test, kind, needs: a.needs, tools: a.tools });
       const leadId = leadIdFor(id);
       const newNodes: PlannedNode[] = [{ id: leadId, tier: "lead", role: "lead", platform: null, appId: id, parentId: parent, slot: "lead", alsoLead: false }, ...squad.map((s) => ({ id: nodeIdFor(id, s), tier: tierOfRole(s.role), role: s.role, platform: s.platform, appId: id, parentId: leadId, slot: slotOfRole(s.role), alsoLead: false }))];
       for (const nd of newNodes) {
-        e.repo.insertNode({ runId, id: nd.id, appId: id, tier: nd.tier, role: nd.role, platform: nd.platform, parentId: nd.parentId, slot: nd.slot, alsoLead: false, model: run.slots[nd.slot] ?? null, scopeGlobs: scopeFor(nd.role, nd.platform), branch: null, briefMd: null });
+        e.repo.insertNode({ runId, id: nd.id, appId: id, tier: nd.tier, role: nd.role, platform: nd.platform, parentId: nd.parentId, slot: nd.slot, alsoLead: false, model: run.slots[nd.slot] ?? null, scopeGlobs: scopeFor(nd.role, nd.platform, kind), branch: null, briefMd: null });
         plan.nodes.push(nd);
       }
-      const pa: PlannedApp = { id, name: a.name, tagline: a.tagline, platforms: a.platforms, platformsAssumed: !!a.platformsAssumed, shape, group: a.group ?? null, managerId: m ? m.id : null, order, test: !!a.test, priority: a.priority ?? "normal", notes: a.notes ?? null, path: a.path ?? null, reads: a.reads ?? [], agents: newNodes.length, squad, staggered: squad.filter((s) => s.role !== "review" && s.role !== "slop").length > run.limits.leadSpan };
+      const pa: PlannedApp = { id, name: a.name, tagline: a.tagline, platforms: a.platforms, platformsAssumed: !!a.platformsAssumed, shape, group: a.group ?? null, managerId: m ? m.id : null, order, test: !!a.test, priority: a.priority ?? "normal", notes: a.notes ?? null, path: a.path ?? null, reads: a.reads ?? [], kind, needs: a.needs ?? [], tools: a.tools ?? [], agents: newNodes.length, squad, staggered: squad.filter((s) => s.role !== "review" && s.role !== "slop").length > run.limits.leadSpan };
       plan.apps.push(pa);
       e.repo.event(runId, ORCH_ID, "plan", `added ${a.name} under ${m ? m.name : "the Orchestrator"}`);
     }
     for (const appId of delta.drop ?? []) dropAppTx(e, runId, appId);
-    for (const [appId, shape] of Object.entries(delta.shapes ?? {})) reshapeTx(e, runId, appId, shape, plan);
+    for (const [appId, c] of changesOf(delta)) reshapeTx(e, runId, appId, c, plan);
     recount(plan);
     e.repo.db.prepare("UPDATE runs SET plan_json = ? WHERE id = ?").run(JSON.stringify(plan), runId);
   });
@@ -131,18 +166,22 @@ export function dropAppTx(e: Engine, runId: string, appId: string): void {
   e.emit(runId, "stage.changed", { appId, stage: "cancelled" });
 }
 
-function reshapeTx(e: Engine, runId: string, appId: string, shape: Shape, plan: TopologyPlan): void {
+function reshapeTx(e: Engine, runId: string, appId: string, c: AppChange, plan: TopologyPlan): void {
   const app = e.repo.getApp(runId, appId)!;
   const run = e.run(runId);
-  const want = squadFor(shape, app.platforms, app.test);
+  const next = { ...app, shape: c.shape ?? app.shape, kind: c.kind ?? app.kind, needs: c.needs ?? app.needs, tools: c.tools ?? app.tools };
+  const shape = next.shape;
+  const want = squadOf(next);
   const wantIds = new Set(want.map((m) => nodeIdFor(appId, m)));
   const lead = e.leadOf(runId, appId)!;
   const current = e.repo.listNodes(runId).filter((n) => n.appId === appId && (n.tier === "specialist" || n.tier === "gate"));
   const extras: NodeInfo[] = current.filter((n) => !wantIds.has(n.id));
+  const added: string[] = [];
   for (const m of want) {
     const id = nodeIdFor(appId, m);
     if (current.find((n) => n.id === id)) continue;
-    e.repo.insertNode({ runId, id, appId, tier: tierOfRole(m.role), role: m.role, platform: m.platform, parentId: lead.id, slot: slotOfRole(m.role), alsoLead: false, model: run.slots[slotOfRole(m.role)] ?? null, scopeGlobs: scopeFor(m.role, m.platform), branch: null, briefMd: null });
+    e.repo.insertNode({ runId, id, appId, tier: tierOfRole(m.role), role: m.role, platform: m.platform, parentId: lead.id, slot: slotOfRole(m.role), alsoLead: false, model: run.slots[slotOfRole(m.role)] ?? null, scopeGlobs: scopeFor(m.role, m.platform, next.kind), branch: null, briefMd: null });
+    added.push(id);
     plan.nodes.push({ id, tier: tierOfRole(m.role), role: m.role, platform: m.platform, appId, parentId: lead.id, slot: slotOfRole(m.role), alsoLead: false });
   }
   const withThread = extras.filter((n) => n.threadId).map((n) => n.id);
@@ -153,12 +192,24 @@ function reshapeTx(e: Engine, runId: string, appId: string, shape: Shape, plan: 
       plan.nodes = plan.nodes.filter((x) => x.id !== n.id);
     }
   }
-  if (withThread.length) e.repo.enqueue({ id: e.oid(), runId, kind: "archive", nodeId: lead.id, payload: { nodeIds: withThread }, idemKey: `reshape:${runId}:${appId}:${shape}` });
-  e.repo.updateApp(runId, appId, { shape });
+  const key = `${shape}:${next.kind}:${next.needs.join(",")}:${next.tools.join(",")}`;
+  if (withThread.length) e.repo.enqueue({ id: e.oid(), runId, kind: "archive", nodeId: lead.id, payload: { nodeIds: withThread }, idemKey: `reshape:${runId}:${appId}:${key}` });
+  e.repo.updateApp(runId, appId, { shape, kind: next.kind, needs: next.needs, tools: next.tools });
   const pa = plan.apps.find((a) => a.id === appId);
   if (pa) {
     pa.shape = shape;
+    pa.kind = next.kind;
+    pa.needs = next.needs;
+    pa.tools = next.tools;
     pa.squad = want;
   }
-  e.repo.event(runId, lead.id, "plan", `${app.name} reshaped to ${shape}`);
+  const profileChanged = next.kind !== app.kind || next.needs.join() !== app.needs.join() || next.tools.join() !== app.tools.join();
+  e.repo.event(runId, lead.id, "plan", profileChanged ? `${app.name} is now ${profileLine(next)} (${shape})` : `${app.name} reshaped to ${shape}`);
+  if (profileChanged && lead.threadId) {
+    const label = (id: string) => e.label(e.repo.getNode(runId, id)!);
+    const L = [`Your project's profile changed: ${profileLine(next)}. Your brief now has the guidance for it.`];
+    if (added.length) L.push(`New in your squad (not started): ${added.map(label).join(", ")}. Write each a task with helm_set_task, then start them with helm_spawn_squad when the work is ready for them.`);
+    if (extras.length) L.push(`Released: ${extras.map((n) => e.label(n)).join(", ")}.`);
+    e.sendFromHelm(runId, lead.id, L.join("\n"), { mode: "queue", key: `profile:${runId}:${appId}:${key}` });
+  }
 }

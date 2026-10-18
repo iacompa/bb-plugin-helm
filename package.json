@@ -13,7 +13,7 @@
   },
   "bb": {
     "name": "Helm",
-    "description": "Run a whole portfolio of app builds as an agent hierarchy: plan from a plain-language brief, choose models every run, watch and steer every agent, and sign off only on evidence.",
+    "description": "Run a whole portfolio of software projects (apps, websites, games, automation, reviews) as an agent hierarchy: plan from a plain-language brief, choose models every run, watch and steer every agent, and sign off only on evidence.",
     "branding": {
       "icon": "./assets/icon.svg"
     },
@@ -56,7 +56,7 @@
     "tailwind-merge": "^3.4.0",
     "vaul": "^1.1.2"
   },
-  "description": "Helm — run a portfolio of app builds as an orchestration hierarchy (Orchestrator → Managers → App Leads → Specialists + Gates).",
+  "description": "Helm — run a portfolio of apps, websites, games, automation and reviews as an orchestration hierarchy (Orchestrator → Managers → App Leads → Specialists + Gates).",
   "scripts": {
     "build": "bb plugin build",
     "dev": "bb plugin dev",

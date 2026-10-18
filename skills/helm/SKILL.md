@@ -5,7 +5,7 @@ description: Drive the Helm BB plugin from the command line with `bb helm …` �
 
 # `bb helm` — the Helm CLI
 
-Helm runs a portfolio of app builds as an agent hierarchy: Orchestrator → Managers → App
+Helm runs a portfolio of projects (apps, websites, games, automation, reviews of existing projects) as an agent hierarchy: Orchestrator → Managers → App
 Leads → specialists (UI, Core, Platform, Security, optional Test) plus two gates per app
 (Reviewer, Slop Hunter). This CLI is the human's control surface. **Every mutating command
 is a human directive**: it is binding on the agents it reaches, it is recorded in the ledger,
@@ -60,7 +60,7 @@ gate verdicts). Only the human moves Ready → Done (`signoff`) or Ready → Bui
 ```bash
 bb helm plan --brief-file brief.md [--preset 'Cheap dev run'] \
   [--slot code=claude-code/claude-sonnet-5-5:high --slot review=codex/gpt-6.1-sol:high …] \
-  [--name 'Outdoor apps'] [--root '/Volumes/Work/helm-runs']
+  [--name 'Outdoor apps'] [--root '~/helm-runs']
 bb helm start <runId> --dry-run      # validate and show what would happen, spawns nothing
 bb helm start <runId> --yes          # approve and start (no prompt)
 ```
@@ -74,6 +74,16 @@ bb helm start <runId> --yes          # approve and start (no prompt)
   folders its agents may read. `--root` sets where apps without a folder go for this run
   (default: the apps root setting). One app per repository; a folder inside another repository,
   or a non-empty non-git folder, is reported as a problem.
+- **Projects are more than apps.** Each line gets a kind: `app`, `web` (websites and full-stack
+  web apps), `game` (mobile, desktop or web; Unreal, Unity or Godot), `automation` (bots,
+  scheduled jobs, integrations) or `review` (an audit report of an existing project, no code
+  changes). Helm also decides its **needs** (`database auth payments security hipaa privacy
+  realtime ai automation assets multiplayer`) and **tools** (`unreal unity godot blender docker
+  ffmpeg`, BB plugins as `plugin:<id>`) from the words in the brief, prints each decision with
+  its reason, and staffs the squad from them (a Data builder for a database, Compliance for
+  HIPAA, an Asset builder for art, a Web builder for websites). Override on the line:
+  `- Shop — bookings · Website · needs payments, HIPAA · tools Docker`, `· Game · tools Unreal`,
+  `· Review`, or `· needs none`. Mid-run the Orchestrator can change a profile; the squad follows.
 - To plan interactively (questions, folders, a model for every role from this machine's catalog),
   use the `helm-planner` skill, or Helm → New run → **Plan with an agent**.
 - A brief written as `# Group` headings with `- Name — tagline · iOS Android macOS Windows`
@@ -84,7 +94,8 @@ bb helm start <runId> --yes          # approve and start (no prompt)
   any questions the planner prints.
 - `--preset`: a Model Studio preset (`Studio default`, `Cheap dev run`, `Max quality`, or
   one the user saved). `--slot slot=provider/model:reasoning` overrides one slot; repeat it.
-  Slots: `orchestrator manager lead ui code platform security test review slop research docs`.
+  Slots: `orchestrator manager lead ui code platform security test review slop research docs`
+  (Data builders use the `code` model, Compliance the `security` model, Asset builders the `ui` model).
   Check model ids and reasoning levels with `bb helm models` — never guess them.
 - Run `start --dry-run` first and show the user the result; `start` without `--yes` asks.
 

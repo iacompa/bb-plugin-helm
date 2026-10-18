@@ -10,7 +10,7 @@ import { nodeWorktree } from "../engine/gates.ts";
 import type { HostOps, SimPlatform } from "../../shared/host-contract.ts";
 import type { AppInfo, Platform } from "../../shared/types.ts";
 
-const PLATFORM_OF: Record<Platform, SimPlatform> = { ios: "ios", and: "and", mac: "mac", win: "win" };
+const PLATFORM_OF: Partial<Record<Platform, SimPlatform>> = { ios: "ios", and: "and", mac: "mac", win: "win" };
 const ROOTS_TTL = 60_000;
 const BUILDS_TTL = 20_000;
 
@@ -66,8 +66,8 @@ export class SimView {
     const apps = current
       ? this.e.repo
           .listApps(current)
+          .map((a) => ({ id: a.id, name: a.name, platforms: a.platforms.map((p) => PLATFORM_OF[p]).filter((p): p is SimPlatform => !!p), stage: a.stage }))
           .filter((a) => a.platforms.length && a.stage !== "cancelled")
-          .map((a) => ({ id: a.id, name: a.name, platforms: a.platforms.map((p) => PLATFORM_OF[p]), stage: a.stage }))
       : [];
     const devices = await this.host(current).simList({});
     return { runs, runId: current, apps, devices };

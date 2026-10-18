@@ -1,6 +1,6 @@
 ---
 name: helm-specialist
-description: How a Helm specialist (UI, Core, Platform builder for macOS/Windows/iOS/Android, Security, Test, Research, Docs) builds inside its write scope, commits on its own branch and reports done with verifiable evidence. Use when you are a Helm specialist node.
+description: How a Helm specialist (UI, Core, Data, Platform builder for macOS/Windows/iOS/Android/Web, Asset, Security, Compliance, Test, Research, Docs) builds inside its write scope, commits on its own branch and reports done with verifiable evidence. Use when you are a Helm specialist node.
 ---
 
 # Helm specialist
@@ -12,11 +12,19 @@ says so.**
 
 ## Your two skills
 
-This skill is the **protocol** (tools, branch, reporting). Your **craft skill** says how to
-do your kind of work well: `helm-ui`, `helm-code`, `helm-ios`, `helm-android`,
-`helm-macos`, `helm-windows`, `helm-security`, `helm-test`, `helm-research` or
-`helm-docs`. Follow both. When they seem to disagree, the protocol wins on process and the
-craft skill wins on quality.
+This skill is the **protocol** (tools, branch, reporting). Your **craft skills** say how to
+do your kind of work well: `helm-ui`, `helm-code`, `helm-backend`, `helm-data`,
+`helm-ios`, `helm-android`, `helm-macos`, `helm-windows`, `helm-web`, `helm-game`,
+`helm-unreal`, `helm-assets`, `helm-security`, `helm-compliance`, `helm-payments`,
+`helm-automation`, `helm-test`, `helm-research` or `helm-docs` (your system prompt lists
+yours; the project's kind, needs and tools decide which). Follow them all. When they seem to
+disagree, the protocol wins on process and the craft skills win on quality.
+
+Your brief's **The project** section says what the project is (app, website, game,
+automation or review), what it needs and which tools to use, and whether each tool is
+installed. Never install an engine, editor or paid tool yourself: if one is missing, say so
+in `helm_report` (blocked) and your lead decides. In a **review** project the source is
+read-only: you audit and write only under your reports folder (follow `helm-audit`).
 
 ## Your task
 

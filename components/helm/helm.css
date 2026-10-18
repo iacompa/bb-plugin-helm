@@ -485,6 +485,10 @@
 .helm .plt { display: inline-flex; gap: 3px; flex-wrap: wrap; }
 .helm .plt i { font: 600 9.5px/1 var(--h-mono); font-style: normal; padding: 3px 5px; border-radius: 4px; background: var(--h-surface-3); color: var(--h-fg-2); letter-spacing: .02em; }
 .helm .plt i.assumed { border: 1px dashed var(--h-line-strong); background: transparent; }
+.helm .plt i.kind { background: var(--h-accent-soft, var(--h-surface-3)); color: var(--h-fg-1); }
+.helm .profile select, .helm .profile .needchip { font: 500 11.5px/1 var(--h-sans, inherit); padding: 3px 6px; border-radius: 5px; border: 1px solid var(--h-line); background: var(--h-surface-2); color: var(--h-fg-2); }
+.helm .profile .needchip { cursor: pointer; }
+.helm .profile .needchip:hover { border-color: var(--h-line-strong); color: var(--h-fg-1); }
 
 /* ───────────── ledger & needs ───────────── */
 .helm .pagewrap { position: absolute; inset: 0; overflow: auto; }

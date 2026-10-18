@@ -6,10 +6,10 @@ export const SLOT_DEFS: Array<{ id: SlotId; group: "Coordination" | "Build" | "G
   { id: "orchestrator", group: "Coordination", name: "Orchestrator", desc: "Strategy, staffing and the portfolio view. Reads everything.", role: "orch" },
   { id: "manager", group: "Coordination", name: "Managers", desc: "Oversee up to four app leads each. Roll up status.", role: "mgr" },
   { id: "lead", group: "Coordination", name: "App leads", desc: "One per app: spec, contract, integration, decisions.", role: "lead" },
-  { id: "ui", group: "Build", name: "UI builders", desc: "Design system, screens, motion.", role: "ui" },
-  { id: "code", group: "Build", name: "Code builders", desc: "Core logic, data layer, functionality.", role: "code" },
-  { id: "platform", group: "Build", name: "Platform builders", desc: "macOS · Windows · iOS · Android glue.", role: "platform" },
-  { id: "security", group: "Build", name: "Security", desc: "Threat model, dependency and secrets audit.", role: "security" },
+  { id: "ui", group: "Build", name: "UI builders", desc: "Design system, screens, motion. Asset builders use this model too.", role: "ui" },
+  { id: "code", group: "Build", name: "Code builders", desc: "Core logic, backend, data layer. Data builders use this model too.", role: "code" },
+  { id: "platform", group: "Build", name: "Platform builders", desc: "macOS · Windows · iOS · Android · Web glue.", role: "platform" },
+  { id: "security", group: "Build", name: "Security", desc: "Threat model, dependency and secrets audit. Compliance uses this model too.", role: "security" },
   { id: "test", group: "Build", name: "Test", desc: "Test plans and UI tests (optional per app).", role: "test" },
   { id: "review", group: "Gates", name: "Reviewer", desc: "Independent code and UI review, one per app.", role: "review" },
   { id: "slop", group: "Gates", name: "Slop Hunter", desc: "AI-slop check: filler, fakes, dead code, invented APIs.", role: "slop" },
@@ -286,6 +286,9 @@ export const BASE_TOK: Record<Role, number> = {
   slop: 300,
   research: 300,
   docs: 300,
+  data: 700,
+  compliance: 350,
+  assets: 700,
 };
 
 export const RW: Record<string, number> = { none: 0.5, low: 0.7, medium: 0.85, high: 1, xhigh: 1.35, max: 1.7, ultra: 2.2, ultracode: 1.8 };

@@ -1,6 +1,6 @@
 # Helm
 
-A BB plugin that runs a portfolio of app builds as a supervised hierarchy of agents:
+A BB plugin that runs a portfolio of software projects (apps, websites, games, automation, and reviews of existing projects) as a supervised hierarchy of agents:
 
 ```
 Orchestrator → Managers (only when apps > 4) → App Leads → Specialists + Gates (Reviewer, Slop Hunter)
@@ -59,10 +59,22 @@ bb helm end --run <id> --yes      # end a run now, or discard a draft plan
 bb helm limits --concurrency 24   # agents running at once in this run; also --budget N, --autonomy high|ask
 ```
 
-A structured brief is read deterministically: `# Group` headings, then `- Name — tagline · iOS Android macOS Windows` lines.
+A structured brief is read deterministically: `# Group` headings, then `- Name — tagline · iOS Android macOS Windows Web` lines.
+
+**Not just apps.** Helm decides what each project is from its line and staffs it to match:
+
+| Kind | What you get | Squad (Full) |
+|---|---|---|
+| App | Native or cross-platform apps | UI, Core, a builder per platform, Security |
+| Website | Full-stack web: frontend, backend, database, deployment | UI, Core (backend), Data, Web builder, Security |
+| Game | Mobile, desktop or web games; Unreal, Unity or Godot | Core (gameplay), UI (HUD), Asset builder, platform builders |
+| Automation | Bots, scheduled jobs, integrations, pipelines | Core, Security, Test, Docs |
+| Review | An audit report of an existing project; source stays read-only | Code, UI, platform, Security and Test auditors |
+
+It also decides each project's **needs** (database, accounts, payments, security, HIPAA, privacy law, realtime, AI, automation, art assets, multiplayer) and **tools** (Unreal, Unity, Godot, Blender, Docker, FFmpeg, and BB plugins such as browser-automation or automations). Needs add specialists: a Data builder for a database, Compliance for HIPAA or privacy law, Security for accounts, payments or health data even in a Lean squad, an Asset builder for art. Each agent's brief carries the rules for every need and says which tools are installed on this machine. Helm prints every decision with its reason before you start. Correct it on the line (`- Clinic — patient intake · Website · needs HIPAA, payments · tools Docker`, `· Game · tools Unreal`, `· Review`, `· needs none`) or in the wizard. Mid-run, the Orchestrator can change a profile and the squad follows. Payments stay in test mode, deployments stay local, and nothing acts on real accounts until you provide the credentials.
 
 **Apps can live anywhere on your machine.** Add a folder to an app's line:
-- `- Tide — breathing app · iOS · /Volumes/Work/apps/tide` works in that folder.
+- `- Pebble — habit counter · iOS · ~/code/pebble` works in that folder.
 - An **existing repository** (or a linked worktree) is adopted. When the app's wave is admitted, Helm creates one `helm/<run>/<app>` branch at your HEAD and adds **no files and no commits**. Your checkout, uncommitted changes and branches are never touched, and Helm never merges. You merge the signed-off branch yourself. Agents work in their own worktrees, so they see **committed work only**: commit anything they should build on first (`bb helm plan` counts the uncommitted changes per folder). Checking folders never writes your index (`GIT_OPTIONAL_LOCKS=0`).
 - A missing or empty folder becomes a new repository.
 - `· reads /path/a, ~/path/b` lists folders the app's agents may read but never change.

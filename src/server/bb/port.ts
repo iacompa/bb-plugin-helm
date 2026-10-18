@@ -137,6 +137,13 @@ export interface Timers {
   setTimeout(fn: () => void, ms: number): () => void;
 }
 
+export interface PluginLite {
+  id: string;
+  name: string;
+  description: string;
+  command: string | null;
+}
+
 export interface BbPort extends Timers {
   readonly kind: "real" | "sim";
   onEvent(handler: (e: HelmEvent) => void | Promise<void>): () => void;
@@ -162,6 +169,8 @@ export interface BbPort extends Timers {
   listInteractions(threadId: string): Promise<InteractionLite[]>;
   respondInteraction(args: { threadId: string; interactionId: string; answer: InteractionAnswer }): Promise<void>;
   countActive(args?: { providerId?: string }): Promise<number>;
+  /** Enabled BB plugins other agents can use (id, name, description, CLI command). */
+  listPlugins(): Promise<PluginLite[]>;
   listForeignThreads(args: { limit: number }): Promise<ForeignThread[]>;
 
   /** Git and filesystem work, executed by the host entry on the machine that owns the repo. */

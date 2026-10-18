@@ -10,21 +10,25 @@ import { raiseInteractionNeed } from "../engine/events.ts";
 import { z } from "zod";
 import type { Engine } from "../engine/engine.ts";
 import { HelmError } from "../engine/engine.ts";
-import { HUMAN_ONLY, type NodeInfo } from "../../shared/types.ts";
+import { HUMAN_ONLY, PROJECT_NEEDS, type NodeInfo, type ProjectNeed } from "../../shared/types.ts";
 import { toolsForNode, PLANNER_TOOLS } from "../domain/roles.ts";
-import { PortfolioSchema, normalizePortfolio } from "../domain/brief.ts";
+import { KindLooseSchema, PortfolioSchema, normalizePortfolio } from "../domain/brief.ts";
 import { VerdictSchema } from "../domain/verdict.ts";
 import { ack, agentDirect, resolveNeed } from "../engine/direct.ts";
 import { assignFix, declareExisting, publishContract, recordCheck, releaseSquadMembers, report, slopScan, spawnSquad, stageRequest, verdict } from "../engine/gates.ts";
 import { context, digest, world } from "../engine/world.ts";
-import { validateDelta } from "../engine/delta.ts";
+import { validateDelta, type ProfileChange } from "../engine/delta.ts";
+import { normalizeNeed, normalizeTool } from "../domain/profile.ts";
 import { planTopology } from "../domain/topology.ts";
 
 const Evidence = z.object({ kind: z.enum(["commit", "file", "check", "report"]), ref: z.string().min(1).max(300), branch: z.string().max(200).optional() });
 const StageZ = z.enum(["intake", "spec", "build", "integrate", "review", "slop", "fix", "ready", "done"]);
 const RelPath = z.string().min(1).max(300).refine((s) => !s.startsWith("/") && !s.startsWith("-") && !s.split(/[\\/]/).includes(".."), "a path inside the repository");
 
-const AppZ = z.object({ name: z.string().min(1).max(60), tagline: z.string().max(160).default(""), platforms: z.array(z.string()).max(4).default([]), group: z.string().max(60).nullish(), shape: z.enum(["solo", "lean", "full"]).optional(), notes: z.string().max(1200).nullish(), path: z.string().trim().min(1).max(500).nullish(), reads: z.array(z.string().trim().min(1).max(500)).max(10).optional() });
+const AppZ = z.object({ name: z.string().min(1).max(60), tagline: z.string().max(160).default(""), platforms: z.array(z.string()).max(5).default([]), group: z.string().max(60).nullish(), shape: z.enum(["solo", "lean", "full"]).optional(), notes: z.string().max(1200).nullish(), path: z.string().trim().min(1).max(500).nullish(), reads: z.array(z.string().trim().min(1).max(500)).max(10).optional(), kind: z.string().max(40).optional(), needs: z.array(z.string().max(40)).max(12).optional(), tools: z.array(z.string().max(60)).max(8).optional() });
+const ProfileZ = z.object({ kind: KindLooseSchema.optional(), needs: z.array(z.string().max(40)).max(12).optional(), tools: z.array(z.string().max(60)).max(8).optional() }).strict();
+const SquadRoleZ = z.enum(["ui", "code", "platform", "security", "test", "research", "docs", "data", "compliance", "assets"]);
+const SquadPlatformZ = z.enum(["mac", "win", "ios", "and", "web"]);
 
 export interface ToolDef {
   name: string;
@@ -92,8 +96,9 @@ export const TOOL_DEFS: ToolDef[] = [
   { name: "helm_world", description: "The whole run from Helm's database: stages, needs, recent human directives with receipts, touched agents, policies, managers and apps. Always current.", parameters: z.object({ appsPage: z.number().int().min(0).max(20).optional() }).strict(), presentation: { label: { pending: "Reading world state", completed: "Read world state" }, icon: { glyph: "Globe" } } },
   {
     name: "helm_propose_plan",
-    description: "Propose a portfolio (planner) or a plan delta (Orchestrator: add apps, drop apps, change shapes). Helm validates it and asks the human.",
-    parameters: z.object({ portfolio: PortfolioSchema.optional(), delta: z.object({ add: z.array(AppZ).max(20).optional(), drop: z.array(z.string()).max(20).optional(), shapes: z.record(z.string(), z.enum(["solo", "lean", "full"])).optional(), rationale: z.string().max(600).optional() }).strict().optional() }).strict(),
+    description:
+      "Propose a portfolio (planner) or a plan delta (Orchestrator: add projects, drop projects, change shapes, or change a project's kind (app|web|game|automation|review), needs (database, auth, payments, security, hipaa, privacy, realtime, ai, automation, assets, multiplayer) or tools (blender, unreal, unity, godot, docker, plugin:<id>) — the squad follows). Helm validates it and asks the human.",
+    parameters: z.object({ portfolio: PortfolioSchema.optional(), delta: z.object({ add: z.array(AppZ).max(20).optional(), drop: z.array(z.string()).max(20).optional(), shapes: z.record(z.string(), z.enum(["solo", "lean", "full"])).optional(), profiles: z.record(z.string(), ProfileZ).optional(), rationale: z.string().max(600).optional() }).strict().optional() }).strict(),
     presentation: { label: { pending: "Proposing a plan", completed: "Proposed a plan" }, icon: { glyph: "ListTodo" } },
   },
   { name: "helm_propose_wave", description: "Propose which Intake apps to start next and why.", parameters: z.object({ appIds: z.array(z.string()).min(1).max(20), rationale: z.string().max(600) }).strict(), presentation: { label: { pending: "Proposing a wave", completed: "Proposed a wave" }, icon: { glyph: "Layers" } } },
@@ -101,11 +106,11 @@ export const TOOL_DEFS: ToolDef[] = [
   { name: "helm_digest", description: "Rolled-up state of the apps under you, plus FYI lines you have not read.", parameters: z.object({}).strict(), presentation: { label: { pending: "Reading digest", completed: "Read digest" }, icon: { glyph: "AlignLeft" } } },
   {
     name: "helm_spawn_squad",
-    description: "Ask Helm to start squad members of your app's plan (role ui|code|platform|security|test, platform for platform builders). Helm checks shape, lead span and caps; returns accepted / deferred with reasons. Give each member a `task`: a short system prompt written for exactly its job (what to build, the files and contract sections it owns, acceptance criteria, what not to touch) — it starts with it. Use `release` (with a reason) for members your SPEC no longer needs: Helm stops them and does not wait for them at Integrate.",
+    description: "Ask Helm to start squad members of your project's plan (role ui|code|platform|security|test|data|compliance|assets|research|docs, platform for platform builders: mac|win|ios|and|web). Helm checks shape, lead span and caps; returns accepted / deferred with reasons. Give each member a `task`: a short system prompt written for exactly its job (what to build, the files and contract sections it owns, acceptance criteria, what not to touch) — it starts with it. Use `release` (with a reason) for members your SPEC no longer needs: Helm stops them and does not wait for them at Integrate.",
     parameters: z
       .object({
-        spawn: z.array(z.object({ role: z.enum(["ui", "code", "platform", "security", "test", "research", "docs"]), platform: z.enum(["mac", "win", "ios", "and"]).nullish(), task: z.string().max(6000).nullish() })).max(12).default([]),
-        release: z.array(z.object({ role: z.enum(["ui", "code", "platform", "security", "test", "research", "docs"]), platform: z.enum(["mac", "win", "ios", "and"]).nullish(), reason: z.string().min(1).max(300) })).max(12).default([]),
+        spawn: z.array(z.object({ role: SquadRoleZ, platform: SquadPlatformZ.nullish(), task: z.string().max(6000).nullish() })).max(12).default([]),
+        release: z.array(z.object({ role: SquadRoleZ, platform: SquadPlatformZ.nullish(), reason: z.string().min(1).max(300) })).max(12).default([]),
       })
       .strict(),
     presentation: { label: { pending: "Spawning the squad", completed: "Spawned the squad" }, icon: { glyph: "UserRoundPlus" } },
@@ -320,12 +325,20 @@ async function autoApprove(e: Engine, runId: string, needId: string, what: strin
 }
 
 function proposePlan(e: Engine, node: NodeInfo, p: Record<string, unknown>): string {
-  const delta = p.delta as { add?: Array<z.infer<typeof AppZ>>; drop?: string[]; shapes?: Record<string, "solo" | "lean" | "full">; rationale?: string } | undefined;
-  if (!delta) return "Rejected: the Orchestrator proposes a delta (add / drop / shapes). A whole portfolio comes from the planner.";
+  const delta = p.delta as { add?: Array<z.infer<typeof AppZ>>; drop?: string[]; shapes?: Record<string, "solo" | "lean" | "full">; profiles?: Record<string, z.infer<typeof ProfileZ>>; rationale?: string } | undefined;
+  if (!delta) return "Rejected: the Orchestrator proposes a delta (add / drop / shapes / profiles). A whole portfolio comes from the planner.";
   const add = delta.add?.length ? normalizePortfolio(PortfolioSchema.parse({ apps: delta.add })).apps : [];
-  const v = validateDelta(e, node.runId, { add, drop: delta.drop, shapes: delta.shapes });
+  const profiles: Record<string, ProfileChange> = {};
+  for (const [id, pr] of Object.entries(delta.profiles ?? {})) {
+    const needs = pr.needs?.map(normalizeNeed);
+    if (needs?.some((x) => !x)) return `Rejected: unknown need in ${id}: ${pr.needs!.filter((x) => !normalizeNeed(x)).join(", ")}. Known: ${PROJECT_NEEDS.join(", ")}.`;
+    const tools = pr.tools?.map(normalizeTool);
+    if (tools?.some((x) => !x)) return `Rejected: ${id} names a tool Helm cannot use: ${pr.tools!.filter((x) => !normalizeTool(x)).join(", ")}.`;
+    profiles[id] = { ...(pr.kind ? { kind: pr.kind } : {}), ...(needs ? { needs: [...new Set(needs as ProjectNeed[])] } : {}), ...(tools ? { tools: [...new Set(tools as string[])] } : {}) };
+  }
+  const v = validateDelta(e, node.runId, { add, drop: delta.drop, shapes: delta.shapes, profiles });
   if (!v.ok) return `Rejected: ${v.error}`;
-  const need = e.repo.tx(() => e.raiseNeed(node.runId, { kind: "plan", nodeId: node.id, appId: null, title: `Plan change: ${v.summary}`, body: `${delta.rationale ?? ""}\nAdds up to ${v.agents} agents (spawned lazily).`.trim(), evidence: "", options: ["Approve plan change", "Deny"], dedupeKey: `delta:${v.summary}`, data: { delta: { add, drop: delta.drop ?? [], shapes: delta.shapes ?? {} } } }));
+  const need = e.repo.tx(() => e.raiseNeed(node.runId, { kind: "plan", nodeId: node.id, appId: null, title: `Plan change: ${v.summary}`, body: `${delta.rationale ?? ""}\nAdds up to ${v.agents} agents (spawned lazily).`.trim(), evidence: "", options: ["Approve plan change", "Deny"], dedupeKey: `delta:${v.summary}`, data: { delta: { add, drop: delta.drop ?? [], shapes: delta.shapes ?? {}, profiles } } }));
   if (need && e.autonomous(e.run(node.runId))) {
     void autoApprove(e, node.runId, need.id, `Plan change: ${v.summary}`).catch((err: unknown) => e.log.error(`auto-approve ${need.id}: ${err instanceof Error ? err.message : String(err)}`));
     return `Valid. Autonomy is on, so ${need.id} is approved and applied now (on the record).`;

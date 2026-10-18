@@ -236,13 +236,16 @@ export class Repo {
       adopted: b(r.adopted),
       helmBranch: s(r.helm_branch),
       userBranch: s(r.user_branch),
+      kind: (r.kind as AppInfo["kind"]) ?? "app",
+      needs: j(r.needs_json, []),
+      tools: j(r.tools_json, []),
     };
   }
-  insertApp(a: { runId: string; id: string; name: string; tagline: string; platforms: string[]; platformsAssumed: boolean; shape: string; managerNodeId: string | null; order: number; test: boolean; priority: string; notes: string | null; targetPath?: string | null; reads?: string[] }): void {
+  insertApp(a: { runId: string; id: string; name: string; tagline: string; platforms: string[]; platformsAssumed: boolean; shape: string; managerNodeId: string | null; order: number; test: boolean; priority: string; notes: string | null; targetPath?: string | null; reads?: string[]; kind?: string; needs?: string[]; tools?: string[] }): void {
     this.run(
-      `INSERT INTO apps(id, run_id, name, tagline, platforms, platforms_assumed, shape, manager_node_id, order_idx, test, priority, notes, target_path, reads_json, stage)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'intake')`,
-      a.id, a.runId, a.name, a.tagline, js(a.platforms), a.platformsAssumed ? 1 : 0, a.shape, a.managerNodeId, a.order, a.test ? 1 : 0, a.priority, a.notes, a.targetPath ?? null, js(a.reads ?? []),
+      `INSERT INTO apps(id, run_id, name, tagline, platforms, platforms_assumed, shape, manager_node_id, order_idx, test, priority, notes, target_path, reads_json, kind, needs_json, tools_json, stage)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'intake')`,
+      a.id, a.runId, a.name, a.tagline, js(a.platforms), a.platformsAssumed ? 1 : 0, a.shape, a.managerNodeId, a.order, a.test ? 1 : 0, a.priority, a.notes, a.targetPath ?? null, js(a.reads ?? []), a.kind ?? "app", js(a.needs ?? []), js(a.tools ?? []),
     );
   }
   getApp(runId: string, id: string): AppInfo | null {
@@ -256,8 +259,11 @@ export class Repo {
     const r = this.get1("SELECT contract_version, integration_branch, integration_head, platforms_assumed, notes, base_commit FROM apps WHERE run_id = ? AND id = ?", runId, id) ?? {};
     return { contractVersion: Number(r.contract_version ?? 0), integrationBranch: s(r.integration_branch), integrationHead: s(r.integration_head), platformsAssumed: b(r.platforms_assumed), notes: s(r.notes), baseCommit: s(r.base_commit) };
   }
-  updateApp(runId: string, id: string, patch: Partial<{ stage: Stage; priority: string; fixRound: number; pct: number; projectId: string; repoPath: string; shape: string; slotOverrides: SlotMap; waivedGates: string[]; contractVersion: number; integrationBranch: string; integrationHead: string | null; managerNodeId: string | null; test: boolean; adopted: boolean; helmBranch: string | null; userBranch: string | null; baseCommit: string | null }>): void {
+  updateApp(runId: string, id: string, patch: Partial<{ stage: Stage; priority: string; fixRound: number; pct: number; projectId: string; repoPath: string; shape: string; slotOverrides: SlotMap; waivedGates: string[]; contractVersion: number; integrationBranch: string; integrationHead: string | null; managerNodeId: string | null; test: boolean; adopted: boolean; helmBranch: string | null; userBranch: string | null; baseCommit: string | null; kind: string; needs: string[]; tools: string[] }>): void {
     const map: Record<string, [string, (v: never) => Param]> = {
+      kind: ["kind", (v: string) => v],
+      needs: ["needs_json", (v: string[]) => js(v)],
+      tools: ["tools_json", (v: string[]) => js(v)],
       stage: ["stage", (v: string) => v],
       priority: ["priority", (v: string) => v],
       fixRound: ["fix_round", (v: number) => v],

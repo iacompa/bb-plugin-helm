@@ -1,6 +1,6 @@
 // Per-app stage machine (§5.1) and board drag rules (§5.7). Stages advance on
 // evidence; the only human moves are the four listed in BOARD rules.
-import type { NodeStatus, Stage } from "../../shared/types.ts";
+import type { NodeStatus, ProjectKind, Stage } from "../../shared/types.ts";
 
 export const STAGES: Array<{ id: Stage; label: string; hint: string }> = [
   { id: "intake", label: "Intake", hint: "Waiting for capacity or a spec slot" },
@@ -57,6 +57,14 @@ export const ENGINE_TRANSITIONS: Partial<Record<Stage, Stage[]>> = {
 
 export const SPEC_FILES = ["SPEC.md", "ARCHITECTURE.md", "CONTRACT.md", "ACCEPTANCE.md"];
 
+/** What Spec must commit before Build. A review project's plan is its ACCEPTANCE.md: what is audited, how, and what counts as evidence. */
+export function specFilesFor(kind: ProjectKind = "app"): string[] {
+  return kind === "review" ? ["ACCEPTANCE.md"] : SPEC_FILES;
+}
+
+/** The report a review project hands to its gates. */
+export const REVIEW_FILE = "REVIEW.md";
+
 export interface TransitionFacts {
   /** files that exist (and are committed) at the integration HEAD */
   committedFiles: Set<string>;
@@ -68,6 +76,8 @@ export interface TransitionFacts {
   checksMissing: string[];
   checksFailing: string[];
   integrationHead: string | null;
+  /** A review project audits; its checks are evidence (a failure is a finding), and REVIEW.md is what the gates judge. */
+  kind?: ProjectKind;
 }
 
 /** Can the lead move from → to right now? Returns the reason when not. */
@@ -79,7 +89,7 @@ export function leadTransition(from: Stage, to: Stage, facts: TransitionFacts): 
       reason: `helm_stage cannot move ${stageLabel(from)} → ${stageLabel(to)}. From ${stageLabel(from)} a lead may only request ${allowed.length ? allowed.map(stageLabel).join(" or ") : "nothing — this stage advances on gate verdicts or the human"}.`,
     };
   if (to === "build") {
-    const missing = SPEC_FILES.filter((f) => !facts.committedFiles.has(f));
+    const missing = specFilesFor(facts.kind).filter((f) => !facts.committedFiles.has(f));
     if (missing.length) return { ok: false, reason: `Spec is not complete: ${missing.join(", ")} not committed on the integration branch.` };
   }
   if (to === "integrate" && from === "build" && !facts.buildersDone)
@@ -88,6 +98,10 @@ export function leadTransition(from: Stage, to: Stage, facts: TransitionFacts): 
     return { ok: false, reason: `Fixes not reported with evidence yet: ${facts.buildersPending.join(", ")}.` };
   if (to === "review") {
     if (!facts.integrationHead) return { ok: false, reason: "No integration HEAD found." };
+    if (facts.kind === "review") {
+      if (!facts.committedFiles.has(REVIEW_FILE)) return { ok: false, reason: `${REVIEW_FILE} is not committed on the integration branch: compile the auditors' findings into it first.` };
+      return { ok: true };
+    }
     if (facts.checksMissing.length) return { ok: false, reason: `Checks not recorded on ${facts.integrationHead.slice(0, 9)}: ${facts.checksMissing.join(", ")}. Run them through .helm/run-check.sh and call helm_record_check.` };
     if (!facts.checksGreen) return { ok: false, reason: `Checks failing on ${facts.integrationHead.slice(0, 9)}: ${facts.checksFailing.join(", ")}.` };
   }

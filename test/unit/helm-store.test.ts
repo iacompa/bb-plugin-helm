@@ -18,7 +18,7 @@ function snap(): Snapshot {
   return {
     run: { id: "r1", name: "Run", status: "running", brief: "", dryRun: false, studioProjectId: null, appsRoot: null, budgetCap: 100, maxAgents: 250, concurrency: 24, spawnsPaused: false, autoAdvance: "ask", limits: {} as never, slots: {}, createdAt: 0, startedAt: 0, endedAt: null, spend: 1, rule: "C3", grouping: "", why: "", counts: { apps: 1, managers: 1, leads: 1, specialists: 1, gates: 1, total: 5 } },
     managers: [{ id: "m0", name: "Wellness", appIds: ["lumen"] }],
-    apps: [{ id: "lumen", runId: "r1", name: "Lumen", tagline: "", platforms: ["ios"], shape: "lean", managerNodeId: "m0", projectId: null, repoPath: null, stage: "build", priority: "normal", fixRound: 0, pct: 25, order: 0, test: false, slotOverrides: {}, waivedGates: [], targetPath: null, reads: [], adopted: false, helmBranch: null, userBranch: null }],
+    apps: [{ id: "lumen", runId: "r1", name: "Lumen", tagline: "", platforms: ["ios"], shape: "lean", managerNodeId: "m0", projectId: null, repoPath: null, stage: "build", priority: "normal", fixRound: 0, pct: 25, order: 0, test: false, slotOverrides: {}, waivedGates: [], targetPath: null, reads: [], adopted: false, helmBranch: null, userBranch: null, kind: "app", needs: [], tools: [] }],
     nodes: [
       node("orch", { tier: "orchestrator", role: "orch", slot: "orchestrator", label: "Orchestrator", status: "running", threadId: "t0" }),
       node("m0", { tier: "manager", role: "mgr", slot: "manager", parentId: "orch", label: "Wellness manager", status: "waiting" }),

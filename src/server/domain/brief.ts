@@ -1,11 +1,15 @@
 // Reading the brief (§7.7). Structured briefs (# Group headings and
-// "- Name — tagline · iOS Android" lines, optionally "· /path/to/folder" and
-// "· reads /a, ~/b") are parsed deterministically; anything else goes to the
-// planner thread, whose only output is a PortfolioSchema.
+// "- Name — tagline · iOS Android" lines, optionally "· /path/to/folder",
+// "· reads /a, ~/b", a kind word "· Website", "· needs payments, HIPAA" and
+// "· tools Unreal, Blender") are parsed deterministically; anything else goes to the
+// planner thread, whose only output is a PortfolioSchema. Either way each project's
+// kind, needs and tools are decided (profile.ts) where the brief does not name them.
 import { z } from "zod";
-import type { Platform, Portfolio, PortfolioApp } from "../../shared/types.ts";
+import type { Platform, Portfolio, PortfolioApp, ProjectKind, ProjectNeed } from "../../shared/types.ts";
+import { PLATFORM_LABEL } from "./roles.ts";
+import { inferProfile, kindWord, listWords, normalizeNeed, normalizeTool, profileAssumption } from "./profile.ts";
 
-export const PlatformSchema = z.enum(["mac", "win", "ios", "and"]);
+export const PlatformSchema = z.enum(["mac", "win", "ios", "and", "web"]);
 export const ShapeSchema = z.enum(["solo", "lean", "full"]);
 
 const PLATFORM_ALIASES: Record<string, Platform> = {
@@ -19,6 +23,9 @@ const PLATFORM_ALIASES: Record<string, Platform> = {
   osx: "mac",
   windows: "win",
   win: "win",
+  web: "web",
+  website: "web",
+  browser: "web",
 };
 
 /** Accepts both Helm ids and the words people type ("Android", "macOS"). */
@@ -28,11 +35,21 @@ export const PlatformLooseSchema = z
     const k = s.trim().toLowerCase().replace(/\s+/g, "");
     const p = PLATFORM_ALIASES[k];
     if (!p) {
-      ctx.addIssue({ code: "custom", message: `Unknown platform "${s}" (use ios, android, macos or windows)` });
+      ctx.addIssue({ code: "custom", message: `Unknown platform "${s}" (use ios, android, macos, windows or web)` });
       return z.NEVER;
     }
     return p;
   });
+
+/** "Website", "full-stack", "audit" → a project kind. */
+export const KindLooseSchema = z.string().transform((s, ctx) => {
+  const k = kindWord(s);
+  if (!k) {
+    ctx.addIssue({ code: "custom", message: `Unknown kind "${s}" (use app, web, game, automation or review)` });
+    return z.NEVER;
+  }
+  return k;
+});
 
 export const PortfolioSchema = z
   .object({
@@ -42,12 +59,15 @@ export const PortfolioSchema = z
           .object({
             name: z.string().trim().min(1).max(60),
             tagline: z.string().trim().max(160).default(""),
-            platforms: z.array(PlatformLooseSchema).max(4).default([]),
+            platforms: z.array(PlatformLooseSchema).max(5).default([]),
             group: z.string().trim().max(60).nullish(),
             shape: ShapeSchema.optional(),
             notes: z.string().max(1200).nullish(),
             path: z.string().trim().min(1).max(500).nullish(),
             reads: z.array(z.string().trim().min(1).max(500)).max(10).default([]),
+            kind: KindLooseSchema.optional(),
+            needs: z.array(z.string().max(40)).max(12).optional(),
+            tools: z.array(z.string().max(60)).max(8).optional(),
           })
           .strict(),
       )
@@ -60,22 +80,68 @@ export const PortfolioSchema = z
 
 export type PortfolioInput = z.input<typeof PortfolioSchema>;
 
+/**
+ * Fill in a project's kind, needs, tools and platforms: what was named is kept, the rest is
+ * decided from its name, tagline and notes. `context` (a brief heading) informs the decision
+ * without being stored.
+ */
+export function applyProfile(a: PortfolioApp, context = ""): { app: PortfolioApp; assumption: string | null } {
+  const named = a.platformsAssumed ? [] : a.platforms;
+  const p = inferProfile({ name: a.name, tagline: a.tagline, notes: [a.notes ?? "", context].join(" "), platforms: named, kind: a.kind, needs: a.needs, tools: a.tools });
+  return { app: { ...a, kind: p.kind, needs: p.needs, tools: p.tools, platforms: p.platforms, platformsAssumed: p.platformsAssumed }, assumption: profileAssumption(a.name, p) };
+}
+
+/** Profiles for a portfolio that arrived from elsewhere (the wizard, the API); assumptions are not repeated. */
+export function withProfiles(p: Portfolio): Portfolio {
+  return { ...p, apps: p.apps.map((a) => applyProfile(a).app) };
+}
+
+function platformAssumption(a: PortfolioApp): string | null {
+  if (!a.platformsAssumed) return null;
+  return `${a.name}: no platforms given — assumed ${a.platforms.map((x) => PLATFORM_LABEL[x]).join(" and ")}.`;
+}
+
+function needsOf(words: string[]): { needs: ProjectNeed[]; unknown: string[] } {
+  const needs: ProjectNeed[] = [];
+  const unknown: string[] = [];
+  for (const w of words) {
+    const n = normalizeNeed(w);
+    if (n) needs.push(n);
+    else unknown.push(w);
+  }
+  return { needs: [...new Set(needs)], unknown };
+}
+
+function toolsOf(words: string[]): string[] {
+  return [...new Set(words.map(normalizeTool).filter((x): x is string => !!x))];
+}
+
 export function normalizePortfolio(p: z.output<typeof PortfolioSchema>): Portfolio {
+  const assumptions = [...p.assumptions];
   const apps: PortfolioApp[] = p.apps.map((a) => {
     const platforms = [...new Set(a.platforms)];
-    return {
+    const nd = a.needs ? needsOf(a.needs) : null;
+    const notes = [a.notes ?? "", nd?.unknown.length ? `Also needs: ${nd.unknown.join(", ")}.` : ""].filter(Boolean).join(" ") || null;
+    const base: PortfolioApp = {
       name: a.name,
       tagline: a.tagline,
-      platforms: platforms.length ? platforms : ["ios", "and"],
+      platforms,
       platformsAssumed: platforms.length === 0,
       group: a.group ?? null,
       shape: a.shape,
-      notes: a.notes ?? null,
+      notes,
       ...(a.path ? { path: a.path } : {}),
       ...(a.reads.length ? { reads: [...new Set(a.reads)] } : {}),
+      ...(a.kind ? { kind: a.kind } : {}),
+      ...(nd ? { needs: nd.needs } : {}),
+      ...(a.tools ? { tools: toolsOf(a.tools) } : {}),
     };
+    const { app } = applyProfile(base);
+    const pa = platformAssumption(app);
+    if (pa && !assumptions.some((x) => x.startsWith(`${app.name}:`))) assumptions.push(pa);
+    return app;
   });
-  return { apps, groups: p.groups, assumptions: p.assumptions, questions: p.questions };
+  return { apps, groups: p.groups, assumptions: assumptions.slice(0, 20), questions: p.questions };
 }
 
 export interface ParsedBrief {
@@ -85,13 +151,15 @@ export interface ParsedBrief {
   skipped: string[];
 }
 
-function platformsIn(text: string): Platform[] {
+/** Platform words in text. "web" counts only in a platform segment: in a tagline it is usually not one ("web scraper"). */
+function platformsIn(text: string, web: boolean): Platform[] {
   const pl = text.toLowerCase();
   const out: Platform[] = [];
   if (/\b(ios|iphone|ipad)\b/.test(pl)) out.push("ios");
   if (/\bandroid\b/.test(pl)) out.push("and");
   if (/\b(mac|macos|osx)\b/.test(pl)) out.push("mac");
   if (/\b(win|windows)\b/.test(pl)) out.push("win");
+  if (web && /\b(web|website|browser)\b/.test(pl)) out.push("web");
   return out;
 }
 
@@ -101,6 +169,8 @@ export function looksLikePath(s: string): boolean {
 }
 
 const READS_RE = /^(?:reads?|uses?|context)\s*:?\s+(.+)$/i;
+const NEEDS_RE = /^needs?\s*:?\s+(.+)$/i;
+const TOOLS_RE = /^(?:tools?|with|using|uses?)\s*:?\s+(.+)$/i;
 
 function splitPaths(s: string): string[] {
   return s
@@ -109,11 +179,12 @@ function splitPaths(s: string): string[] {
     .filter(looksLikePath);
 }
 
-/** Port of the prototype's parseBrief, plus "assumed" platform marking, app folders and read-only folders. */
+/** Port of the prototype's parseBrief, plus "assumed" platform marking, app folders, read-only folders, kinds, needs and tools. */
 export function parseBrief(text: string): ParsedBrief {
   const groups: string[] = [];
   const apps: PortfolioApp[] = [];
   const skipped: string[] = [];
+  const assumptions: string[] = [];
   let cur: string | null = null;
   for (const line of text.split(/\r?\n/)) {
     const h = line.match(/^\s*#{1,3}\s*(.+?)\s*$/);
@@ -132,32 +203,58 @@ export function parseBrief(text: string): ParsedBrief {
     let path: string | null = null;
     const reads: string[] = [];
     const platParts: string[] = [];
+    let kind: ProjectKind | undefined;
+    let needs: ProjectNeed[] | undefined;
+    const unknownNeeds: string[] = [];
+    const tools: string[] = [];
     for (const seg of parts.slice(1)) {
       const r = seg.match(READS_RE);
+      const nd = seg.match(NEEDS_RE);
+      const tl = seg.match(TOOLS_RE);
+      const k = kindWord(seg);
       if (r && splitPaths(r[1]).length) reads.push(...splitPaths(r[1]));
       else if (looksLikePath(seg)) path ??= seg.trim();
-      else platParts.push(seg);
+      else if (nd) {
+        needs ??= [];
+        if (!/^(none|nothing|no extras?)$/i.test(nd[1].trim())) {
+          const got = needsOf(listWords(nd[1]));
+          needs.push(...got.needs);
+          unknownNeeds.push(...got.unknown);
+        }
+      } else if (tl) tools.push(...toolsOf(listWords(tl[1])));
+      else if (k) {
+        kind = k;
+        if (k === "web") platParts.push("web");
+      } else platParts.push(seg);
     }
     // path segments never count as platform words ("/Volumes/mac-ssd" is not macOS)
-    const platText = parts.length > 1 ? platParts.join(" ") : m[2];
-    const plat = platformsIn(platText);
+    const segmented = parts.length > 1;
+    const plat = platformsIn(segmented ? platParts.join(" ") : m[2], segmented);
     if (!cur) cur = "Ungrouped";
     if (!groups.includes(cur)) groups.push(cur);
-    apps.push({
+    if (unknownNeeds.length)
+      assumptions.push(`${name}: “${unknownNeeds.join(", ")}” is not a need Helm knows (database, auth, payments, security, HIPAA, privacy, realtime, AI, automation, assets, multiplayer); it is passed to the lead as a note.`);
+    const base: PortfolioApp = {
       name,
       tagline,
-      platforms: plat.length ? plat : ["ios", "and"],
+      platforms: plat,
       platformsAssumed: plat.length === 0,
       group: cur,
       ...(path ? { path } : {}),
       ...(reads.length ? { reads: [...new Set(reads)] } : {}),
-    });
+      ...(kind ? { kind } : {}),
+      ...(needs ? { needs: [...new Set(needs)] } : {}),
+      ...(tools.length ? { tools: [...new Set(tools)] } : {}),
+      ...(unknownNeeds.length ? { notes: `Also needs: ${unknownNeeds.join(", ")}.` } : {}),
+    };
+    const { app, assumption } = applyProfile(base, cur === "Ungrouped" ? "" : cur);
+    apps.push(app);
+    const pa = platformAssumption(app);
+    if (pa) assumptions.push(pa);
+    if (assumption) assumptions.push(assumption);
   }
-  const assumptions = apps
-    .filter((a) => a.platformsAssumed)
-    .map((a) => `${a.name}: no platforms given — assumed iOS and Android.`);
   return {
-    portfolio: { apps, groups, assumptions, questions: [] },
+    portfolio: { apps, groups, assumptions: assumptions.slice(0, 40), questions: [] },
     structured: apps.length > 0,
     skipped,
   };

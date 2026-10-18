@@ -15,6 +15,8 @@ import type {
   NodeInfo,
   Platform,
   PolicyInfo,
+  ProjectKind,
+  ProjectNeed,
   Priority,
   ReceiptState,
   RecipientInfo,
@@ -50,6 +52,8 @@ export type {
   RecipientInfo,
   RecipientLevel,
   ReportInfo,
+  ProjectKind,
+  ProjectNeed,
   Role,
   RunInfo,
   Shape,
@@ -206,6 +210,9 @@ export interface PlannedApp {
   /** The folder the human named (existing repository or new folder), else null for the run folder. */
   path?: string | null;
   reads?: string[];
+  kind?: ProjectKind;
+  needs?: ProjectNeed[];
+  tools?: string[];
   agents: number;
   squad: Array<{ role: Role; platform?: Platform | null }>;
   staggered?: boolean;

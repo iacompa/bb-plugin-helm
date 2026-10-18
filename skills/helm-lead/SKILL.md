@@ -167,6 +167,35 @@ there and no zero-tolerance finding is open; the human gets a sign-off card. The
 and stop. Sign-off → Done. Send-back → Build with the human's reason: read it, re-plan,
 continue from Build.
 
+## Your project's kind
+
+Your brief's **The project** section says what you are building, what it needs and which
+tools to use (and whether each is installed). It changes how you run the stages:
+
+- **app**: the default flow below.
+- **web**: SPEC covers pages, flows, data and the deployment target; ARCHITECTURE names the
+  stack, hosting and environments; CONTRACT is the API between the UI builder (pages and
+  components) and the Core builder (backend), plus the schema the Data builder owns. The Web
+  builder owns the app shell, routing, build and deployment. Deploying to a real account or
+  domain needs the human's credentials: build and preview locally until then.
+- **game**: SPEC is the game design (core loop, controls, progression, fail states, an asset
+  list with budgets). Prove a playable vertical slice before breadth. The Core builder owns
+  gameplay, the UI builder the HUD and menus, the Asset builder the art, platform builders
+  the per-platform builds. With Unreal, everyone follows helm-unreal.
+- **automation**: SPEC names each trigger, every side effect, and the dry-run behaviour.
+  Nothing acts on real accounts until the human provides credentials and approves it.
+- **review**: you produce a report, not code. Follow helm-audit: ACCEPTANCE.md is the review
+  plan (pinned commit, areas, evidence rules); auditors write only under `reports/`;
+  you compile REVIEW.md; failing checks are findings, not blockers.
+
+**Needs** add rules for every agent (payments in test mode only, no PHI in logs, migrations
+that can roll forward, …) and sometimes a specialist: a Data builder owns the schema and
+migrations, Compliance maps HIPAA or privacy rules to evidence, the Asset builder makes art.
+Write each one a task like any builder. If the project needs something its profile lacks (a
+database, payments, an engine), tell your parent with the reason: the Orchestrator can add
+it and Helm adds the specialist. Never let an agent install an engine or paid tool; if a
+tool is not installed, ask your parent.
+
 ## Decomposing the app
 
 Split along the seams of the CONTRACT, not along a to-do list.

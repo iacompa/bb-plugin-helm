@@ -9,7 +9,8 @@
 import type { NodeInfo } from "../../shared/types.ts";
 import type { Engine } from "./engine.ts";
 import { HelmError } from "./engine.ts";
-import { craftSkill, scopeFor, skillsFor } from "../domain/roles.ts";
+import { scopeFor, skillsFor } from "../domain/roles.ts";
+import { profileLine } from "../domain/profile.ts";
 import { getTask, isAbove } from "./tasks.ts";
 
 const TIER_ORDER = ["orchestrator", "manager", "lead", "specialist", "gate"];
@@ -54,17 +55,16 @@ export function refreshRun(e: Engine, runId: string): RefreshResult {
       }
       const app = n.appId ? e.repo.getApp(runId, n.appId) : null;
       const skills = skillsFor(n, app);
-      const craft = craftSkill(n.role, n.platform);
       const L = [
-        `Helm was upgraded and restarted your session so it loads the new version. Your skills: ${skills.join(", ")}${craft ? ` (${craft} is new: how to do your kind of work well — follow it from now on)` : ""}. Your brief file was rewritten.`,
+        `Helm was upgraded and restarted your session so it loads the new version. Your skills: ${skills.join(", ")} — re-read any you have not loaded in this session. Your brief file was rewritten${app ? ` and now has a "The project" section (${profileLine(app)}): what this project needs and which tools to use` : ""}.`,
         "Re-read your BRIEF and helm_context, check git status, then continue from your last commit. Nothing you committed is lost.",
       ];
       if (["orchestrator", "manager", "lead"].includes(n.tier) || n.alsoLead) {
         const todo = untasked(e, n, nodes);
-        L.push(
-          `New tool: helm_set_task {nodeId, task} — write each agent under you a tailored task (150–600 words; the template is in your skill). It becomes part of that agent's system prompt and brief, and a running agent is told at once.${todo.length ? ` These have no task yet: ${todo.slice(0, 20).map((x) => `${x.id} (${e.label(x)})`).join(", ")}. Write theirs first, most active first.` : ""}`,
-        );
-        if (n.tier === "lead" || n.alsoLead) L.push("helm_spawn_squad items now take a `task` too.");
+        if (todo.length) L.push(`These agents under you have no task yet: ${todo.slice(0, 20).map((x) => `${x.id} (${e.label(x)})`).join(", ")}. Write theirs with helm_set_task {nodeId, task}, most active first.`);
+        if (n.role === "orch" || n.alsoLead)
+          L.push("Projects now have a kind (app, web, game, automation, review), needs (database, auth, payments, security, HIPAA, privacy, realtime, AI, automation, assets, multiplayer) and tools (Unreal, Blender, Docker, BB plugins). helm_world shows each project's profile; if one is wrong, change it with helm_propose_plan {delta: {profiles: {<appId>: {kind?, needs?, tools?}}}} and the squad follows.");
+        else if (n.tier === "lead") L.push("If your project's profile (kind, needs, tools) is wrong or missing something, tell your parent: the Orchestrator can change it and the squad follows.");
       }
       if (n.tier === "manager") L.push(e.scopeLine(n) ?? "");
       L.push("Report with helm_report when you are moving again.");
