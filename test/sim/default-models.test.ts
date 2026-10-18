@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHarness, CHEAP } from "../helpers/harness.ts";
 import { HelmService } from "../../src/server/service.ts";
-import { parseModelSetting, settingsDescriptors, toHelmSettings, type ModelChoice } from "../../src/server/settings.ts";
+import { matchModelWords, parseModelSetting, settingsDescriptors, toHelmSettings, type ModelChoice } from "../../src/server/settings.ts";
 import { MODEL_CHOICES_KEY } from "../../src/server/engine/engine.ts";
 import { parseBrief, SAMPLE_BRIEF } from "../../src/server/domain/brief.ts";
 import type { Portfolio } from "../../src/shared/types.ts";
@@ -84,4 +84,13 @@ test("the reasoning picker applies only when the chosen model offers that level"
   assert.equal(pick("ultracode")?.reasoning, "medium", "falls back to the model's default");
   assert.equal(pick("default")?.reasoning, "medium");
   assert.equal(toHelmSettings({ plannerModel: "none", plannerReasoning: "high" }, () => {}, choices).defaultModels.planner, null);
+});
+
+test("a model typed in words before the dropdowns existed is read against the list", () => {
+  const c = (value: string, label: string): ModelChoice => ({ value, label, reasoning: ["low", "medium", "high", "max"], defaultReasoning: "medium" });
+  const choices = [c("claude-code/claude-sonnet-5-5", "Sonnet 5.5 · Claude Code"), c("claude-code/claude-sonnet-5", "Sonnet 5 · Claude Code"), c("claude-code/claude-haiku-5-5", "Haiku 5.5 · Claude Code")];
+  assert.deepEqual(matchModelWords("sonnet 5.5 high", choices), { ...SONNET, reasoning: "high" });
+  assert.equal(matchModelWords("haiku 5.5", choices)?.reasoning, "medium");
+  assert.equal(matchModelWords("sonnet", choices), null, "two Sonnets: ambiguous, not guessed");
+  assert.equal(matchModelWords("claude-code/claude-sonnet-5-5", choices), null, "ids are read by parseModelSetting");
 });

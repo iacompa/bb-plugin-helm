@@ -405,7 +405,7 @@ export class Engine {
       if (cm) cat.models.push(cm);
     }
     this.catalogs.set(key, cat);
-    if (hostId === null) this.saveModelChoices(cat);
+    if (hostId === null || hostId === (await this.port.primaryHostId().catch(() => null))) this.saveModelChoices(cat);
     return cat;
   }
 

@@ -188,6 +188,26 @@ export function toHelmSettings(v: Values, warn: (m: string) => void = () => {}, 
 }
 
 /**
+ * Read a model typed in words ("sonnet 5.5 high") against the list: every word but the reasoning
+ * must appear in one model's id or name. Several providers offering the same model is ambiguous.
+ */
+export function matchModelWords(v: unknown, choices: ModelChoice[]): ModelRef | null {
+  if (typeof v !== "string" || !v.trim() || v.includes("/")) return null;
+  const words = v.toLowerCase().split(/[\s,]+/).filter(Boolean);
+  const reasoning = words.find((w) => REASONING_ORDER.includes(w)) ?? null;
+  const rest = words.filter((w) => w !== reasoning);
+  if (!rest.length) return null;
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+  const hits = choices.filter((c) => {
+    const hay = ` ${norm(c.value)} ${norm(c.label)} `;
+    return rest.every((w) => hay.includes(` ${norm(w).trim()} `));
+  });
+  if (hits.length !== 1) return null;
+  const [providerId, modelId] = hits[0].value.split("/");
+  return { providerId, modelId, reasoning: reasoning && hits[0].reasoning.includes(reasoning) ? reasoning : hits[0].defaultReasoning };
+}
+
+/**
  * Earlier versions stored a default model as one "provider/model:reasoning" text; the pickers now
  * hold the model and the reasoning apart. Split an old value when the list offers its model.
  */
@@ -195,10 +215,12 @@ async function migrateModelSettings(handle: { get(): Promise<unknown>; experimen
   const v = (await handle.get()) as Values;
   const fix: Values = {};
   for (const [m, r] of [["plannerModel", "plannerReasoning"], ["orchestratorModel", "orchestratorReasoning"]] as const) {
-    const ref = parseModelSetting(v[m], m);
-    if (!ref?.reasoning || !choices.some((c) => c.value === `${ref.providerId}/${ref.modelId}`)) continue;
+    const parsed = parseModelSetting(v[m], m);
+    const ref = parsed ?? matchModelWords(v[m], choices);
+    // "provider/model" is already a dropdown value; "provider/model:reasoning" and words are not
+    if (!ref || (parsed && !parsed.reasoning) || !choices.some((c) => c.value === `${ref.providerId}/${ref.modelId}`)) continue;
     fix[m] = `${ref.providerId}/${ref.modelId}`;
-    fix[r] = ref.reasoning;
+    fix[r] = ref.reasoning ?? MODEL_REASONING;
   }
   if (!Object.keys(fix).length) return v;
   try {
