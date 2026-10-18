@@ -255,7 +255,11 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
   another repository an agent works in), no evidence or debug captures (before/after, probes,
   a commit or time in the name), no captures for platforms the app does not target, and for a
   phone app nothing shaped like a computer screen. The CLI's "Left out" line says what was
-  hidden and why. If an app shows no screens, or the wrong ones, tell the lead with `bb helm tell`.
+  hidden and why. For a phone app, each page is captured on every phone in the **Phones for
+  screenshots** setting (`screenDevices`, default iPhone 18 Pro, iPhone 17 Pro Max, iPhone Air;
+  simulator or emulator model names): Screens has a phone picker and an **All phones** view that
+  shows one page on each phone side by side, and the camera button asks the app's lead for fresh
+  captures of every page. If an app shows no screens, or the wrong ones, tell the lead with `bb helm tell`.
 - **After a Helm upgrade, mid-run** → agents keep the old skills, tools and prompt until
   their session restarts. `bb helm refresh --yes` rewrites briefs and restarts each live
   agent on the new version (supervisors first; work in worktrees stays).

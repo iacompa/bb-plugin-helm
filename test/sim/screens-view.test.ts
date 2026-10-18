@@ -57,3 +57,18 @@ test("an agent whose worktree is another repository (a host app, another project
   const map = await new HelmService(h.engine).screens.list(runId, ui.appId!, true);
   assert.deepEqual(map.screens.map((s) => s.id), ["home"], JSON.stringify(map.screens.map((s) => s.variants.map((v) => v.path))));
 });
+
+test("a phone app's UI builder is told to capture every page on the human's phones", async () => {
+  const h = await createHarness({ settings: { screenDevices: ["iPhone 18 Pro", "iPhone Air"] } });
+  const p = parseBrief(SAMPLE_BRIEF).portfolio;
+  const apps = p.apps.filter((a) => a.platforms.includes("ios")).slice(0, 1).map((a) => ({ ...a, group: null }));
+  assert.ok(apps.length, "the sample brief has an iOS app");
+  const { runId } = h.engine.createRun({ name: "S", brief: "x", portfolio: { ...p, apps }, slots: CHEAP, limits: { concurrency: 32 } });
+  const ui = h.repo.listNodes(runId).find((n) => n.role === "ui");
+  assert.ok(ui, "a UI builder");
+  const brief = h.engine.buildBrief(h.engine.run(runId), ui!);
+  assert.match(brief, /## Screenshots on these phones \(set by the human\)\nCapture every page of the app on each of these phones: iPhone 18 Pro, iPhone Air\./);
+  assert.match(brief, /home--default--iphone-18-pro--light\.png/);
+  const lead = h.repo.listNodes(runId).find((n) => n.role === "lead");
+  if (lead) assert.doesNotMatch(h.engine.buildBrief(h.engine.run(runId), lead), /## Screenshots on these phones/);
+});

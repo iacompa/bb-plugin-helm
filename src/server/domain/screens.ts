@@ -28,6 +28,8 @@ export type Device = "phone" | "desktop" | "web" | "any";
 export interface ScreenTarget {
   name: string;
   platforms: string[];
+  /** The phones the human wants each page on, in order (the "Phones for screenshots" setting). */
+  devices?: string[];
 }
 
 export interface ScreenVariant {
@@ -42,6 +44,8 @@ export interface ScreenVariant {
   w: number | null;
   h: number | null;
   form: Form | null;
+  /** The phone or tablet it was captured on ("iPhone 17 Pro Max"), from its file name. */
+  device: string | null;
 }
 
 export interface ScreenLink {
@@ -69,6 +73,8 @@ export interface ScreenMap {
   problems: string[];
   /** How to frame the pages: a phone for an iOS or Android app. */
   device: Device;
+  /** The phones the pages were captured on: the human's list first, in its order. */
+  devices: string[];
   /** Captures that were found and are not pages, with why (counts per reason). */
   hidden: { count: number; reasons: string[] };
 }
@@ -121,6 +127,32 @@ export function isScreenFile(rel: string): boolean {
   return IMAGE_FILE.test(r) && (SCREEN_DIR.test(r) || OTHER_SCREEN_DIR.test(r)) && !/\/reports\/(review|slop|audit|security|compliance|tests?)\//.test(`/${r}`);
 }
 
+const DEVICE_START = /^(iphone|ipad|pixel|galaxy|nexus|oneplus)$/i;
+const DEVICE_PART = /^(\d{1,2}(e|a)?|pro|max|plus|mini|air|se|ultra|fold\d*|flip\d*|xl|lite|fe|s\d{1,2}|z|(1st|2nd|3rd|\d+th)|generation|inch|\d{2}(in)?)$/i;
+
+/** "iPhone 17 Pro Max" or "iphone-17-pro-max" → "iphone-17-pro-max". */
+export function deviceSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+/** "iphone-17-pro-max" → "iPhone 17 Pro Max". */
+export function deviceName(slug: string): string {
+  return slug
+    .split("-")
+    .filter(Boolean)
+    .map((t) => (t === "iphone" ? "iPhone" : t === "ipad" ? "iPad" : /^(se|xl|fe)$/.test(t) ? t.toUpperCase() : /^\d/.test(t) ? t : t[0].toUpperCase() + t.slice(1)))
+    .join(" ");
+}
+
+/** A device named inside a list of name tokens: its slug and where it starts and ends. */
+function findDevice(tokens: string[]): { slug: string; from: number; to: number } | null {
+  const i = tokens.findIndex((t) => DEVICE_START.test(t));
+  if (i < 0) return null;
+  let j = i + 1;
+  while (j < tokens.length && DEVICE_PART.test(tokens[j])) j++;
+  return { slug: tokens.slice(i, j).join("-").toLowerCase(), from: i, to: j };
+}
+
 /** What a screenshot's path says about it: the screen and the variant. */
 export function parseScreenFile(f: ScanFile): { id: string; variant: ScreenVariant } | null {
   const rel = f.rel.replace(/\\/g, "/");
@@ -129,13 +161,19 @@ export function parseScreenFile(f: ScanFile): { id: string; variant: ScreenVaria
   const base = rel.split("/").pop()!.replace(IMAGE_FILE, "");
   let parts: string[];
   let screen: string;
+  let device: string | null = null;
   if (base.includes("--")) {
     // reports/ui/<screen>--<state>--<size>--<theme>.png
     parts = base.split("--").map((p) => p.trim()).filter(Boolean);
     screen = parts.shift() ?? base;
+    const at = parts.findIndex((p) => findDevice(p.split(/[-_. ]+/))?.from === 0);
+    if (at >= 0) device = deviceName(deviceSlug(parts.splice(at, 1)[0]));
   } else {
-    // <route>-<width>-<theme>.png, home_dark.png, 01-settings.png …
-    const tokens = base.split(/[-_. ]+/).filter(Boolean);
+    // <route>-<width>-<theme>.png, home_dark.png, 01-settings.png, home-iphone-air.png …
+    const all = base.split(/[-_. ]+/).filter(Boolean);
+    const d = findDevice(all);
+    if (d) device = deviceName(d.slug);
+    const tokens = d ? [...all.slice(0, d.from), ...all.slice(d.to)] : all;
     const keep: string[] = [];
     parts = [];
     for (const t of tokens) (THEMES.has(t.toLowerCase()) || SIZES.test(t) || STATES.has(t.toLowerCase()) ? parts : keep).push(t);
@@ -155,7 +193,7 @@ export function parseScreenFile(f: ScanFile): { id: string; variant: ScreenVaria
   }
   const w = f.w ?? null;
   const h = f.h ?? null;
-  return { id, variant: { path: joinPath(f.root, rel), rel, platform, size, theme, state, mtime: f.mtime, w, h, form: formOf(w, h, size) } };
+  return { id, variant: { path: joinPath(f.root, rel), rel, platform, size, theme, state, mtime: f.mtime, w, h, form: formOf(w, h, size) ?? (device ? (/^ipad/i.test(device) ? "tablet" : "phone") : null), device } };
 }
 
 /** A capture's shape from its pixels (upright phone ≥ 1.55 tall per wide), else from its size word. */
@@ -279,7 +317,7 @@ export function buildScreenMap(files: ScanFile[], manifests: Array<{ root: strin
         }
         if (s.variants.some((v) => v.rel === rel) || listed.has(rel)) continue;
         listed.add(rel);
-        const known = byRel.get(rel) ?? { path: joinPath(m.root, rel), rel, platform: null, size: null, theme: null, state: null, mtime: m.mtime, w: null, h: null, form: null };
+        const known = byRel.get(rel) ?? { path: joinPath(m.root, rel), rel, platform: null, size: null, theme: null, state: null, mtime: m.mtime, w: null, h: null, form: null, device: null };
         if (keep(known, true)) s.variants.push(known);
       }
       for (const v of fromFiles.get(id) ?? []) if (!s.variants.some((x) => x.rel === v.rel) && keep(v, false)) s.variants.push(v);
@@ -303,7 +341,20 @@ export function buildScreenMap(files: ScanFile[], manifests: Array<{ root: strin
   }
 
   const screens = order.map((id) => byId.get(id)!).filter((s) => s.variants.length || s.links.length);
-  for (const s of screens) s.variants.sort((a, b) => rankVariant(a) - rankVariant(b) || b.mtime - a.mtime || a.rel.localeCompare(b.rel));
+  // the human's phones first, in their order; then the usual default (phone, light, default state, newest)
+  const wanted = (target?.devices ?? []).map(deviceSlug);
+  const dRank = (v: ScreenVariant) => {
+    if (!v.device) return wanted.length + 1;
+    const i = wanted.indexOf(deviceSlug(v.device));
+    return i < 0 ? wanted.length : i;
+  };
+  for (const s of screens) s.variants.sort((a, b) => dRank(a) - dRank(b) || rankVariant(a) - rankVariant(b) || b.mtime - a.mtime || a.rel.localeCompare(b.rel));
+  const found = [...new Set(screens.flatMap((s) => s.variants.map((v) => v.device).filter((d): d is string => !!d)))];
+  const devices = found.sort((a, b) => {
+    const ia = wanted.indexOf(deviceSlug(a));
+    const ib = wanted.indexOf(deviceSlug(b));
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
+  });
   if (!start) start = screens.find((s) => s.variants.length)?.id ?? null;
   const count = [...hidden.values()].reduce((a, b) => a + b, 0);
   return {
@@ -312,6 +363,7 @@ export function buildScreenMap(files: ScanFile[], manifests: Array<{ root: strin
     source,
     problems: problems.slice(0, 20),
     device: deviceFor(target?.platforms ?? []),
+    devices,
     hidden: { count, reasons: [...hidden].sort((a, b) => b[1] - a[1]).map(([why, n]) => `${n} ${why}`) },
   };
 }

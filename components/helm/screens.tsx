@@ -5,8 +5,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useHelm } from "./ctx.tsx";
-import { Banner, Ic, Modal, ModalHead, cx } from "./ui.tsx";
+import { Banner, Ic, Modal, ModalHead, askConfirm, cx } from "./ui.tsx";
+import { leadOf } from "./store.ts";
 import { errMsg } from "./format.ts";
+import { toast } from "sonner";
 
 interface Variant {
   path: string;
@@ -16,6 +18,7 @@ interface Variant {
   theme: string | null;
   state: string | null;
   form: "phone" | "tablet" | "wide" | null;
+  device: string | null;
 }
 interface Link {
   to: string;
@@ -38,6 +41,7 @@ interface ScreenMap {
   source: "map" | "files";
   problems: string[];
   device: "phone" | "desktop" | "web" | "any";
+  devices: string[];
   hidden: { count: number; reasons: string[] };
 }
 interface AppRow {
@@ -67,7 +71,8 @@ function ScreensInner() {
   const [err, setErr] = useState<string | null>(null);
   const [cur, setCur] = useState<string | null>(null);
   const [hist, setHist] = useState<{ back: string[]; fwd: string[] }>({ back: [], fwd: [] });
-  const [pref, setPref] = useState<{ platform: string | null; theme: string | null; size: string | null }>({ platform: null, theme: null, size: null });
+  const [pref, setPref] = useState<{ platform: string | null; theme: string | null; size: string | null; device: string | null }>({ platform: null, theme: null, size: null, device: null });
+  const [allPhones, setAllPhones] = useState(false);
   const [showAreas, setShowAreas] = useState(false);
   const images = useRef(new Map<string, string | null>());
   const [, bump] = useState(0);
@@ -107,30 +112,57 @@ function ScreensInner() {
     return { platform: uniq("platform"), theme: uniq("theme"), size: uniq("size") };
   }, [screens]);
 
-  const variant = useMemo(() => {
-    if (!screen?.variants.length) return null;
-    const score = (v: Variant) => (pref.platform && v.platform === pref.platform ? 4 : 0) + (pref.theme && v.theme === pref.theme ? 2 : 0) + (pref.size && v.size === pref.size ? 1 : 0);
-    return [...screen.variants].sort((a, b) => score(b) - score(a))[0];
-  }, [screen, pref]);
-
-  // load the shown image (and keep it for the session)
+  // the phone shown by default: the human's first phone that has captures
   useEffect(() => {
-    if (!runId || !appId || !variant || images.current.has(variant.path)) return;
-    let live = true;
-    images.current.set(variant.path, null);
-    void (h.rpc.call("screens_image", { runId, appId, path: variant.path }) as Promise<{ dataUrl: string | null }>)
-      .then((r) => {
-        images.current.set(variant.path, r.dataUrl ?? "");
-        if (live) bump((x) => x + 1);
-      })
-      .catch(() => {
-        images.current.set(variant.path, "");
-        if (live) bump((x) => x + 1);
-      });
-    return () => {
-      live = false;
-    };
-  }, [h.rpc, runId, appId, variant]);
+    if (map?.devices.length && (!pref.device || !map.devices.includes(pref.device))) setPref((p) => ({ ...p, device: map.devices[0] }));
+  }, [map, pref.device]);
+
+  const score = useCallback(
+    (v: Variant, device: string | null) => (device && v.device === device ? 8 : 0) + (pref.platform && v.platform === pref.platform ? 4 : 0) + (pref.theme && v.theme === pref.theme ? 2 : 0) + (pref.size && v.size === pref.size ? 1 : 0),
+    [pref],
+  );
+  const pick = useCallback((s: Screen | null, device: string | null) => (s?.variants.length ? [...s.variants].sort((a, b) => score(b, device) - score(a, device))[0] : null), [score]);
+  const variant = useMemo(() => pick(screen, pref.device), [pick, screen, pref.device]);
+  // side by side: this page on each phone that has it
+  const phones = useMemo(
+    () =>
+      allPhones && map
+        ? map.devices
+            .map((d) => ({ device: d, v: pick(screen, d) }))
+            .filter((x): x is { device: string; v: Variant } => !!x.v && x.v.device === x.device)
+        : [],
+    [allPhones, map, screen, pick],
+  );
+
+  // load the shown images (and keep them for the session)
+  const want = useMemo(() => (phones.length ? phones.map((x) => x.v.path) : variant ? [variant.path] : []), [phones, variant]);
+  useEffect(() => {
+    if (!runId || !appId) return;
+    for (const path of want) {
+      if (images.current.has(path)) continue;
+      images.current.set(path, null);
+      void (h.rpc.call("screens_image", { runId, appId, path }) as Promise<{ dataUrl: string | null }>)
+        .then((r) => images.current.set(path, r.dataUrl ?? ""))
+        .catch(() => images.current.set(path, ""))
+        .finally(() => bump((x) => x + 1));
+    }
+  }, [h.rpc, runId, appId, want]);
+
+  // ask the app's lead for fresh captures of every page on the human's phones
+  const recapture = async () => {
+    const data = h.data;
+    const lead = data && appId ? leadOf(data, appId) ?? data.nodes["orch"] ?? null : null;
+    if (!runId || !lead) return;
+    const phonesText = map?.devices.length ? map.devices.join(", ") : "the phones in the human's setting";
+    const text = `The human wants to see ${appName || "the app"} in Screens: capture every page again, on each phone (${phonesText} and any others in your brief's "Screenshots on these phones"), upright, both themes, named reports/ui/<screen>--<state>--<phone>--<theme>.png, and update reports/screens/screens.json with every page and its links. Have the UI or platform builder do it, then check it with bb helm screens --app ${appId}.`;
+    if (!(await askConfirm({ title: `Ask for fresh screens of ${appName || "this app"}?`, body: `${data?.nodes[lead.id] ? "The app lead" : "The lead"} is told:\n\n${text}`, ok: "Ask the lead" }))) return;
+    try {
+      await h.rpc.call("directive_create", { runId, directive: { type: "tell", target: lead.id, mode: "queue", text } });
+      toast.success("Asked the lead for fresh screens");
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+  };
 
   const go = (id: string) => {
     if (id === cur || !screens.some((s) => s.id === id)) return;
@@ -211,6 +243,9 @@ function ScreensInner() {
             <button type="button" className="iconbtn sm" title="Scan again" aria-label="Scan again" disabled={loading || !appId} onClick={() => void load(appId, true)}>
               <Ic name="Refresh" size="sm" className={cx(loading && "spin")} />
             </button>
+            <button type="button" className="iconbtn sm" title="Ask the app's lead to capture every page again on your phones" aria-label="Capture again" disabled={!appId} onClick={() => void recapture()}>
+              <Ic name="Camera" size="sm" />
+            </button>
           </div>
           {screens.map((s) => (
             <button key={s.id} type="button" className="scr-page" aria-current={s.id === cur ? "page" : undefined} onClick={() => go(s.id)} title={s.note ?? s.name}>
@@ -235,6 +270,21 @@ function ScreensInner() {
               {appName ? <b>{appName}</b> : null}
               {screen ? <span> / {screen.name}</span> : null}
             </div>
+            {map?.devices.length ? (
+              <select className="select sm" aria-label="Phone" value={pref.device ?? ""} disabled={allPhones} onChange={(e) => setPref((p) => ({ ...p, device: e.target.value || null }))} style={{ width: "auto" }}>
+                {map.devices.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            {(map?.devices.length ?? 0) > 1 ? (
+              <button type="button" className={cx("btn sm", allPhones && "on")} aria-pressed={allPhones} onClick={() => setAllPhones((x) => !x)} title="This page on every phone, side by side">
+                <Ic name="Smartphone" size="sm" />
+                <span className="btn-lbl"> All phones</span>
+              </button>
+            ) : null}
             {facets.platform.length > 1 ? <Facet label="Platform" values={facets.platform} value={pref.platform} names={PLATFORM} onPick={(v) => setPref((p) => ({ ...p, platform: v }))} /> : null}
             {facets.size.length > 1 ? <Facet label="Size" values={facets.size} value={pref.size} onPick={(v) => setPref((p) => ({ ...p, size: v }))} /> : null}
             {facets.theme.length > 1 ? <Facet label="Theme" values={facets.theme} value={pref.theme} onPick={(v) => setPref((p) => ({ ...p, theme: v }))} /> : null}
@@ -276,6 +326,20 @@ function ScreensInner() {
                   </span>
                 ) : null}
               </div>
+            ) : phones.length ? (
+              <div className="scr-phones">
+                {phones.map(({ device, v }) => {
+                  const img = images.current.get(v.path);
+                  return (
+                    <figure key={device} className="scr-phone">
+                      <div className={cx("scr-dev", v.form === "tablet" ? "tablet" : "phone")}>
+                        <div className="scr-shot">{img ? <img src={img} alt={`${appName} · ${screen?.name ?? ""} · ${device}`} draggable={false} /> : <div className="scr-ph muted">{img === "" ? "Could not read it" : "Loading…"}</div>}</div>
+                      </div>
+                      <figcaption>{device}</figcaption>
+                    </figure>
+                  );
+                })}
+              </div>
             ) : src === undefined || src === null ? (
               <div className="muted">Loading {screen?.name}…</div>
             ) : src === "" ? (
@@ -284,6 +348,7 @@ function ScreensInner() {
                 <span className="muted">This screenshot could not be read (it may have moved). Press Scan again.</span>
               </div>
             ) : (
+              <div className="scr-single">
               <div className={cx("scr-dev", frame)}>
               <div className={cx("scr-shot", showAreas && "show")}>
                 <img src={src} alt={`${appName} · ${screen?.name ?? ""}`} draggable={false} />
@@ -303,6 +368,8 @@ function ScreensInner() {
                   );
                 })}
               </div>
+              </div>
+              {variant.device ? <div className="scr-devname">{variant.device}</div> : null}
               </div>
             )}
           </div>

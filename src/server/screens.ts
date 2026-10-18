@@ -56,7 +56,7 @@ export class ScreensView {
     const roots = await this.roots(runId, appId);
     const { files, maps } = roots.length ? await this.e.host(runId).screensScan({ roots }) : { files: [], maps: [] };
     const app = this.e.repo.getApp(runId, appId)!;
-    const map = buildScreenMap(files, maps, { name: app.name, platforms: app.platforms });
+    const map = buildScreenMap(files, maps, { name: app.name, platforms: app.platforms, devices: this.e.settings.screenDevices ?? [] });
     this.cache.set(key, { at: this.e.now(), map, paths: new Set(map.screens.flatMap((s) => s.variants.map((v) => v.path))) });
     return map;
   }

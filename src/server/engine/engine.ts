@@ -97,6 +97,17 @@ export function gitRulesText(appBranch: string | null, cap = 10): string {
   ].join(" ");
 }
 
+/** How UI and phone builders capture each page on the human's phones, for the Screens view. */
+export function phoneCaptureText(devices: string[]): string {
+  const list = devices.length ? devices : ["iPhone 18 Pro", "iPhone 17 Pro Max", "iPhone Air"];
+  const slug = (d: string) => d.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return [
+    `Capture every page of the app on each of these phones: ${list.join(", ")}. The human looks at them in the Screens view, one phone at a time or side by side.`,
+    `iOS: \`xcrun simctl list devicetypes\` names the installed models. Make one simulator per model once (\`xcrun simctl create helm-${slug(list[0])} "${list[0]}"\`), reuse it, boot it only to capture (\`xcrun simctl io helm-${slug(list[0])} screenshot …\`) and shut it down afterwards. Android: an emulator of each model, or the closest size. A model that is not installed: use the closest one installed and say which in reports/ui/INDEX.md.`,
+    `Name each file \`reports/ui/<screen>--<state>--<phone>--<theme>.png\`, the phone as a slug (\`home--default--${slug(list[0])}--light.png\`), so Screens knows the phone. Upright captures only. The screen map's \`image\` is the first phone's light capture.`,
+  ].join(" ");
+}
+
 /** How to work in a worktree several agents share. */
 export const SHARED_WORKTREE_RULES =
   "Several agents work in this folder at once. Commit only your own files: `git add -- <paths in your scope>` then `git commit -m …`. Never run `git add -A`, `git add .`, `git commit -a`, `git stash`, `git reset --hard`, `git checkout -- .`, `git restore .`, `git clean`, a rebase, or switch branches: they would take or destroy other agents' work. Never create another worktree or clone. If git says `index.lock` exists, wait a few seconds and retry.";
@@ -994,6 +1005,7 @@ export class Engine {
       if (run.autoAdvance === "ask" && !this.autonomous(run)) lines.push("## Waves\nWhen apps wait in Intake and capacity frees up, Helm asks the human to approve the next wave. Use `helm_propose_wave` if you want to suggest a different set.");
     }
     if (this.autonomous(run)) lines.push(`## Autonomy\n${autonomyText(n.role === "orch")}`);
+    if (app && (n.role === "ui" || (n.role === "platform" && (n.platform === "ios" || n.platform === "and"))) && app.platforms.some((p) => p === "ios" || p === "and")) lines.push(`## Screenshots on these phones (set by the human)\n${phoneCaptureText(this.settings.screenDevices ?? [])}`);
     if (n.tier !== "git") lines.push(`## Git rules (strict, set by the human)\n${gitRulesText(app ? this.repo.appExtra(run.id, app.id).integrationBranch : null, Math.max(2, Math.min(32, this.settings.worktreesPerApp ?? 10)))}`);
     const remit = n.tier === "orchestrator" ? "the run" : n.tier === "manager" ? `your group (${this.repo.listApps(run.id).filter((a) => a.managerNodeId === n.id).map((a) => a.name).slice(0, 8).join(", ") || "its apps"})` : app?.name ?? "your app";
     const authority = authorityText(this.isLeadNode(n) && n.tier !== "orchestrator" ? "lead" : n.tier, remit);
