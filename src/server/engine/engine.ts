@@ -3,6 +3,7 @@
 // Event handling, directives, gates and tools live in sibling modules that take
 // the engine as their first argument; nothing here touches api.sdk directly.
 
+import { askKey } from "./asks.ts";
 import { authorityText } from "../domain/authority.ts";
 import type { OutboxRow, Repo } from "../db/repo.ts";
 import type { BbPort, EnvSpec, HelmEvent, PluginLite } from "../bb/port.ts";
@@ -1515,6 +1516,7 @@ export class Engine {
       const text = String(row.payload.text ?? "");
       if (kind !== "flush" && !(row.payload.recipients as unknown[] | undefined)?.length && text) {
         this.repo.pushInbox(run.id, n.id, text.length > 790 ? `${text.slice(0, 790)}…` : text);
+        if (typeof row.payload.askFrom === "string") this.repo.deleteMeta(askKey(run.id, n.id, row.payload.askFrom));
         return { done: true, result: { skipped: `no thread (${n.status}) — kept as an FYI line` } };
       }
       return { done: true, result: { skipped: `no thread (${n.status})${["planned", "queued", "paused"].includes(n.status) ? " — directives go into the spawn prompt" : ""}` } };
@@ -1549,6 +1551,17 @@ export class Engine {
         else this.repo.updateRecipient(run.id, r.directiveId, r.nodeId, { queuedMessageId: res.queuedMessageId });
       }
       if (kind === "message" && sender) this.repo.comms(run.id, { from: sender.id, to: n.id, kind: String(row.payload.commsKind ?? "info"), summary: base.slice(0, 300) });
+      // a question: the turn that answers it starts now, or when BB dispatches the queued message
+      if (typeof row.payload.askFrom === "string") {
+        const k = askKey(run.id, n.id, row.payload.askFrom);
+        if (this.repo.getMeta(k)) {
+          if (res.delivery === "sent" || !res.queuedMessageId) this.repo.setMeta(k, JSON.stringify({ state: "live", at: this.now() }));
+          else {
+            this.repo.setMeta(k, JSON.stringify({ state: "queued", at: this.now() }));
+            this.repo.setMeta(`askq:${res.queuedMessageId}`, k);
+          }
+        }
+      }
     });
     for (const r of recips) this.emit(run.id, "receipt.updated", { directiveId: r.directiveId, nodeId: r.nodeId, state: res.delivery === "sent" ? "delivered" : "queued" });
     return { done: true, result: res };
@@ -1715,13 +1728,13 @@ export class Engine {
   }
 
   /** Enqueue a plain message from Helm (not a directive) to a node. */
-  sendFromHelm(runId: string, nodeId: string, text: string, opts: { mode?: "steer" | "queue"; key?: string; senderNodeId?: string | null; kind?: string; commsKind?: string; bypassPause?: boolean } = {}): void {
+  sendFromHelm(runId: string, nodeId: string, text: string, opts: { mode?: "steer" | "queue"; key?: string; senderNodeId?: string | null; kind?: string; commsKind?: string; bypassPause?: boolean; askFrom?: string } = {}): void {
     this.repo.enqueue({
       id: this.oid(),
       runId,
       kind: "send",
       nodeId,
-      payload: { text, mode: opts.mode ?? "queue", kind: opts.kind ?? "helm", senderNodeId: opts.senderNodeId ?? null, commsKind: opts.commsKind, bypassPause: opts.bypassPause ?? false },
+      payload: { text, mode: opts.mode ?? "queue", kind: opts.kind ?? "helm", senderNodeId: opts.senderNodeId ?? null, commsKind: opts.commsKind, bypassPause: opts.bypassPause ?? false, askFrom: opts.askFrom ?? null },
       idemKey: opts.key ?? `helm:${runId}:${nodeId}:${this.oid()}`,
     });
     this.outbox.kick();

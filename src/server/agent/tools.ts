@@ -3,6 +3,7 @@
 // tier, identity, parent and app come from the database, never from metadata
 // or arguments (§8.2, V12).
 
+import { askKey } from "../engine/asks.ts";
 import { worktreesViewFor, worktreeSizesText } from "../worktree-view.ts";
 import { githubViewFor, githubText } from "../github-view.ts";
 import { setTask } from "../engine/tasks.ts";
@@ -400,14 +401,24 @@ function message(e: Engine, from: NodeInfo, to: string, text: string, kind: stri
   const line =
     from.tier === "git"
       ? `Git rule from ${e.label(from)} (${from.id}, ${kind}), binding by the human's policy on branches, worktrees, merges and pushes: ${text}\nDo what it asks about git now; it outranks earlier instructions on git. If doing it would discard someone's uncommitted work, reply to it (helm_message to "git") with exactly what is in the way instead.`
-      : `Message from ${e.label(from)} (${from.id}, ${kind}): ${text}`;
+      : `Message from ${e.label(from)} (${from.id}, ${kind}): ${text}${kind === "ask" ? `\nAnswer it with helm_message to "${from.id}": ${e.label(from)} sees only what you send that way, not what you write in your thread.` : ""}`;
+  const asking = kind === "ask" && from.tier !== "git";
   e.repo.tx(() => {
     e.repo.comms(from.runId, { from: from.id, to: target.id, kind, summary: text.slice(0, 300) });
+    // writing back answers the target's open question to this agent: Helm need not pass anything on
+    e.repo.deleteMeta(askKey(from.runId, from.id, target.id));
+    if (asking) e.repo.setMeta(askKey(from.runId, target.id, from.id), JSON.stringify({ state: "sending", at: e.now() }));
     // a Git rule is never a mere FYI: it reaches the agent now
     if (kind === "info" && from.tier !== "git") e.fyi(from.runId, target.id, line.slice(0, 800));
-    else e.sendFromHelm(from.runId, target.id, line, { senderNodeId: from.id, kind: "message", commsKind: kind, key: `msg:${from.runId}:${from.id}:${target.id}:${e.now()}` });
+    else e.sendFromHelm(from.runId, target.id, line, { senderNodeId: from.id, kind: "message", commsKind: kind, key: `msg:${from.runId}:${from.id}:${target.id}:${e.now()}`, askFrom: asking ? from.id : undefined });
   });
-  return (kind === "info" && from.tier !== "git" ? `Delivered to ${e.label(target)} as FYI (it reads it on its next turn).` : `Sent to ${e.label(target)}.`) + note;
+  return (
+    (kind === "info" && from.tier !== "git"
+      ? `Delivered to ${e.label(target)} as FYI (it reads it on its next turn).`
+      : asking
+        ? `${!target.threadId ? `${e.label(target)} has not started; it sees your question when it does, and is told to answer with helm_message.` : `${target.status === "paused" ? `${e.label(target)} is paused; it gets your question when it is resumed.` : `Sent to ${e.label(target)}; it is woken to answer.`} Its answer comes to you as a message (Helm passes it on even if it replies only in its own thread).`} Until it answers you have no answer: do not tell anyone what it said.`
+        : `Sent to ${e.label(target)}.`) + note
+  );
 }
 
 const ABOUT_LABEL: Record<string, string> = { credentials: "Credentials", spending: "Spending", privacy: "Private data", access: "Access", owner: "Owner's call" };

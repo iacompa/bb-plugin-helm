@@ -54,7 +54,7 @@ precise question before building the wrong thing.
 |---|---|
 | `helm_context {}` | Your node, branch, brief version, the app's stage, CONTRACT version, integration branch, unacked directives, policies. |
 | `helm_report {status, summary ≤600, evidence?[], blockers?[], next?}` | `progress` · `blocked` · `done` · `failed`, to your lead. |
-| `helm_message {to, text, kind}` | Your lead (parent) and siblings **in the same app** (other builders, gates), by node id (`<app>.code`, `<app>.ui`, `<app>.p.ios` …). Cross-app traffic goes through your lead. `info` = FYI; `ask` / `handoff` wake them. |
+| `helm_message {to, text, kind}` | Your lead (parent) and siblings **in the same app** (other builders, gates), by node id (`<app>.code`, `<app>.ui`, `<app>.p.ios` …). Cross-app traffic goes through your lead. `info` = FYI; `ask` / `handoff` wake them. Answer an `ask` with `helm_message` to the asker: what you write in your thread reaches no agent. |
 | `helm_slop_scan {paths?}` | The deterministic scanner on your branch. Run it before reporting done. |
 | `helm_ack {directiveId, note}` | Acknowledge a binding human change. |
 | `helm_need {kind, about, title, body, options?, evidence?}` | Ask for a decision. `about`: credentials, spending, privacy, access or other. With autonomy high (the default), only the first four reach the human; `other` goes to your supervisor. |

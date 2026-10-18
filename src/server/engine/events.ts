@@ -7,6 +7,7 @@ import type { HelmEvent, InteractionLite } from "../bb/port.ts";
 import type { Engine } from "./engine.ts";
 import type { NodeInfo, NeedKind } from "../../shared/types.ts";
 import { createDirective, remindUnacked } from "./direct.ts";
+import { askKey } from "./asks.ts";
 import { spendFromTokens } from "../domain/models.ts";
 import { isQuestion } from "../domain/directives.ts";
 import { nodeWorktree } from "./gates.ts";
@@ -23,7 +24,19 @@ export function installEventHandler(e: Engine, opts: { selfPluginIds?: string[];
 }
 
 export async function handleEvent(e: Engine, ev: HelmEvent, opts: { selfPluginIds?: string[]; onPlannerEvent?: (ev: HelmEvent) => Promise<boolean> } = {}): Promise<void> {
-  if (ev.type === "message.dispatched" || ev.type === "message.cancelled") return receipts(e, ev);
+  if (ev.type === "message.dispatched" || ev.type === "message.cancelled") {
+    // a queued message starting means the turn before it ended without the thread going idle:
+    // questions that turn was answering are due now (read before receipts makes this message's own question live)
+    const node = ev.type === "message.dispatched" ? e.repo.nodeByThread(ev.threadId) : null;
+    const due = node ? liveAsks(e, node) : [];
+    receipts(e, ev);
+    if (node && due.length) {
+      const out = await e.port.threadOutput(ev.threadId).catch(() => null);
+      passOnAnswers(e, node, out, new Set(due));
+      e.outbox.kick();
+    }
+    return;
+  }
   if (opts.onPlannerEvent && (await opts.onPlannerEvent(ev))) return;
   const node = e.repo.nodeByThread(ev.threadId);
   if (!node) return; // not ours: the Observatory reads these, Helm never acts on them
@@ -107,6 +120,13 @@ export async function handleEvent(e: Engine, ev: HelmEvent, opts: { selfPluginId
 }
 
 function receipts(e: Engine, ev: Extract<HelmEvent, { type: "message.dispatched" | "message.cancelled" }>): void {
+  // a queued question: the turn that answers it starts now (or it was deleted and nobody will answer)
+  const ask = e.repo.getMeta(`askq:${ev.queuedMessageId}`);
+  if (ask) {
+    e.repo.deleteMeta(`askq:${ev.queuedMessageId}`);
+    if (ev.type === "message.dispatched" && e.repo.getMeta(ask)) e.repo.setMeta(ask, JSON.stringify({ state: "live", at: e.now() }));
+    else e.repo.deleteMeta(ask);
+  }
   const rs = e.repo.recipientsByQueuedMessage(ev.queuedMessageId);
   if (!rs.length) return;
   e.repo.tx(() => {
@@ -191,8 +211,49 @@ async function onIdle(e: Engine, node: NodeInfo, lastText: string | null): Promi
     }
   }
   remindUnacked(e, e.repo.getNode(node.runId, node.id)!);
+  passOnAnswers(e, node, lastText);
   e.outbox.kick();
   await e.pump(node.runId);
+}
+
+const ASK_TTL_MS = 24 * 3600_000;
+
+/**
+ * Another agent asked this one a question and the turn that answered it has ended without a
+ * helm_message back (that clears the question). An answer written in the agent's own thread
+ * reaches no agent, so Helm passes it on, and the asker is woken to use it.
+ */
+function askState(v: string): { state?: string; at?: number } {
+  try {
+    return JSON.parse(v) as { state?: string; at?: number };
+  } catch {
+    return {}; // unreadable: forgotten at the next pass
+  }
+}
+
+/** The questions to this node whose answering turn is running. */
+function liveAsks(e: Engine, node: NodeInfo): string[] {
+  return e.repo.metaByPrefix(askKey(node.runId, node.id, "")).filter(([, v]) => askState(v).state === "live").map(([k]) => k);
+}
+
+function passOnAnswers(e: Engine, node: NodeInfo, lastText: string | null, only?: Set<string>): void {
+  const prefix = askKey(node.runId, node.id, "");
+  for (const [k, v] of e.repo.metaByPrefix(prefix)) {
+    if (only && !only.has(k)) continue;
+    const st = askState(v);
+    if (st.state !== "live") {
+      if (!st.at || e.now() - st.at > ASK_TTL_MS) e.repo.deleteMeta(k);
+      continue;
+    }
+    e.repo.deleteMeta(k);
+    const asker = e.repo.getNode(node.runId, k.slice(prefix.length));
+    if (!asker || asker.status === "done") continue;
+    const answer = (lastText ?? "").trim();
+    const text = answer
+      ? `Answer from ${e.label(node)} (${node.id}) to your question. It replied in its own thread instead of with helm_message, so Helm passes it on:\n${answer.length > 1800 ? `${answer.slice(0, 1800)}…` : answer}`
+      : `${e.label(node)} (${node.id}) finished the turn your question started, and Helm found no answer from it. You have no answer: ask again, or tell it what you need.`;
+    e.sendFromHelm(node.runId, asker.id, text, { key: `answer:${k}:${e.now()}`, senderNodeId: node.id, kind: "message", commsKind: "info" });
+  }
 }
 
 function needKindFor(i: InteractionLite): NeedKind {
