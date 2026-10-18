@@ -130,6 +130,8 @@ export async function consolidate(e: Engine, runId: string, appId: string, by: s
     moving.push({ n, envId, path: env?.path ?? null });
   }
   if (!moving.length) {
+    // a consolidation that stopped half-way, or an older app none of whose agents holds a worktree now
+    if (!work && branch) return finish(e, run, app as AppInfo, branch, by, "");
     const list = await appWorktrees(e, runId, { appId });
     const rest = list[0]?.worktrees.filter((w) => w.role === "extra") ?? [];
     if (!work && branch === null) return `${app.name} has not started yet; Helm gives it one shared work worktree when its first agent starts.`;
@@ -160,6 +162,7 @@ export async function consolidate(e: Engine, runId: string, appId: string, by: s
   const wasLive = new Set(moving.filter((m) => m.n.threadId && !["done", "planned"].includes(m.n.status)).map((m) => m.n.id));
   const threads = moving.map((m) => m.n.threadId).filter((t): t is string => !!t);
   e.repo.tx(() => {
+    e.repo.setMeta(consolidatingKey(runId, appId), keep!);
     for (const m of moving) {
       e.repo.updateNode(runId, m.n.id, { threadId: null, environmentId: null, branch: null, ...(m.n.status === "done" ? {} : { status: "planned", warning: "moving to the app's shared work worktree" }) });
       e.repo.deleteMeta(`reuse:${runId}:${m.n.id}`);
@@ -180,20 +183,46 @@ export async function consolidate(e: Engine, runId: string, appId: string, by: s
   }
 
   // 3. the shared worktree on the integration branch, then the agents start again there
+  return finish(e, run, app as AppInfo, branch, by, `Removed ${moving.length - left.length} agent worktree(s)${left.length ? `; could not remove ${left.join("; ")}` : ""}. `);
+}
+
+/** Set while an app moves to its shared worktree, so its agents wait instead of getting their own. Value: the integration branch's last commit. */
+export const consolidatingKey = (runId: string, appId: string) => `consolidating:${runId}:${appId}`;
+
+/**
+ * Create the shared worktree and start the moved agents there. Also resumes a consolidation that
+ * stopped half-way. BB removes worktrees in the background, so the integration branch can still be
+ * held by the old lead worktree for a while: then the agents are queued anyway and the worktree is
+ * created by their spawn as soon as BB is done.
+ */
+async function finish(e: Engine, run: ReturnType<Engine["run"]>, app: AppInfo, branch: string, by: string, removed: string): Promise<string> {
+  const runId = run.id;
+  const key = consolidatingKey(runId, app.id);
+  const keep = e.repo.getMeta(key) ?? (await e.host(runId).revParse({ repo: app.repoPath!, ref: `refs/heads/${branch}` }).catch(() => ({ sha: null }))).sha;
+  if (!keep) return `Rejected: the integration branch ${branch} does not exist in ${app.repoPath}. ${removed}`;
+  if (!e.repo.getMeta(key)) e.repo.setMeta(key, keep);
+  const waiting = e.repo.listNodes(runId).filter((n) => (n.appId === app.id || (n.alsoLead && e.repo.listApps(runId)[0]?.id === app.id)) && !n.threadId && n.status !== "done" && e.repo.getMeta(`moved:${runId}:${n.id}`));
+  const ids = waiting.map((n) => n.id).join(", ") || "none";
   let path: string;
   try {
-    path = await e.ensureWorkTree(run, app as AppInfo, keep!);
+    path = await e.ensureWorkTree(run, app, keep);
   } catch (err) {
     const why = err instanceof Error ? err.message.slice(0, 200) : String(err);
+    const busy = /checked out in/.test(why);
     e.repo.tx(() => {
-      for (const id of wasLive) e.repo.updateNode(runId, id, { status: "idle", warning: `waiting for the shared work worktree: ${why}` });
+      for (const n of waiting) e.repo.updateNode(runId, n.id, busy ? { status: "queued", firstInLine: true, warning: "waiting for BB to finish removing the old worktrees" } : { status: "idle", warning: `waiting for the shared work worktree: ${why}` });
     });
-    return `Rejected: the extra worktrees were removed${left.length ? ` except ${left.join("; ")}` : ""}, but the shared work worktree could not be created: ${why}. Its agents are stopped (Retry them after fixing it).`;
+    if (busy) {
+      await e.pump(runId);
+      return `${app.name} is moving to one shared worktree on ${branch}. ${removed}BB is still removing the old worktrees (${why}); the shared worktree is created as soon as it is done, and ${waiting.length} agent(s) start there with a hand-over: ${ids}.`;
+    }
+    return `Rejected: ${removed}but the shared work worktree could not be created: ${why}. ${app.name}'s agents are stopped; fix that and consolidate again.`;
   }
   e.repo.tx(() => {
-    for (const id of wasLive) e.repo.updateNode(runId, id, { status: "queued", firstInLine: true, warning: null });
-    e.repo.event(runId, e.leadOf(runId, appId)?.id ?? by, "worktrees", `${app.name}: consolidated into ${path} by ${by}; ${moving.length} agent worktree(s) removed${left.length ? `, ${left.length} could not be` : ""}`);
+    e.repo.deleteMeta(key);
+    for (const n of waiting) e.repo.updateNode(runId, n.id, { status: "queued", firstInLine: true, warning: null });
+    e.repo.event(runId, e.leadOf(runId, app.id)?.id ?? by, "worktrees", `${app.name}: consolidated into ${path} by ${by}. ${removed}`.trim());
   });
   await e.pump(runId);
-  return `${app.name} now works in one shared worktree: ${path} on ${branch}. Removed ${moving.length - left.length} agent worktree(s)${left.length ? `; could not remove ${left.join("; ")}` : ""}. ${wasLive.size} agent(s) start again there with a hand-over: ${[...wasLive].join(", ") || "none"}.`;
+  return `${app.name} now works in one shared worktree: ${path} on ${branch}. ${removed}${waiting.length} agent(s) start again there with a hand-over: ${ids}.`;
 }

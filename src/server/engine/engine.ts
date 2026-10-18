@@ -1182,7 +1182,7 @@ export class Engine {
     const work = this.workTree(run.id, app.id);
     if (work) return { kind: "path", hostId, path: work };
     const integration = this.repo.appExtra(run.id, app.id).integrationBranch;
-    if (!integration) return { wait: "work worktree" };
+    if (!integration || this.repo.getMeta(`consolidating:${run.id}:${app.id}`)) return { wait: "work worktree" };
     // an app started before shared worktrees: per-agent worktrees until it is consolidated
     if (this.isLeadNode(n)) return { kind: "worktree", hostId, baseBranch: integration ?? app.helmBranch ?? null };
     if (!integration) return { wait: "integration branch" };
@@ -1212,11 +1212,17 @@ export class Engine {
       }
     }
     const hostId = this.repo.runHost(run.id);
-    // a new app's agents share one work worktree beside its repository: make it before the first spawn
+    // a new app's agents share one work worktree beside its repository: make it before the first
+    // spawn. While an app is being consolidated, this finishes it once BB has removed the old worktrees.
     const appOf = n.appId ? this.repo.getApp(run.id, n.appId) : n.alsoLead ? this.repo.listApps(run.id)[0] ?? null : null;
-    if (appOf?.projectId && appOf.repoPath && !this.workTree(run.id, appOf.id) && !this.repo.appExtra(run.id, appOf.id).integrationBranch) {
+    const moving = appOf ? this.repo.getMeta(`consolidating:${run.id}:${appOf.id}`) : null;
+    if (appOf?.projectId && appOf.repoPath && !this.workTree(run.id, appOf.id) && (moving || !this.repo.appExtra(run.id, appOf.id).integrationBranch)) {
       try {
-        await this.ensureWorkTree(run, appOf);
+        await this.ensureWorkTree(run, appOf, moving ?? undefined);
+        if (moving) {
+          this.repo.deleteMeta(`consolidating:${run.id}:${appOf.id}`);
+          this.repo.updateNode(run.id, n.id, { warning: null });
+        }
       } catch (err) {
         return { defer: DEFER_SHORT, reason: `work worktree: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}` };
       }

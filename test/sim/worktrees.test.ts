@@ -129,6 +129,48 @@ test("an app with one worktree per agent: the audit wakes the Git agent; consoli
   assert.match(await consolidate(h.engine, runId, "alpha", "test"), /already has 2 worktrees: nothing to consolidate/);
 });
 
+test("BB removes the old worktrees in the background: the agents wait, and start in the shared worktree once it is done", async () => {
+  const { h, runId } = await run({ legacy: true });
+  await mergeAll(h, runId, "alpha");
+  const git = h.sim.git;
+  const rm = git.removeWorktree.bind(git);
+  const later: string[] = [];
+  git.removeWorktree = (p: string) => void later.push(p);
+  const lead = h.repo.getNode(runId, "alpha.lead")!;
+  h.repo.updateNode(runId, lead.id, { status: "waiting" });
+
+  const r = await consolidate(h.engine, runId, "alpha", "test");
+  assert.match(r, /^Alpha is moving to one shared worktree on \S+\. Removed \d+ agent worktree\(s\)\. BB is still removing the old worktrees \(.*checked out in/, r);
+  assert.equal(h.repo.getNode(runId, lead.id)!.status, "queued", "queued, not stopped");
+  await h.clock.advance(60_000);
+  assert.equal(h.repo.getNode(runId, lead.id)!.threadId, null, "no thread, and no worktree of its own, while BB is busy");
+  assert.equal(h.engine.workTree(runId, "alpha"), null);
+
+  for (const p of later.splice(0)) rm(p);
+  git.removeWorktree = rm;
+  await h.clock.runUntil(h.clock.now() + H, { stopWhen: () => !!h.repo.getNode(runId, lead.id)?.threadId });
+  const work = h.engine.workTree(runId, "alpha");
+  assert.match(work!, /\/\.helm-work\/alpha$/);
+  assert.equal(await nodeWorktree(h.engine, h.repo.getNode(runId, lead.id)!), work, "the lead started in the shared worktree");
+  assert.equal(h.repo.getMeta(`consolidating:${runId}:alpha`), null);
+  assert.equal((await appWorktrees(h.engine, runId, { appId: "alpha" }))[0].worktrees.length, 2);
+});
+
+test("a consolidation that stopped half-way is finished by running it again", async () => {
+  const { h, runId } = await run({ legacy: true });
+  await mergeAll(h, runId, "alpha");
+  const git = h.sim.git;
+  const rm = git.removeWorktree.bind(git);
+  const later: string[] = [];
+  git.removeWorktree = (p: string) => void later.push(p);
+  h.repo.updateNode(runId, "alpha.lead", { status: "waiting" });
+  await consolidate(h.engine, runId, "alpha", "test");
+  for (const p of later.splice(0)) rm(p);
+  git.removeWorktree = rm;
+  const again = await consolidate(h.engine, runId, "alpha", "test");
+  assert.match(again, /^Alpha now works in one shared worktree: \S+\/\.helm-work\/alpha on \S+\. \d agent\(s\) start again there with a hand-over: alpha\.lead\b/, again);
+});
+
 test("the Git agent consolidates by itself when woken, and the other app is untouched", async () => {
   const { h, runId } = await run({ legacy: true });
   await mergeAll(h, runId, "alpha");
