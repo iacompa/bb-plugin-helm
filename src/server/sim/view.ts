@@ -48,12 +48,20 @@ export class SimView {
     return app;
   }
 
-  /** Runs worth showing, their apps and platforms, and what the host can run. */
-  async state(runId?: string | null) {
-    const runs = this.e.repo
+  /** Running (or paused) runs, the most recently active first. */
+  liveRuns(): Array<{ id: string; name: string }> {
+    const last = (id: string) => Math.max(0, ...this.e.repo.listNodes(id).map((n) => n.lastActivityAt ?? 0));
+    return this.e.repo
       .listRuns()
       .filter((r) => r.status === "running" || r.status === "paused")
-      .map((r) => ({ id: r.id, name: r.name }));
+      .map((r) => ({ id: r.id, name: r.name, at: last(r.id) }))
+      .sort((a, b) => b.at - a.at)
+      .map(({ id, name }) => ({ id, name }));
+  }
+
+  /** Runs worth showing, their apps and platforms, and what the host can run. */
+  async state(runId?: string | null) {
+    const runs = this.liveRuns();
     const current = runId && runs.some((r) => r.id === runId) ? runId : runs[0]?.id ?? null;
     const apps = current
       ? this.e.repo

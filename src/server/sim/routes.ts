@@ -84,7 +84,8 @@ export function simUrl(bb: BbPluginApi, runId?: string | null, appId?: string | 
  * Helm panel itself has no browser). Returns the thread to show, or null when no desktop
  * browser is available (the caller then opens the URL directly).
  */
-export async function openSimTab(bb: BbPluginApi, engine: Engine, runId?: string | null, appId?: string | null): Promise<{ url: string; threadId: string | null; message: string }> {
+export async function openSimTab(bb: BbPluginApi, engine: Engine, view: SimView, runId?: string | null, appId?: string | null): Promise<{ url: string; threadId: string | null; message: string }> {
+  runId = runId ?? view.liveRuns()[0]?.id ?? null;
   const url = simUrl(bb, runId, appId);
   const run = runId ? engine.repo.getRun(runId) : null;
   const threadId = run ? engine.repo.getNode(run.id, "orch")?.threadId ?? null : null;

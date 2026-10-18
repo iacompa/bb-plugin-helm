@@ -359,12 +359,8 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
         options: { run: RUN, app: { type: "string", description: "App id to show first" }, json: JSON_OPT },
         run: (i) =>
           guard(async () => {
-            let run: { id: string } | null = null;
-            try {
-              run = runOf(i.options.run);
-            } catch (err) {
-              if (i.options.run) throw err;
-            }
+            // without --run: the most recently active run
+            const run = i.options.run ? runOf(i.options.run) : null;
             const r = await svc.openSimulators(run?.id ?? null, i.options.app ?? null);
             return out(i.options.json, r, `${r.message}\n${r.url}`);
           }),

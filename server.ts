@@ -67,8 +67,8 @@ export default async function plugin(bb: BbPluginApi) {
   installEventHandler(engine, { selfPluginIds: [bb.pluginId] });
   svc = new HelmService(engine);
   svc.writeSettings = settings.write;
-  registerSimView(bb, engine);
-  svc.openSimulators = (runId, appId) => openSimTab(bb, engine, runId, appId);
+  const sims = registerSimView(bb, engine);
+  svc.openSimulators = (runId, appId) => openSimTab(bb, engine, sims, runId, appId);
   const planner = new Planner(engine, (s) => bb.realtime.publish(PLANNER_CHANNEL, { id: s.id, status: s.status }));
   planner.install();
   svc.planner = planner;
