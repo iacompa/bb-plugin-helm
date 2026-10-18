@@ -1,7 +1,7 @@
 // Graph layout, semantic zoom and viewport culling for the Helm app (pure).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { D, fitTransform, intersects, lodFor, portfolioLayout, squadLayout, visibleIdOf, visibleIds, zoomAbout, type PortfolioInput } from "../../components/helm/layout.ts";
+import { D, fitTransform, intersects, lodFor, portfolioLayout, squadLayout, visibleIdOf, visibleIds, withOffsets, zoomAbout, type PortfolioInput } from "../../components/helm/layout.ts";
 import { appMoveRule, taskMoveRule, colOfStatus, fmtUnits, fmtTokens, allowedTypes } from "../../components/helm/format.ts";
 
 /** A portfolio the size of the spec's big case: 20 apps × 8 agents under 5 managers. */
@@ -132,6 +132,26 @@ test("formatting never shows dollars and tokens are raw counts", () => {
   assert.equal(fmtTokens(1_400_000), "1.4M");
   assert.deepEqual(allowedTypes({ tier: "specialist", status: "planned", threadId: null }), ["tell", "model", "scope", "priority", "spawn"]);
   assert.ok(allowedTypes({ tier: "gate", status: "running", threadId: "t" }).includes("waive"));
+});
+
+test("nodes moved by hand: a card moves, an expanded app's squad moves with its frame, group boxes stretch, nothing goes below 0", () => {
+  const L = portfolioLayout(bigInput({ expanded: new Set(["app0"]) }));
+  assert.equal(withOffsets(L, {}), L, "no offsets: the same layout");
+  const inBox = (r: { x: number; y: number; w: number; h: number }, c: { x: number; y: number; w: number; h: number }) => r.x >= c.x && r.y >= c.y && r.x + r.w <= c.x + c.w && r.y + r.h <= c.y + c.h;
+  const frame = L.frames["frame:app0"];
+  assert.ok(frame, "app0 is expanded");
+  const squad = Object.keys(L.rects).filter((id) => inBox(L.rects[id], frame));
+  assert.ok(squad.length > 0);
+  const M = withOffsets(L, { "frame:app0": { dx: 400, dy: 120 } });
+  for (const id of squad) assert.deepEqual([M.rects[id].x - L.rects[id].x, M.rects[id].y - L.rects[id].y], [400, 120], `${id} moved with its frame`);
+  assert.deepEqual([M.frames["frame:app0"].x - frame.x, M.frames["frame:app0"].w], [400, frame.w], "the frame moved, same size");
+  const group = L.clusters.find((c) => c.id !== "frame:app0" && inBox(frame, c))!;
+  assert.ok(inBox(M.frames["frame:app0"], M.clusters.find((c) => c.id === group.id)!), "its group box stretched to hold it");
+  const card = withOffsets(L, { app1: { dx: -30, dy: 50 } });
+  assert.deepEqual([card.rects.app1.x - L.rects.app1.x, card.rects.app1.y - L.rects.app1.y], [-30, 50]);
+  const far = withOffsets(L, { orch: { dx: -99999, dy: -99999 } });
+  assert.deepEqual([far.rects.orch.x, far.rects.orch.y], [0, 0]);
+  assert.ok(M.bounds.w >= L.bounds.w);
 });
 
 test("the Planner sits beside the Orchestrator, unconnected; custom agents with no app below it, linked to their supervisor", () => {

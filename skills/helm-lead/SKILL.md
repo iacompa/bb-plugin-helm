@@ -498,7 +498,7 @@ marked "instead of the human". Decide within the app's spec and contract, and an
 sent up: Helm tells you it is your call. Only `about: credentials | spending | privacy |
 access` reach the human, and `owner` goes to your manager first.
 
-**Custom agents.** The run's Planner (Amer by default) may add a custom agent under you, such as
+**Custom agents.** The run's Planner may add a custom agent under you, such as
 a HIPAA reviewer for this app. It works in its own worktree of your repository, and you get
 an FYI line with its mission. It reports to you: read its reports, steer it with
 `helm_direct`, replace its task with `helm_set_task`. You may also ask the Planner

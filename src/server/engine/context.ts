@@ -18,7 +18,7 @@ export interface HelmSettings {
   autoAdvance: "ask" | "auto";
   /** Who answers an agent's BB permission prompt: its supervisor (escalating only what the human must decide) or the human. */
   approvePrompts: "supervisor" | "human";
-  /** Default personal names for new runs; any agent can be renamed later. */
+  /** Default personal names for new runs ("" = none: just the role); any agent can be renamed later. */
   names: { planner: string; orchestrator: string; git: string };
   /** Default models (settings plannerModel, orchestratorModel, gitModel): used when a run's slot is empty. */
   defaultModels: { planner: ModelRef | null; orchestrator: ModelRef | null; git: ModelRef | null };
@@ -29,7 +29,7 @@ export interface HelmSettings {
 export const DEFAULT_SETTINGS: HelmSettings = {
   limits: LIMIT_DEFAULTS,
   permissionMode: { orchestrator: "auto", manager: "auto", lead: "auto", specialist: "auto", gate: "auto", planner: "auto", git: "auto", custom: "auto" },
-  names: { planner: "Amer", orchestrator: "Gestra", git: "Git Pusher" },
+  names: { planner: "", orchestrator: "", git: "" },
   defaultModels: { planner: null, orchestrator: null, git: null },
   gitOnSignoff: "push",
   showLeadsInSidebar: false,

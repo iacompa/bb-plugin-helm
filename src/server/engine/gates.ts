@@ -62,6 +62,20 @@ export async function verifyEvidence(e: Engine, n: NodeInfo, evidence: EvidenceR
       problems.push(`empty ${ev.kind} ref`);
       continue;
     }
+    if (!app && !n.appId && (ev.kind === "commit" || ev.kind === "file")) {
+      // agents outside the apps (Orchestrator, managers, Planner, Git agent) work in the Studio; the
+      // Git agent also cites commits in the apps' repositories
+      const studio = e.studioPath(e.run(n.runId));
+      const repos = [studio, ...(n.tier === "git" ? e.repo.listApps(n.runId).map((a) => a.repoPath).filter((p): p is string => !!p) : [])];
+      let hit: string | null = null;
+      for (const r of repos.slice(0, 40)) {
+        hit = ev.kind === "commit" ? (await host.revParse({ repo: r, ref }).catch(() => ({ sha: null }))).sha : (await host.fileAt({ repo: r, ref: "HEAD", path: ref, maxBytes: 4_000_000 }).catch(() => ({ content: null }))).content !== null ? ref : null;
+        if (hit) break;
+      }
+      if (!hit) problems.push(ev.kind === "commit" ? `commit ${ref.slice(0, 12)} is not in the Studio${repos.length > 1 ? " or any app's repository" : ""}` : `file ${ref} is not committed in the Studio`);
+      else verified.push(ev.kind === "commit" ? { kind: "commit", ref: hit, branch: ev.branch } : { kind: "file", ref });
+      continue;
+    }
     if (ev.kind === "commit") {
       if (!repo) {
         problems.push(`commit ${ref}: no repository for this node`);
@@ -139,6 +153,7 @@ export async function report(e: Engine, n: NodeInfo, input: { status: "progress"
     e.repo.event(n.runId, n.id, `report.${input.status}`, summary.slice(0, 200));
     if (input.status === "done") {
       if (ok && n.tier === "specialist") e.repo.updateNode(n.runId, n.id, { status: "done", endedAt: e.now(), warning: null });
+      else if (ok && n.warning?.startsWith("claimed done without verifiable evidence")) e.repo.updateNode(n.runId, n.id, { warning: null });
       else if (!ok) e.repo.updateNode(n.runId, n.id, { warning: `claimed done without verifiable evidence: ${problems.join("; ").slice(0, 200)}` });
     }
     if (input.status === "blocked") e.repo.updateNode(n.runId, n.id, { warning: `blocked: ${(input.blockers ?? []).join("; ").slice(0, 160) || summary.slice(0, 160)}` });

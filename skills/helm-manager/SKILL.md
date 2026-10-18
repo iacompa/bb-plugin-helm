@@ -214,7 +214,7 @@ it; otherwise raise it once with `helm_need` (`about: owner`).
 Your own ordinary `helm_need` comes back as "this is your call". Only `about: credentials |
 spending | privacy | access | owner` reaches the human.
 
-**Custom agents.** The run's Planner (Amer by default) may add a custom agent to your team, for
+**Custom agents.** The run's Planner may add a custom agent to your team, for
 example a HIPAA reviewer for your group. You get an FYI line with its mission. It reports to
 you like a lead does: read its reports, steer it with `helm_direct`, replace its task with
 `helm_set_task`. If you think a new kind of agent would help your group, ask the Planner

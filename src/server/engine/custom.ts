@@ -46,14 +46,17 @@ export interface CustomAgentInput {
   reason?: string;
 }
 
-/** The name people see: its own, or the run's default for the Orchestrator and the Planner. */
+/** The name people see: its own, or the default name in Settings for the Orchestrator, the Planner and the Git agent (none unless the human set one). */
 export function nameOf(e: Engine, n: Pick<NodeInfo, "role"> & { name?: string | null }): string | null {
   if (n.name) return n.name;
-  if (n.role === "orch") return e.settings.names.orchestrator;
-  if (n.role === "planner") return e.settings.names.planner;
-  if (n.role === "git") return e.settings.names.git;
+  if (n.role === "orch") return e.settings.names.orchestrator || null;
+  if (n.role === "planner") return e.settings.names.planner || null;
+  if (n.role === "git") return e.settings.names.git || null;
   return null;
 }
+
+/** Renaming to one of these clears the personal name, so the agent is called by its role. */
+const ROLE_WORDS: Record<string, string[]> = { orch: ["orchestrator"], planner: ["planner"], git: ["git agent", "git"] };
 
 const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N} .'’-]{0,39}$/u;
 
@@ -189,12 +192,16 @@ export function renameNode(e: Engine, runId: string, nodeId: string, name: strin
   const n = e.repo.getNode(runId, nodeId);
   if (!n) throw new HelmError(`No agent ${nodeId}.`, "not_found");
   const clean = name.trim();
-  const problem = nameProblem(e, runId, clean, n.id);
-  if (problem) throw new HelmError(problem, "invalid_value");
+  // "none", or the role itself ("Planner"), clears the name of the Orchestrator, the Planner or the Git agent
+  const clear = (ROLE_WORDS[n.role] ?? []).concat(ROLE_WORDS[n.role] ? ["none", ""] : []).includes(clean.toLowerCase());
+  if (!clear) {
+    const problem = nameProblem(e, runId, clean, n.id);
+    if (problem) throw new HelmError(problem, "invalid_value");
+  }
   const before = e.label(n);
   e.repo.tx(() => {
-    e.repo.updateNode(runId, n.id, { name: clean });
-    e.repo.event(runId, n.id, "renamed", `${before} → ${clean} (by ${actor})`);
+    e.repo.updateNode(runId, n.id, { name: clear ? null : clean });
+    e.repo.event(runId, n.id, "renamed", `${before} → ${clear ? "no name" : clean} (by ${actor})`);
   });
   const after = e.repo.getNode(runId, n.id)!;
   if (after.threadId) void e.port.updateThread({ threadId: after.threadId, title: threadTitle(e, e.run(runId), after) }).catch((err: unknown) => e.log.warn(`rename ${n.id}: ${err instanceof Error ? err.message : String(err)}`));
@@ -256,7 +263,7 @@ export async function ensurePlanner(e: Engine, runId: string, opts: { queue?: bo
   if (!n) {
     const model = plannerModel(run, e.settings);
     e.repo.tx(() => {
-      e.repo.insertNode({ runId, id: PLANNER_ID, appId: null, tier: "planner", role: "planner", platform: null, parentId: null, slot: "planner", alsoLead: false, model, modelOverride: false, scopeGlobs: ROLES.planner.scope, branch: null, briefMd: null, name: e.settings.names.planner });
+      e.repo.insertNode({ runId, id: PLANNER_ID, appId: null, tier: "planner", role: "planner", platform: null, parentId: null, slot: "planner", alsoLead: false, model, modelOverride: false, scopeGlobs: ROLES.planner.scope, branch: null, briefMd: null, name: e.settings.names.planner || null });
       e.repo.event(runId, PLANNER_ID, "created", `the run's Planner, on ${model ? `${model.providerId}/${model.modelId}${model.reasoning ? `:${model.reasoning}` : ""}` : "no model yet"}`);
     });
     n = e.repo.getNode(runId, PLANNER_ID)!;
@@ -288,7 +295,7 @@ export async function ensureGitAgent(e: Engine, runId: string, opts: { queue?: b
   if (!n) {
     const model = gitModel(run, e.settings);
     e.repo.tx(() => {
-      e.repo.insertNode({ runId, id: GIT_ID, appId: null, tier: "git", role: "git", platform: null, parentId: null, slot: "git", alsoLead: false, model, modelOverride: false, scopeGlobs: ROLES.git.scope, branch: null, briefMd: null, name: e.settings.names.git });
+      e.repo.insertNode({ runId, id: GIT_ID, appId: null, tier: "git", role: "git", platform: null, parentId: null, slot: "git", alsoLead: false, model, modelOverride: false, scopeGlobs: ROLES.git.scope, branch: null, briefMd: null, name: e.settings.names.git || null });
       e.repo.event(runId, GIT_ID, "created", `the run's Git agent, on ${model ? `${model.providerId}/${model.modelId}${model.reasoning ? `:${model.reasoning}` : ""}` : "no model yet"}`);
     });
     n = e.repo.getNode(runId, GIT_ID)!;

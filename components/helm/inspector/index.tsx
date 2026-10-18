@@ -1,6 +1,6 @@
 // The Inspector (§11.8): header, breadcrumb and seven tabs for the selected
 // agent; an Observatory ghost gets a read-only Overview only.
-import { useRef, type KeyboardEvent } from "react";
+import { useRef, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { useBbNavigate } from "@get-bb/plugin-sdk/app";
 import "./inspector.css";
 import type { InspTab, SnapNode } from "../types.ts";
@@ -25,13 +25,46 @@ const TABS: Array<[InspTab, string]> = [
   ["changes", "Changes"],
 ];
 
+const MIN_W = 320;
+/** The graph keeps at least this much room when the inspector is dragged wider. */
+const KEEP_W = 240;
+
 export function Inspector() {
   const h = useHelm();
   const sel = h.sel;
   const ghostId = sel?.startsWith("ghost:") ? sel.slice(6) : null;
   const n = !ghostId ? h.node(sel) : null;
+  const ref = useRef<HTMLElement>(null);
+  // drag the left edge to make the inspector wider or narrower; double-click resets it
+  const onResize = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const el = ref.current;
+    const box = el?.parentElement?.getBoundingClientRect();
+    if (!el || !box || e.button !== 0) return;
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    const right = el.getBoundingClientRect().right;
+    const widthAt = (x: number) => Math.round(Math.max(MIN_W, Math.min(box.width - KEEP_W, right - x)));
+    const move = (ev: PointerEvent) => el.style.setProperty("--insp-w", `${widthAt(ev.clientX)}px`);
+    const up = (ev: PointerEvent) => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      h.setInspW(widthAt(ev.clientX));
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  };
+  const onResizeKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const now = ref.current?.getBoundingClientRect().width ?? 460;
+    h.setInspW(Math.max(MIN_W, Math.round(now + (e.key === "ArrowLeft" ? 40 : -40))));
+  };
   return (
-    <aside className={cx("inspector", h.inspWide && "wide")} aria-label="Inspector">
+    <aside ref={ref} className={cx("inspector", h.inspWide && !h.inspW && "wide")} style={h.inspW ? ({ "--insp-w": `min(${h.inspW}px, calc(100cqw - ${KEEP_W}px))` } as CSSProperties) : undefined} aria-label="Inspector">
+      <div className="insp-resize" role="separator" aria-orientation="vertical" aria-label="Resize the inspector (drag, or arrow keys; double-click to reset)" tabIndex={0} title="Drag to resize · double-click to reset" onPointerDown={onResize} onDoubleClick={() => h.setInspW(null)} onKeyDown={onResizeKey} />
       {ghostId ? <GhostInspector threadId={ghostId} /> : n ? <NodeInspector key={n.id} n={n} /> : <EmptyInspector />}
     </aside>
   );
@@ -41,7 +74,16 @@ function HeadButtons() {
   const h = useHelm();
   return (
     <div className="row" style={{ gap: 2, flex: "none" }}>
-      <button type="button" className="iconbtn sm" onClick={() => h.setInspWide(!h.inspWide)} title={h.inspWide ? "Narrower" : "Wider"} aria-label={h.inspWide ? "Make the inspector narrower" : "Make the inspector wider"}>
+      <button
+        type="button"
+        className="iconbtn sm"
+        onClick={() => {
+          h.setInspW(null);
+          h.setInspWide(!h.inspWide);
+        }}
+        title={h.inspWide ? "Narrower" : "Wider"}
+        aria-label={h.inspWide ? "Make the inspector narrower" : "Make the inspector wider"}
+      >
         <Ic name={h.inspWide ? "Minimize2" : "Maximize2"} size="sm" />
       </button>
       <button type="button" className="iconbtn sm" onClick={() => h.setInspOpen(false)} title="Hide inspector" aria-label="Hide inspector">

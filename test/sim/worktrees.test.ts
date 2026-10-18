@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { createHarness, CHEAP, type Harness } from "../helpers/harness.ts";
 import { appWorktrees, auditWorktrees, consolidate } from "../../src/server/engine/worktrees.ts";
 import { nodeWorktree } from "../../src/server/engine/gates.ts";
+import { callTool } from "../../src/server/agent/tools.ts";
 import { GIT_ID } from "../../src/server/engine/custom.ts";
 import type { HelmSettings } from "../../src/server/engine/context.ts";
 import type { Portfolio } from "../../src/shared/types.ts";
@@ -60,7 +61,7 @@ test("the Git agent stands beside the Orchestrator, checks the worktrees on star
   const git = h.repo.getNode(runId, GIT_ID)!;
   assert.equal(git.tier, "git");
   assert.equal(git.parentId, null, "outside the chain of command");
-  assert.equal(h.engine.label(git), "Git Pusher · Git agent");
+  assert.equal(h.engine.label(git), "Git agent", "no personal name by default");
   assert.equal(h.engine.effectiveModel(h.engine.run(runId), git)?.modelId, h.engine.run(runId).slots.orchestrator?.modelId, "no Git agent default: the Orchestrator's model");
   assert.ok(h.agents.log.some((l) => /^git: Every app has at most 2 worktrees/.test(l)), h.agents.log.filter((l) => l.startsWith("git")).join("\n"));
 
@@ -68,6 +69,18 @@ test("the Git agent stands beside the Orchestrator, checks the worktrees on star
   await h.resolve(runId, so.id, { action: "signoff" });
   const branch = h.repo.appExtra(runId, "alpha").integrationBranch!;
   assert.ok(sentTo(h, runId, GIT_ID, new RegExp(`signed off Alpha \\(alpha\\).*Settings say: push ${branch.replace(/[/.]/g, "\\$&")} to its remote`, "s")));
+});
+
+test("the Git agent's evidence is checked in the Studio and the apps' repositories", async () => {
+  const { h, runId } = await run();
+  const git = h.repo.getNode(runId, GIT_ID)!;
+  const repo = h.repo.getApp(runId, "alpha")!.repoPath!;
+  const sha = h.sim.git.resolve(repo, h.repo.appExtra(runId, "alpha").integrationBranch!)!;
+  const ok = await callTool(h.engine, "helm_report", git.threadId!, { status: "done", summary: "Pushed Alpha.", evidence: [{ kind: "commit", ref: sha }] });
+  assert.ok(!ok.isError, ok.text);
+  assert.equal(h.repo.getNode(runId, GIT_ID)!.warning, null);
+  await callTool(h.engine, "helm_report", git.threadId!, { status: "done", summary: "x", evidence: [{ kind: "commit", ref: "0123456789ab" }] });
+  assert.match(h.repo.getNode(runId, GIT_ID)!.warning!, /commit 0123456789ab is not in the Studio or any app's repository/);
 });
 
 test("gitOnSignoff report: the Git agent is told to send nothing", async () => {

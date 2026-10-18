@@ -1,4 +1,4 @@
-// Default models for the Planner (Amer) and the Orchestrator (Gestra): Helm settings that fill
+// Default models for the Planner, the Orchestrator and the Git agent: Helm settings that fill
 // those roles when a run leaves them empty. Changing the Planner's can also move every running
 // run's Planner now.
 
@@ -20,12 +20,12 @@ interface Defaults {
 type Key = "planner" | "orchestrator" | "git";
 
 const ROWS = [
-  { key: "planner", label: "Planner (Amer)", empty: "Not set: uses each run's Orchestrator model" },
-  { key: "orchestrator", label: "Orchestrator (Gestra)", empty: "Not set: chosen in each new run" },
+  { key: "planner", label: "Planner", empty: "Not set: uses each run's Orchestrator model" },
+  { key: "orchestrator", label: "Orchestrator", empty: "Not set: chosen in each new run" },
   { key: "git", label: "Git agent", empty: "Not set: uses each run's Orchestrator model" },
 ] as const;
 
-const TITLE: Record<Key, string> = { planner: "Planner (Amer)", orchestrator: "Orchestrator (Gestra)", git: "Git agent" };
+const TITLE: Record<Key, string> = { planner: "Planner", orchestrator: "Orchestrator", git: "Git agent" };
 const HELP: Record<Key, string> = {
   planner: "Used whenever a run's Planner role has no model. Pick something affordable: the Planner is idle until you ask it something.",
   orchestrator: "Used for new runs that do not choose an Orchestrator model.",

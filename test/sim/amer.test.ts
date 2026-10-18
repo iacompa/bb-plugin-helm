@@ -15,8 +15,9 @@ function four(): Portfolio {
   return { ...p, apps: p.apps.slice(0, 4).map((a) => ({ ...a, group: null })) };
 }
 
-async function setup(autonomy?: Autonomy) {
-  const h = await createHarness();
+async function setup(autonomy?: Autonomy, named = true) {
+  // personal names are set in Settings here; by default agents are called by their role
+  const h = await createHarness(named ? { settings: { names: { planner: "Amer", orchestrator: "Gestra", git: "Git Pusher" } } } : {});
   const { runId } = h.engine.createRun({ name: "Company", brief: "x", portfolio: four(), slots: { ...CHEAP, planner: undefined }, limits: { concurrency: 48, ...(autonomy ? { autonomy } : {}) } });
   assert.deepEqual((await h.engine.startRun(runId)).problems, []);
   await h.clock.runUntil(h.clock.now() + 6 * H, { stopWhen: () => ["orch", "planner"].every((id) => !!h.repo.getNode(runId, id)?.threadId) });
@@ -49,6 +50,17 @@ test("the run starts with Amer · Planner and Gestra · Orchestrator; the Planne
   assert.equal(h.engine.run(runId).slots.orchestrator?.modelId, "claude-haiku-5-5");
   assert.equal(h.engine.effectiveModel(h.engine.run(runId), planner)?.modelId, "claude-haiku-5-5");
   assert.equal(planner.modelOverride, false);
+});
+
+test("by default nobody has a personal name: Orchestrator, Planner, Git agent; a name can be given and cleared", async () => {
+  const { h, runId, svc } = await setup(undefined, false);
+  assert.deepEqual(["orch", "planner", "git"].map((id) => h.engine.label(h.repo.getNode(runId, id)!)), ["Orchestrator", "Planner", "Git agent"]);
+  assert.equal(h.sim.helmThreads().find((x) => x.id === h.repo.getNode(runId, "planner")!.threadId)!.title, "Planner · Company");
+  assert.equal(svc.rename(runId, "planner", "Nova"), "Nova · Planner");
+  assert.equal(svc.rename(runId, "Nova", "none"), "Planner");
+  assert.equal(svc.rename(runId, "git", "Courier"), "Courier · Git agent");
+  assert.equal(svc.rename(runId, "git", "Git agent"), "Git agent", "renaming to the role clears the name");
+  assert.equal(h.repo.getNode(runId, "git")!.name, null);
 });
 
 test("the Planner adds a custom agent under the Orchestrator: it starts, the Orchestrator is told, and events wake it", async () => {

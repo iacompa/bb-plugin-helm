@@ -55,16 +55,16 @@ function modelSelects(choices: ModelChoice[], who: "Planner" | "Orchestrator" | 
 
 /** Helm's settings, with the default-model pickers filled from the models you can use. */
 export function settingsDescriptors(choices: ModelChoice[]) {
-  const pl = modelSelects(choices, "Planner", "Not set: use each run's Orchestrator model", "The Planner's (Amer's) model in runs whose Planner role has no model.");
+  const pl = modelSelects(choices, "Planner", "Not set: use each run's Orchestrator model", "The Planner's model in runs whose Planner role has no model.");
   const or = modelSelects(choices, "Orchestrator", "Not set: choose it in each new run", "The Orchestrator's model for new runs that do not choose one.");
   const gt = modelSelects(choices, "Git agent", "Not set: use each run's Orchestrator model", "The Git agent's model: it keeps every app to two worktrees and sends work where you tell it.");
   return { plannerModel: pl.model, plannerReasoning: pl.reasoning, orchestratorModel: or.model, orchestratorReasoning: or.reasoning, gitModel: gt.model, gitReasoning: gt.reasoning, ...BASE_DESCRIPTORS };
 }
 
 const BASE_DESCRIPTORS = {
-  plannerName: { type: "string", label: "Planner's name", description: "What new runs call their Planner, the advisor you talk to (it can design new agents). Rename one run's Planner with bb helm rename planner <name>.", default: DEFAULT_SETTINGS.names.planner },
-  orchestratorName: { type: "string", label: "Orchestrator's name", description: "What new runs call their Orchestrator. Rename one run's with bb helm rename orch <name>.", default: DEFAULT_SETTINGS.names.orchestrator },
-  gitName: { type: "string", label: "Git agent's name", description: "What new runs call their Git agent. Rename one run's with bb helm rename git <name>.", default: DEFAULT_SETTINGS.names.git },
+  plannerName: { type: "string", label: "Planner's name", description: "Empty: the Planner is just called Planner. A name here is shown with the role (\"Nova · Planner\"). Rename one run's with bb helm rename planner <name>; bb helm rename planner none clears it.", default: DEFAULT_SETTINGS.names.planner },
+  orchestratorName: { type: "string", label: "Orchestrator's name", description: "Empty: the Orchestrator is just called Orchestrator. Rename one run's with bb helm rename orch <name>; bb helm rename orch none clears it.", default: DEFAULT_SETTINGS.names.orchestrator },
+  gitName: { type: "string", label: "Git agent's name", description: "Empty: the Git agent is just called Git agent. Rename one run's with bb helm rename git <name>; bb helm rename git none clears it.", default: DEFAULT_SETTINGS.names.git },
   gitOnSignoff: {
     type: "select",
     label: "When you sign a project off, the Git agent",

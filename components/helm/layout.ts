@@ -237,6 +237,60 @@ export function squadLayout(a: SquadInput): Layout {
 
 export const rectOf = (L: Layout, id: string): Rect | undefined => L.rects[id] ?? L.frames[id];
 
+// ───────────── nodes moved by hand ─────────────
+
+export type Offsets = Record<string, { dx: number; dy: number }>;
+
+const inside = (r: Rect, b: Rect) => r.x >= b.x - 1 && r.y >= b.y - 1 && r.x + r.w <= b.x + b.w + 1 && r.y + r.h <= b.y + b.h + 1;
+
+/** A box around its members again after some moved, keeping the padding it had on each side. */
+function refit(box: Rect, before: Rect[], after: Rect[]): Rect {
+  const bb = (rs: Rect[]) => ({ x0: Math.min(...rs.map((r) => r.x)), y0: Math.min(...rs.map((r) => r.y)), x1: Math.max(...rs.map((r) => r.x + r.w)), y1: Math.max(...rs.map((r) => r.y + r.h)) });
+  const o = bb(before);
+  const n = bb(after);
+  const x = n.x0 - (o.x0 - box.x);
+  const y = n.y0 - (o.y0 - box.y);
+  return { x, y, w: n.x1 + (box.x + box.w - o.x1) - x, h: n.y1 + (box.y + box.h - o.y1) - y };
+}
+
+/**
+ * The layout with the nodes the user dragged moved by their offsets. An offset on a frame or group
+ * box (`frame:<app>` for an expanded app, a manager's group) moves everything in it; frames and
+ * group boxes stretch to hold their members; nothing goes above or left of 0.
+ */
+export function withOffsets(L: Layout, off: Offsets): Layout {
+  const boxOf = (id: string): Rect | undefined => L.frames[id] ?? L.clusters.find((c) => c.id === id);
+  const ids = Object.keys(off).filter((id) => L.rects[id] || boxOf(id));
+  if (!ids.length) return L;
+  const shift: Record<string, { dx: number; dy: number }> = {};
+  const add = (id: string, d: { dx: number; dy: number }) => {
+    const s = (shift[id] ??= { dx: 0, dy: 0 });
+    s.dx += d.dx;
+    s.dy += d.dy;
+  };
+  for (const id of ids) {
+    if (L.rects[id]) add(id, off[id]);
+    const box = boxOf(id);
+    if (box) for (const m in L.rects) if (inside(L.rects[m], box)) add(m, off[id]);
+  }
+  const rects: Record<string, PlacedRect> = { ...L.rects };
+  for (const id in shift) {
+    const r = L.rects[id];
+    rects[id] = { ...r, x: Math.max(0, r.x + shift[id].dx), y: Math.max(0, r.y + shift[id].dy) };
+  }
+  const regroup = <T extends Rect>(box: T): T => {
+    const members = Object.keys(L.rects).filter((m) => inside(L.rects[m], box));
+    if (!members.some((m) => shift[m])) return box;
+    return { ...box, ...refit(box, members.map((m) => L.rects[m]), members.map((m) => rects[m])) };
+  };
+  const frames: Record<string, Rect> = {};
+  for (const k in L.frames) frames[k] = regroup(L.frames[k]);
+  const clusters = L.clusters.map(regroup);
+  const all = [...Object.values(rects), ...Object.values(frames), ...clusters];
+  const bounds = { w: Math.max(L.bounds.w, ...all.map((r) => r.x + r.w + 20)), h: Math.max(L.bounds.h, ...all.map((r) => r.y + r.h + 20)) };
+  return { ...L, rects, frames, clusters, bounds };
+}
+
 export function pathD(a: Rect, b: Rect, kind: "v" | "h"): string {
   if (kind === "v") {
     const x1 = a.x + a.w / 2;

@@ -7,7 +7,8 @@ import type { Catalog, ForeignThread, NeedInfo, SnapApp, SnapNode } from "./type
 import { useHelm } from "./ctx.tsx";
 import { ancestorsOf, appMembers, leadOf, type RunState } from "./store.ts";
 import { PLAT, ROLE_LABEL, TYPE_LABEL, appStatus, mgrHue, plural, stageLabel, statusLabel, trailLabel, modelName } from "./format.ts";
-import { fitTransform, lodFor, pathD, portfolioLayout, rectOf, squadLayout, visibleIdOf, visibleIds, zoomAbout, type Layout, type Lod, type PlacedRect } from "./layout.ts";
+import { fitTransform, lodFor, pathD, portfolioLayout, rectOf, squadLayout, visibleIdOf, visibleIds, withOffsets, zoomAbout, type Layout, type Lod, type Offsets, type PlacedRect } from "./layout.ts";
+import { lsGet, lsSet } from "./persist.ts";
 import { Dot, Ic, Kbd, ModelChip, Popover, RoleTile, Seg, StagePill, StatusPill, cx } from "./ui.tsx";
 
 type StatusFilter = "all" | "running" | "needs" | "touched";
@@ -45,6 +46,19 @@ function nowFallback(n: SnapNode): string {
 }
 
 const SIDE_ORDER = ["planner", "git", "custom"];
+
+/** Hand-moved positions saved in this browser (untrusted: anything malformed is dropped). */
+function readOffsets(key: string | null): Offsets {
+  if (!key) return {};
+  try {
+    const v = JSON.parse(lsGet(key) ?? "{}") as Record<string, { dx?: unknown; dy?: unknown }>;
+    const out: Offsets = {};
+    for (const [id, o] of Object.entries(v ?? {}).slice(0, 2000)) if (o && Number.isFinite(o.dx) && Number.isFinite(o.dy)) out[id] = { dx: Number(o.dx), dy: Number(o.dy) };
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 function agentTitle(n: SnapNode): string {
   if (n.role === "planner" || n.role === "git" || n.role === "custom") return n.label;
@@ -169,7 +183,7 @@ export function GraphView({ active }: { active: boolean }) {
   const skey = data ? structKey(data) : "";
   const ghostKey = ghosts.map((g) => g.threadId).join(",");
 
-  const layout: Layout | null = useMemo(() => {
+  const base: Layout | null = useMemo(() => {
     if (!data || !der) return null;
     if (drill && data.apps[drill]) {
       const lead = leadOf(data, drill);
@@ -203,6 +217,21 @@ export function GraphView({ active }: { active: boolean }) {
       ghostLabel: ghosts.length ? `Outside this run · ${plural(ghosts.length, "thread")} · read-only` : undefined,
     });
   }, [skey, drill, ui, ghostKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // nodes and groups the user dragged, per run and view, kept in this browser
+  const posKey = runId ? `helm:pos:${runId}:${drill ?? "all"}` : null;
+  const [offs, setOffs] = useState<Offsets>({});
+  useEffect(() => setOffs(readOffsets(posKey)), [posKey]);
+  const saveOffs = useCallback(
+    (next: (o: Offsets) => Offsets) =>
+      setOffs((o) => {
+        const n = next(o);
+        if (posKey) lsSet(posKey, Object.keys(n).length ? JSON.stringify(n) : null);
+        return n;
+      }),
+    [posKey],
+  );
+  const layout = useMemo(() => (base ? withOffsets(base, offs) : null), [base, offs]);
 
   // ── transform, LOD, culling (no React render per frame) ──
   const raf = useRef<number | null>(null);
@@ -357,6 +386,53 @@ export function GraphView({ active }: { active: boolean }) {
       /* already released */
     }
   };
+  // drag a card (or a group by its label) to move it; a press without movement is still a click
+  const dragged = useRef(false);
+  const startDrag = (e: ReactPointerEvent<HTMLElement>, id: string) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest("button, input, [data-act]")) return;
+    e.stopPropagation();
+    const el = e.currentTarget;
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    const start = offs[id] ?? { dx: 0, dy: 0 };
+    let last = start;
+    let moved = false;
+    let frame: number | null = null;
+    const move = (ev: PointerEvent) => {
+      if (!moved && Math.abs(ev.clientX - x0) + Math.abs(ev.clientY - y0) < 5) return;
+      if (!moved) {
+        moved = true;
+        vp.current.auto = false;
+        el.classList.add("dragging");
+      }
+      const z = vp.current.zoom;
+      last = { dx: Math.round(start.dx + (ev.clientX - x0) / z), dy: Math.round(start.dy + (ev.clientY - y0) / z) };
+      if (frame === null)
+        frame = requestAnimationFrame(() => {
+          frame = null;
+          setOffs((o) => ({ ...o, [id]: last }));
+        });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      if (frame !== null) cancelAnimationFrame(frame);
+      el.classList.remove("dragging");
+      if (!moved) return;
+      dragged.current = true;
+      setTimeout(() => (dragged.current = false), 0);
+      saveOffs((o) => ({ ...o, [id]: last }));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
+  const resetPositions = () => {
+    saveOffs(() => ({}));
+    if (vp.current.auto) fit(true);
+  };
+
   const zoomBy = (k: number) => {
     const cv = canvasRef.current;
     if (!cv) return;
@@ -532,6 +608,11 @@ export function GraphView({ active }: { active: boolean }) {
 
   const onNodeClick = (e: ReactMouseEvent, id: string) => {
     if ((e.target as HTMLElement).closest("[data-act]")) return;
+    // the click that ends a drag does not select
+    if (dragged.current) {
+      dragged.current = false;
+      return;
+    }
     selectId(id);
   };
   const onNodeDouble = (id: string, mode: string) => {
@@ -592,7 +673,7 @@ export function GraphView({ active }: { active: boolean }) {
         <div className="stage" ref={stageRef}>
           {layout.clusters.map((c) => (
             <div key={c.id} className={cx("cluster", c.dashed && "dashed")} style={{ left: c.x, top: c.y, width: c.w, height: c.h, ...(c.hue ? { borderColor: `color-mix(in oklab, ${c.hue} 38%, var(--h-line))` } : {}) }}>
-              <span className="cl-label" style={c.hue ? { color: c.hue } : undefined}>
+              <span className="cl-label" style={c.hue ? { color: c.hue } : undefined} onPointerDown={(e) => startDrag(e, c.id)} title="Drag to move this group">
                 {c.label}
               </span>
             </div>
@@ -637,6 +718,7 @@ export function GraphView({ active }: { active: boolean }) {
               pulse: pulsing.has(id),
               chain: reduced && !!lit[id],
               flash: flashing.has(id),
+              onDown: startDrag,
               onClick: onNodeClick,
               onDouble: onNodeDouble,
               onKey: onNodeKey,
@@ -842,6 +924,11 @@ export function GraphView({ active }: { active: boolean }) {
             <button type="button" className="iconbtn sm" onClick={() => fit(true)} aria-label="Fit to screen" title="Fit to screen (F)">
               <Ic name="Maximize2" size="sm" />
             </button>
+            {Object.keys(offs).length ? (
+              <button type="button" className="iconbtn sm" onClick={resetPositions} aria-label="Reset layout" title="Put every node you moved back in its place">
+                <Ic name="RotateCcw" size="sm" />
+              </button>
+            ) : null}
             <button type="button" className="iconbtn sm" onClick={(e) => setHelp(help ? null : e.currentTarget)} aria-label="Gestures and shortcuts" title="Gestures and shortcuts">
               <b style={{ font: "700 12px inherit" }}>?</b>
             </button>
@@ -925,6 +1012,7 @@ interface CardCommon {
   pulse: boolean;
   chain: boolean;
   flash: boolean;
+  onDown: (e: ReactPointerEvent<HTMLElement>, id: string) => void;
   onClick: (e: ReactMouseEvent, id: string) => void;
   onDouble: (id: string, mode: string) => void;
   onKey: (e: ReactKeyboardEvent, id: string, mode: string) => void;
@@ -939,6 +1027,7 @@ function cardProps(c: CardCommon, cls: string, label: string) {
     "aria-label": label,
     "aria-pressed": c.sel,
     "data-id": c.id,
+    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => c.onDown(e, c.id),
     onClick: (e: ReactMouseEvent) => c.onClick(e, c.id),
     onDoubleClick: () => c.onDouble(c.id, c.r.mode),
     onKeyDown: (e: ReactKeyboardEvent) => c.onKey(e, c.id, c.r.mode),

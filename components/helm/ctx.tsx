@@ -60,6 +60,9 @@ export interface HelmCtx {
   setInspOpen: (v: boolean) => void;
   inspWide: boolean;
   setInspWide: (v: boolean) => void;
+  /** The inspector's width in px once the user has dragged its edge (null: the default or wide width). */
+  inspW: number | null;
+  setInspW: (v: number | null) => void;
   drill: string | null;
   setDrill: (appId: string | null) => void;
   /** go to the graph and centre a node */
@@ -169,6 +172,7 @@ export function HelmProvider({ children, rootRef }: { children: ReactNode; rootR
     return w > 1100;
   });
   const [inspWide, setInspWide] = useStored("helm:inspWide", false);
+  const [inspW, setInspW] = useStored<number | null>("helm:inspW", null, (v) => v === null || (typeof v === "number" && v >= 280 && v <= 4000));
   const [drill, setDrill] = useStored<string | null>("helm:drill", null, (v) => v === null || typeof v === "string");
   const [focusReq, setFocusReq] = useState<{ id: string; key: number } | null>(null);
   const [observatory, setObservatory] = useState(false);
@@ -257,6 +261,8 @@ export function HelmProvider({ children, rootRef }: { children: ReactNode; rootR
       setInspOpen,
       inspWide,
       setInspWide,
+      inspW,
+      setInspW,
       drill,
       setDrill,
       focusNode,
@@ -277,7 +283,7 @@ export function HelmProvider({ children, rootRef }: { children: ReactNode; rootR
       node,
       app,
     }),
-    [rpc, rootRef, runs, runsError, refreshRuns, runId, setRunId, tabs, closeTab, newSession, data, rev, loading, error, refetch, catalog, catalogError, loadCatalog, view, sel, select, tab, draftType, inspOpen, inspWide, drill, focusNode, focusReq, observatory, studio, screensOpen, wizardOpen, pulse, firePulse, flashes, node, app],
+    [rpc, rootRef, runs, runsError, refreshRuns, runId, setRunId, tabs, closeTab, newSession, data, rev, loading, error, refetch, catalog, catalogError, loadCatalog, view, sel, select, tab, draftType, inspOpen, inspWide, inspW, drill, focusNode, focusReq, observatory, studio, screensOpen, wizardOpen, pulse, firePulse, flashes, node, app],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

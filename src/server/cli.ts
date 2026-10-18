@@ -280,7 +280,7 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
           }),
       }),
       ask: cliCommand({
-        summary: "Ask the run's Planner (Amer) a question or for a change: new agents, plan changes, models. Answers in its thread",
+        summary: "Ask the run's Planner a question or for a change: new agents, plan changes, models. Answers in its thread",
         positionals: [{ name: "question", description: "Your question or request (or use --message-file)", required: false }] as const,
         options: { "message-file": { type: "string", description: "File with the question", placeholder: "file" }, run: RUN, json: JSON_OPT },
         run: (i, ctx) =>

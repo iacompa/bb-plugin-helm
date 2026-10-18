@@ -130,7 +130,7 @@ bb helm priority <app|node> low|normal|high
 - Questions for the Orchestrator ("what is blocking?") are not directives — read
   `bb helm world` / `status` instead of `tell`-ing it a question, or ask the Planner.
 
-## Ask the Planner (Amer); names and custom agents
+## Ask the Planner; names and custom agents
 
 ```bash
 bb helm ask "Should we add a HIPAA reviewer for the clinic app?" [--run <id>]
@@ -140,8 +140,10 @@ bb helm rename <agent> "<name>"
 bb helm retire <agent> --yes [--reason "<why>"]
 ```
 
-- Every run has a **Planner** beside the Orchestrator: **Amer · Planner** and **Gestra ·
-  Orchestrator** by default (settings `plannerName`, `orchestratorName`). The Planner runs on a
+- Every run has a **Planner** and a **Git agent** beside the **Orchestrator**. By default they
+  have no personal names, just their roles; a name set in Settings (`plannerName`,
+  `orchestratorName`, `gitName`) or with `bb helm rename <agent> "<name>"` shows as
+  "Nova · Planner", and `bb helm rename <agent> none` clears it. The Planner runs on a
   model the user chooses: the run's `planner` slot, else the **Default Planner model** setting,
   else the Orchestrator's model. It never picks a model by itself. It is idle until asked, so it
   uses no capacity while waiting. Defaults for new runs: Helm panel → Models → Default models,
@@ -260,7 +262,7 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
   runs may still have one BB worktree per agent on the internal drive; `bb helm worktrees
   --consolidate <app> --yes` brings one back to two (refused while any of them holds uncommitted or
   unmerged work). Put `appsRoot` on an external disk to keep new projects off the Mac.
-- **Git agent** → every run has one (`git`, default name "Git Pusher") beside the Orchestrator.
+- **Git agent** → every run has one (`git`, the free-standing node beside the Orchestrator).
   `bb helm git` opens it; tell it in its thread where to send work (GitHub or any remote, a bare
   repository or folder on the Mac or an external disk). Settings: "Git agent" model and reasoning,
   name, and "When you sign a project off, the Git agent" (push / merge and push / report only). It never

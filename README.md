@@ -40,14 +40,18 @@ Nothing spawns until you start the plan. When the planner has made it, press **O
 
 **Helm remembers where you were.** The New run wizard keeps its draft: brief, portfolio, models, and the planning conversation. Your view, selection and inspector tab are kept too. Leave the panel, reload, or open Helm in another window, and you come back to the same place. **Close** keeps the draft (New run reopens it). **Discard** clears it, and starting a run clears it.
 
-**Talk to Amer, the Planner.** Every run has three named agents at the top:
-- **Gestra · Orchestrator** runs the build and delegates.
-- **Amer · Planner** sits beside it on the model you choose and stays idle until you ask it something.
-- **Git Pusher · Git agent** sits beside them too. It keeps every app to two worktrees and sends work where you say (see below).
+**Talk to the Planner.** Every run has three agents at the top of the graph:
+- The **Orchestrator** runs the build and delegates.
+- The **Planner** sits beside it, on the model you choose, unconnected to the rest, and stays idle until you ask it something.
+- The **Git agent** sits beside them too. It keeps every app to two worktrees and sends work where you say (see below).
 
-Open Amer's thread in the sidebar (or run `bb helm ask "…"`) to ask about the run or change it. It can add a project, add a need such as HIPAA, or change models. It can also design **new kinds of agent** for your run: a GitHub sync agent, a storage guard that keeps work on your external SSD, a HIPAA reviewer, a workflow debugger. Amer names each one and tells you the name; rename any agent with `bb helm rename`. Custom agents report to Gestra, a manager or a lead. Events wake them (no polling), and anything leaving your machine still needs you.
+They are called by their roles. To give one a personal name, set it in Settings or run `bb helm rename planner "Nova"` (it shows as "Nova · Planner"); `bb helm rename planner none` clears it.
 
-**It runs like a company.** Leads decide inside their apps and managers inside their groups. Gestra oversees and delegates; it does not hand out per-item GOs. Questions go up only when they cross a team, and at most three an hour wake the next level. You hear about credentials, spending, private data, access, and questions only you can answer.
+Click the Planner in the graph (or run `bb helm ask "…"`) to ask about the run or change it. It can add a project, add a need such as HIPAA, or change models. It can also design **new kinds of agent** for your run: a GitHub sync agent, a storage guard that keeps work on your external SSD, a HIPAA reviewer, a workflow debugger. It names each one and tells you the name; rename any agent with `bb helm rename`. Custom agents report to the Orchestrator, a manager or a lead. Events wake them (no polling), and anything leaving your machine still needs you.
+
+**Arrange the graph your way.** Drag any card to move it, or drag a group by its label to move the whole group; an expanded app's squad moves with it. Positions are kept per run in this browser, and the reset button next to Fit puts everything back. Drag the inspector's left edge to make it wider or narrower (double-click the edge to reset).
+
+**It runs like a company.** Leads decide inside their apps and managers inside their groups. The Orchestrator oversees and delegates; it does not hand out per-item GOs. Questions go up only when they cross a team, and at most three an hour wake the next level. You hear about credentials, spending, private data, access, and questions only you can answer.
 
 Or use the terminal:
 
@@ -61,7 +65,7 @@ bb helm tell <agent> --message-file note.md
 bb helm model <agent> --model claude-sonnet-5-5 --provider claude-code --reasoning medium
 bb helm slots --replace codex --with claude-code/claude-sonnet-5-5:high   # a provider ran out: move every role off it now
 # or just ask in a thread: the Orchestrator, a Manager or a Lead changes the models of the agents below it
-bb helm ask "Add a HIPAA reviewer for the clinic app"   # talk to the Planner (Amer)
+bb helm ask "Add a HIPAA reviewer for the clinic app"   # talk to the Planner
 bb helm agents                    # the Planner, the Orchestrator, the Git agent and every custom agent
 bb helm git                       # open the Git agent's thread (tell it where to push)
 bb helm worktrees                 # every app's worktrees: the checkout plus one work worktree
@@ -123,7 +127,7 @@ Settings live under `bb plugin config helm`:
 - budget cap, in relative units;
 - wave approval (`ask` / `auto`);
 - permission mode per tier;
-- the Planner's, the Orchestrator's and the Git agent's names (Amer, Gestra and Git Pusher by default);
+- personal names for the Planner, the Orchestrator and the Git agent (none by default: they are called by their roles);
 - what the Git agent does when you sign a project off (push, merge and push, or report only);
 - the default Planner, Orchestrator and Git agent models and their reasoning: dropdowns that list the models of the providers you have connected, so nothing is typed (also in the panel: **Models → Default models**, or `bb helm defaults`). A newly connected provider appears after Helm reloads;
 - showing leads in the sidebar;

@@ -255,12 +255,12 @@ export class Engine {
     return `You manage only these apps: ${names.join(", ") || "none yet"}. Other managers' apps are not yours: do not read their notes, branches or reports and do not direct their leads. Anything that crosses groups goes to the Orchestrator.`;
   }
 
-  /** "Gestra · Orchestrator", "Amer · Planner", "Ledger · GitHub Sync (Tide)", "Lumen · UI builder", "Wellness manager". A personal name always comes with the role. */
+  /** "Orchestrator", "Planner", "Git agent", "Ledger · GitHub Sync (Tide)", "Lumen · UI builder", "Wellness manager". A personal name, when given, always comes with the role. */
   label(n: Pick<NodeInfo, "runId" | "id" | "role" | "platform" | "appId"> & { name?: string | null; title?: string | null }): string {
     const name = nameOf(this, n);
     if (n.role === "orch") return name ? `${name} · Orchestrator` : "Orchestrator";
-    if (n.role === "planner") return `${name ?? "Amer"} · Planner`;
-    if (n.role === "git") return `${name ?? "Git Pusher"} · Git agent`;
+    if (n.role === "planner") return name ? `${name} · Planner` : "Planner";
+    if (n.role === "git") return name ? `${name} · Git agent` : "Git agent";
     const app = n.appId ? this.repo.getApp(n.runId, n.appId) : null;
     if (n.role === "custom") return `${name ?? n.id} · ${n.title ?? "Custom agent"}${app ? ` (${app.name})` : ""}`;
     const base = n.role === "mgr" ? `${this.managerName(n.runId, n.id)} manager` : app ? `${app.name} · ${n.role === "lead" ? "App lead" : roleLabel(n.role, n.platform)}` : n.role === "lead" ? "App lead" : roleLabel(n.role, n.platform);

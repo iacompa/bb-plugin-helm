@@ -209,7 +209,8 @@
 .helm .edges path.deco { stroke: var(--h-fg-4); stroke-dasharray: 3 4; }
 .helm .cluster { position: absolute; border-radius: 16px; border: 1px solid var(--h-line); background: color-mix(in oklab, var(--h-surface) 46%, transparent); }
 .helm .cluster.dashed { border-style: dashed; }
-.helm .cluster .cl-label { position: absolute; left: 14px; top: -9px; padding: 0 7px; font: 600 10px/16px var(--h-mono); letter-spacing: .07em; text-transform: uppercase; color: var(--h-fg-3); background: var(--h-bg); border-radius: 6px; white-space: nowrap; }
+.helm .cluster .cl-label { position: absolute; left: 14px; top: -9px; padding: 0 7px; font: 600 10px/16px var(--h-mono); letter-spacing: .07em; text-transform: uppercase; color: var(--h-fg-3); background: var(--h-bg); border-radius: 6px; white-space: nowrap; cursor: grab; touch-action: none; }
+.helm .node.dragging, .helm .cluster .cl-label.dragging { cursor: grabbing; z-index: 30; box-shadow: var(--h-shadow-pop); transition: none; }
 .helm .zone-label { position: absolute; font: 600 10px/1 var(--h-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--h-fg-4); white-space: nowrap; }
 .helm .node { position: absolute; display: flex; flex-direction: column; gap: 5px; padding: 9px 11px 8px 14px; background: var(--h-surface); border: 1px solid var(--h-line); border-radius: 11px; box-shadow: var(--h-shadow-1); cursor: pointer; transition: box-shadow .15s, border-color .15s, opacity .2s, background .2s; --st: var(--h-idle); user-select: none; -webkit-user-select: none; text-align: left; overflow: visible; }
 .helm .node::before { content: ""; position: absolute; left: 0; top: 11px; bottom: 11px; width: 3px; border-radius: 0 3px 3px 0; background: var(--st); }
