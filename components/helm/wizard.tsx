@@ -95,6 +95,20 @@ function WizardInner() {
   };
   const [limits, setLimits] = useStored<Limits>(`${WIZ}limits`, { managerSpan: 4, orchestratorSpan: 6, concurrency: 24, budgetCap: 2500 }, (v) => isObj(v) && typeof (v as Limits).concurrency === "number");
   const [slots, setSlots] = useStored<SlotMap>(`${WIZ}slots`, () => JSON.parse(JSON.stringify(SEED_PRESETS["Studio default"])) as SlotMap);
+  // the default Planner and Orchestrator models (Models → Default models) fill those roles when empty
+  useEffect(() => {
+    let live = true;
+    h.rpc.call("settings_models", {}).then(
+      (d: { planner: ModelRef | null; orchestrator: ModelRef | null }) => {
+        if (!live) return;
+        setSlots((s) => (s.orchestrator || !d.orchestrator) && (s.planner || !d.planner) ? s : { ...s, ...(!s.orchestrator && d.orchestrator ? { orchestrator: d.orchestrator } : {}), ...(!s.planner && d.planner ? { planner: d.planner } : {}) });
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [h.rpc]); // eslint-disable-line react-hooks/exhaustive-deps
   const [autoAdvance, setAutoAdvance] = useStored<"ask" | "auto">(`${WIZ}autoAdvance`, "ask", (v) => v === "ask" || v === "auto");
   const [dryRun, setDryRun] = useStored(`${WIZ}dryRun`, false);
   const [autonomy, setAutonomy] = useStored<"high" | "ask">(`${WIZ}autonomy`, "high", (v) => v === "high" || v === "ask");

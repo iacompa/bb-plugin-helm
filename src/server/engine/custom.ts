@@ -6,11 +6,11 @@
 // they are woken by events (stage changes, Ready, sign-off, failures) instead of polling.
 
 import type { Catalog, ModelRef, NodeInfo, RunInfo, WakeEvent } from "../../shared/types.ts";
+import type { HelmSettings } from "./context.ts";
 import { WAKE_EVENTS } from "../../shared/types.ts";
 import { HelmError, type Engine } from "./engine.ts";
 import { ORCH_ID, slugify } from "../domain/topology.ts";
 import { CUSTOM_SKILLS, ROLES } from "../domain/roles.ts";
-import { RW } from "../domain/models.ts";
 import { looksLikePath } from "../domain/brief.ts";
 
 export const PLANNER_ID = "planner";
@@ -243,18 +243,9 @@ export function wakeCustom(e: Engine, runId: string, kind: WakeEvent, appId: str
   }
 }
 
-/** The Planner's model: its slot, else the strongest model on the Orchestrator's provider at its highest reasoning. */
-export function plannerModel(run: RunInfo, cat: Catalog | null): ModelRef | null {
-  if (run.slots.planner) return run.slots.planner;
-  const base = run.slots.orchestrator ?? run.slots.lead ?? null;
-  if (!cat) return base;
-  const live = cat.models.filter((m) => !m.hidden && cat.providers.find((p) => p.id === m.providerId)?.available);
-  const same = live.filter((m) => !base || m.providerId === base.providerId);
-  const pool = same.length ? same : live;
-  if (!pool.length) return base;
-  const best = [...pool].sort((a, b) => b.weight - a.weight || Number(b.isDefault) - Number(a.isDefault))[0];
-  const levels = [...best.reasoning].sort((a, b) => (RW[b] ?? 1) - (RW[a] ?? 1));
-  return { providerId: best.providerId, modelId: best.modelId, reasoning: levels[0] ?? best.defaultReasoning ?? null };
+/** The Planner's model: its role's model in the run, else the default in Settings, else the Orchestrator's model. Never picked by price or strength. */
+export function plannerModel(run: RunInfo, settings: HelmSettings): ModelRef | null {
+  return run.slots.planner ?? settings.defaultModels.planner ?? run.slots.orchestrator ?? run.slots.lead ?? null;
 }
 
 /** Make sure the run has its Planner; queue it when the run is running and `queue` is set. Returns the node. */
@@ -262,10 +253,9 @@ export async function ensurePlanner(e: Engine, runId: string, opts: { queue?: bo
   const run = e.run(runId);
   let n = e.repo.getNode(runId, PLANNER_ID);
   if (!n) {
-    const cat = opts.catalog !== undefined ? opts.catalog : await e.catalog(e.repo.runHost(runId)).catch(() => null);
-    const model = plannerModel(run, cat);
+    const model = plannerModel(run, e.settings);
     e.repo.tx(() => {
-      e.repo.insertNode({ runId, id: PLANNER_ID, appId: null, tier: "planner", role: "planner", platform: null, parentId: null, slot: "planner", alsoLead: false, model, modelOverride: !run.slots.planner && !!model, scopeGlobs: ROLES.planner.scope, branch: null, briefMd: null, name: e.settings.names.planner });
+      e.repo.insertNode({ runId, id: PLANNER_ID, appId: null, tier: "planner", role: "planner", platform: null, parentId: null, slot: "planner", alsoLead: false, model, modelOverride: false, scopeGlobs: ROLES.planner.scope, branch: null, briefMd: null, name: e.settings.names.planner });
       e.repo.event(runId, PLANNER_ID, "created", `the run's Planner, on ${model ? `${model.providerId}/${model.modelId}${model.reasoning ? `:${model.reasoning}` : ""}` : "no model yet"}`);
     });
     n = e.repo.getNode(runId, PLANNER_ID)!;

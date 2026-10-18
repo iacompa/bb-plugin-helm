@@ -2,7 +2,7 @@
 // engine's HelmSettings. Every value is also settable with `bb plugin config`.
 
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
-import { LIMIT_CEILINGS, LIMIT_DEFAULTS, type HelmLimits, type Tier } from "../shared/types.ts";
+import { LIMIT_CEILINGS, LIMIT_DEFAULTS, type HelmLimits, type ModelRef, type Tier } from "../shared/types.ts";
 import { DEFAULT_SETTINGS, type HelmSettings } from "./engine/context.ts";
 import { SEED_WEIGHTS } from "./domain/models.ts";
 import type { PermissionMode } from "./bb/port.ts";
@@ -18,6 +18,8 @@ const PERM = {
 export const SETTINGS_DESCRIPTORS = {
   plannerName: { type: "string", label: "Planner's name", description: "What new runs call their Planner, the advisor you talk to (it can design new agents). Rename one run's Planner with bb helm rename planner <name>.", default: DEFAULT_SETTINGS.names.planner },
   orchestratorName: { type: "string", label: "Orchestrator's name", description: "What new runs call their Orchestrator. Rename one run's with bb helm rename orch <name>.", default: DEFAULT_SETTINGS.names.orchestrator },
+  plannerModel: { type: "string", label: "Default Planner model", description: "The model of the Planner (Amer) in runs whose Planner role has no model, written provider/model:reasoning, e.g. claude-code/claude-sonnet-5-5:medium. Empty = the run's Orchestrator model. Easier: Helm panel → Models → Default models.", default: "" },
+  orchestratorModel: { type: "string", label: "Default Orchestrator model", description: "The Orchestrator's model for new runs that do not choose one, written provider/model:reasoning, e.g. claude-code/claude-sonnet-5-5:high. Empty = choose it in each new run. Easier: Helm panel → Models → Default models.", default: "" },
   appsRoot: { type: "string", label: "Apps root folder", description: "Default parent folder for new app repositories: <root>/<run>/<app>. An app can also name its own folder or an existing repository anywhere (brief: \"- Name — tagline · macOS · /path/to/repo\"), and bb helm plan --root sets this per run.", default: DEFAULT_SETTINGS.appsRoot },
   concurrency: { type: "number", label: "Concurrent agents", description: `Default for new runs: how many of a run's agents may run at once (max ${LIMIT_CEILINGS.concurrency}). Change a running run with bb helm limits or the capacity chip.`, default: LIMIT_DEFAULTS.concurrency },
   maxTotalAgents: { type: "number", label: "Agent cap per run", description: `Upper bound on a plan's size (max ${LIMIT_CEILINGS.maxTotalAgents}).`, default: LIMIT_DEFAULTS.maxTotalAgents },
@@ -61,6 +63,22 @@ const clampInt = (v: unknown, min: number, max: number, dflt: number) => {
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : dflt;
 };
 
+/** "provider/model:reasoning" → a model ref (checked against the catalog where it is used). */
+export function parseModelSetting(v: unknown, label: string, warn: (m: string) => void = () => {}): ModelRef | null {
+  if (typeof v !== "string" || !v.trim()) return null;
+  const m = v.trim().match(/^([A-Za-z0-9._-]+)\/([A-Za-z0-9._\-\[\]]+?)(?::([A-Za-z0-9_-]+))?$/);
+  if (!m) {
+    warn(`${label}: "${v}" is not provider/model:reasoning; ignoring it.`);
+    return null;
+  }
+  return { providerId: m[1], modelId: m[2], reasoning: m[3] ?? null };
+}
+
+/** A model ref → the setting's text. */
+export function modelSettingText(r: ModelRef | null | undefined): string {
+  return r ? `${r.providerId}/${r.modelId}${r.reasoning ? `:${r.reasoning}` : ""}` : "";
+}
+
 /** BB setting values → engine settings, clamped to the ceilings (§4.1). */
 export function toHelmSettings(v: Values, warn: (m: string) => void = () => {}): HelmSettings {
   const limits: HelmLimits = {
@@ -103,6 +121,7 @@ export function toHelmSettings(v: Values, warn: (m: string) => void = () => {}):
     showLeadsInSidebar: v.showLeadsInSidebar === true,
     appsRoot: typeof v.appsRoot === "string" && v.appsRoot.trim() ? v.appsRoot.trim() : DEFAULT_SETTINGS.appsRoot,
     names: { planner: nm(v.plannerName, DEFAULT_SETTINGS.names.planner), orchestrator: nm(v.orchestratorName, DEFAULT_SETTINGS.names.orchestrator) },
+    defaultModels: { planner: parseModelSetting(v.plannerModel, "Default Planner model", warn), orchestrator: parseModelSetting(v.orchestratorModel, "Default Orchestrator model", warn) },
     weights,
     zeroTolerance: typeof v.zeroTolerance === "string" ? v.zeroTolerance.split(/[,\s]+/).filter((x) => /^S\d+$/.test(x)) : DEFAULT_SETTINGS.zeroTolerance,
     createRemote: v.createRemote === true,

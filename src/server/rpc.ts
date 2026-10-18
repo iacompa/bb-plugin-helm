@@ -39,6 +39,8 @@ export function registerRpc(bb: BbPluginApi, svc: HelmService): void {
     },
     screens_image: ({ runId, appId, path }) => svc.screens.image(runId, appId, path),
     settings_setPermissions: (input) => svc.setPermissions(input as never),
+    settings_models: () => svc.defaultModels(),
+    settings_setModels: (input) => svc.setDefaultModels(input as never),
     run_setLimits: ({ runId, concurrency, budgetCap, autonomy }) => svc.setLimits(runId, { concurrency, budgetCap, autonomy }),
     run_start: ({ runId, dryRun }) => svc.start(runId, { dryRun }),
     run_finish: ({ runId, status }) => svc.finish(runId, status),

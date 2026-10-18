@@ -4,7 +4,7 @@ import type { Catalog, CatalogModel, ModelRef, Role, SlotId, SlotMap } from "../
 
 export const SLOT_DEFS: Array<{ id: SlotId; group: "Coordination" | "Build" | "Gates" | "Support"; name: string; desc: string; role: Role | null }> = [
   { id: "orchestrator", group: "Coordination", name: "Orchestrator", desc: "Strategy, staffing and the portfolio view. Reads everything.", role: "orch" },
-  { id: "planner", group: "Coordination", name: "Planner", desc: "Amer: answers your questions about the run and designs new agents when they help. Idle until you ask. Leave empty to use the Orchestrator's model at its highest reasoning.", role: "planner" },
+  { id: "planner", group: "Coordination", name: "Planner", desc: "Amer: answers your questions about the run and designs new agents when they help. Idle until you ask. Leave empty to use the default Planner model from Settings (Models → Default models), else the Orchestrator's model.", role: "planner" },
   { id: "manager", group: "Coordination", name: "Managers", desc: "Oversee up to four app leads each. Roll up status.", role: "mgr" },
   { id: "lead", group: "Coordination", name: "App leads", desc: "One per app: spec, contract, integration, decisions.", role: "lead" },
   { id: "ui", group: "Build", name: "UI builders", desc: "Design system, screens, motion. Asset builders use this model too.", role: "ui" },

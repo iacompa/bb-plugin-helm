@@ -501,6 +501,9 @@ export class Engine {
   }
 
   createRun(input: CreateRunInput): { runId: string; plan: TopologyPlan } {
+    // the default models in Settings fill an Orchestrator or Planner role the run left empty
+    const dm = this.settings.defaultModels;
+    input = { ...input, slots: { ...input.slots, ...(!input.slots?.orchestrator && dm.orchestrator ? { orchestrator: dm.orchestrator } : {}), ...(!input.slots?.planner && dm.planner ? { planner: dm.planner } : {}) } };
     const pre = this.preview({ brief: input.brief, portfolio: input.portfolio, slots: input.slots, limits: input.limits });
     if (!pre.plan.ok) throw new HelmError(pre.plan.error ?? "The plan is not valid.", "invalid_plan");
     const limits = { ...LIMIT_DEFAULTS, ...this.settings.limits, ...(input.limits ?? {}) };
@@ -550,7 +553,7 @@ export class Engine {
   /** Effective model for a node right now: node override > app override > run slots (§7.5). */
   effectiveModel(run: RunInfo, n: NodeInfo): ModelRef | null {
     const app = n.appId ? this.repo.getApp(run.id, n.appId) : null;
-    const runSlot = run.slots[n.slot] ?? (n.role === "planner" ? n.model ?? run.slots.orchestrator ?? null : null);
+    const runSlot = run.slots[n.slot] ?? (n.role === "planner" ? this.settings.defaultModels.planner ?? run.slots.orchestrator ?? null : null);
     return resolveModel({ nodeOverride: n.modelOverride ? n.model : null, appOverride: app?.slotOverrides?.[n.slot] ?? null, runSlot });
   }
 

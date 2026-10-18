@@ -693,3 +693,9 @@
 .helm .scr-foot .warn { color: var(--h-warn-ink); display: inline-flex; align-items: center; gap: 4px; }
 .helm .ic.spin { animation: helm-scr-spin 1s linear infinite; }
 @keyframes helm-scr-spin { to { transform: rotate(360deg); } }
+
+/* Model Studio: default Planner and Orchestrator models */
+.helm .defmodels { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 18px; border-bottom: 1px solid var(--h-line); font-size: 12.5px; flex: none; }
+.helm .defmodels-h { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--h-fg); }
+.helm .defmodels-row { display: inline-flex; align-items: center; gap: 8px; }
+.helm .defmodels-row .btn { gap: 6px; max-width: 360px; }

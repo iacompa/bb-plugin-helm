@@ -4,7 +4,7 @@
 import { ScreensView } from "./screens.ts";
 import { refreshRun } from "./engine/refresh.ts";
 import type { Autonomy, DirectiveInfo, ModelRef, NodeInfo, PermissionMode, Portfolio, RunInfo, SlotId, SlotMap, Tier } from "../shared/types.ts";
-import { PERMISSION_KEYS, type SettingsWriter } from "./settings.ts";
+import { PERMISSION_KEYS, modelSettingText, type SettingsWriter } from "./settings.ts";
 import { SLOT_IDS, SEED_PRESETS, modelName, validateRef } from "./domain/models.ts";
 import { ORCH_ID } from "./domain/topology.ts";
 import { ensurePlanner, nameOf, renameNode, retireAgent } from "./engine/custom.ts";
@@ -204,6 +204,44 @@ export class HelmService {
     if (input.approvePrompts) values.approvePrompts = input.approvePrompts;
     if (Object.keys(values).length) await this.writeSettings(values);
     return this.permissions();
+  }
+
+  /** The default Planner and Orchestrator models (Settings), as refs and as setting text. */
+  defaultModels() {
+    const d = this.engine.settings.defaultModels;
+    return { planner: d.planner, orchestrator: d.orchestrator, text: { planner: modelSettingText(d.planner), orchestrator: modelSettingText(d.orchestrator) } };
+  }
+
+  /**
+   * Set the default Planner and/or Orchestrator model (null clears it). New runs use them for an
+   * empty role; with `applyToPlanners`, every live run's Planner also moves to the new model now.
+   */
+  async setDefaultModels(input: { planner?: ModelRef | null; orchestrator?: ModelRef | null; applyToPlanners?: boolean }) {
+    if (!this.writeSettings) throw new HelmError("Settings cannot be written here.", "bad_state");
+    const cat = await this.engine.catalog(null);
+    const values: Record<string, string> = {};
+    for (const key of ["planner", "orchestrator"] as const) {
+      const ref = input[key];
+      if (ref === undefined) continue;
+      if (ref) {
+        const p = validateRef(cat, ref);
+        if (p) throw new HelmError(`${key === "planner" ? "Planner" : "Orchestrator"}: ${p.message}`, "invalid_value");
+      }
+      values[key === "planner" ? "plannerModel" : "orchestratorModel"] = modelSettingText(ref);
+    }
+    if (Object.keys(values).length) await this.writeSettings(values);
+    const moved: string[] = [];
+    if (input.applyToPlanners && input.planner) {
+      for (const run of this.repo.listRuns().filter((r) => r.status === "running" || r.status === "paused")) {
+        const p = this.repo.getNode(run.id, "planner");
+        if (!p || p.status === "done") continue;
+        const want = modelSettingText(input.planner);
+        if (modelSettingText(p.model) === want && modelSettingText(run.slots.planner) === want) continue;
+        await this.changeSlots(run.id, { planner: input.planner }, "all");
+        moved.push(run.name);
+      }
+    }
+    return { ...this.defaultModels(), moved };
   }
 
   private screensView: ScreensView | null = null;

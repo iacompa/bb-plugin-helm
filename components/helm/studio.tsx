@@ -22,6 +22,7 @@ import {
 import { useHelm } from "./ctx.tsx";
 import { Banner, Ic, Modal, ModalHead, ModelChip, Seg, askConfirm, askReason, cx } from "./ui.tsx";
 import { CatalogList, ReasoningControl, pickRef } from "./picker.tsx";
+import { DefaultModels } from "./defaults.tsx";
 
 export interface StudioNode {
   role: Role;
@@ -451,6 +452,7 @@ function StudioModalInner() {
           This run is {run.status}; its models can no longer change.
         </Banner>
       ) : null}
+      <DefaultModels />
       <div className="mbody" style={{ overflow: "hidden" }}>
         <StudioPanel slots={draft} onChange={setDraft} mode="run" baseSlots={base} nodes={nodes} initialSel={h.studio?.slot as SlotId | undefined} readOnly={readOnly} />
       </div>

@@ -36,7 +36,7 @@ const LEDGER = {
   reason: "the human wants everything on GitHub",
 };
 
-test("the run starts with Amer · Planner and Gestra · Orchestrator; the Planner is visible and on the strongest model", async () => {
+test("the run starts with Amer · Planner and Gestra · Orchestrator; the Planner is visible and never picks an expensive model by itself", async () => {
   const { h, runId } = await setup();
   const planner = h.repo.getNode(runId, "planner")!;
   assert.equal(planner.tier, "planner");
@@ -45,9 +45,10 @@ test("the run starts with Amer · Planner and Gestra · Orchestrator; the Planne
   assert.equal(h.engine.label(h.repo.getNode(runId, "orch")!), "Gestra · Orchestrator");
   const t = h.sim.helmThreads().find((x) => x.id === planner.threadId)!;
   assert.equal(t.title, "Amer · Planner · Company");
-  // the cheap preset runs the Orchestrator on Haiku; the Planner takes the strongest model on that provider
+  // no Planner role and no default in Settings: it uses the Orchestrator's model
   assert.equal(h.engine.run(runId).slots.orchestrator?.modelId, "claude-haiku-5-5");
-  assert.equal(h.engine.effectiveModel(h.engine.run(runId), planner)?.modelId, "claude-opus-5-5");
+  assert.equal(h.engine.effectiveModel(h.engine.run(runId), planner)?.modelId, "claude-haiku-5-5");
+  assert.equal(planner.modelOverride, false);
 });
 
 test("the Planner adds a custom agent under the Orchestrator: it starts, the Orchestrator is told, and events wake it", async () => {

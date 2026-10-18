@@ -1,5 +1,5 @@
 // Engine-wide settings and small helpers shared by the engine modules.
-import type { HelmLimits, Tier } from "../../shared/types.ts";
+import type { HelmLimits, ModelRef, Tier } from "../../shared/types.ts";
 import { LIMIT_DEFAULTS } from "../../shared/types.ts";
 import { SEED_WEIGHTS } from "../domain/models.ts";
 import type { PermissionMode } from "../bb/port.ts";
@@ -20,12 +20,15 @@ export interface HelmSettings {
   approvePrompts: "supervisor" | "human";
   /** Default personal names for new runs; any agent can be renamed later. */
   names: { planner: string; orchestrator: string };
+  /** Default models (settings plannerModel, orchestratorModel): used when a run's slot is empty. */
+  defaultModels: { planner: ModelRef | null; orchestrator: ModelRef | null };
 }
 
 export const DEFAULT_SETTINGS: HelmSettings = {
   limits: LIMIT_DEFAULTS,
   permissionMode: { orchestrator: "auto", manager: "auto", lead: "auto", specialist: "auto", gate: "auto", planner: "auto", custom: "auto" },
   names: { planner: "Amer", orchestrator: "Gestra" },
+  defaultModels: { planner: null, orchestrator: null },
   showLeadsInSidebar: false,
   appsRoot: "~/Projects/helm",
   weights: SEED_WEIGHTS,

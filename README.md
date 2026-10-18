@@ -42,7 +42,7 @@ Nothing spawns until you start the plan. When the planner has made it, press **O
 
 **Talk to Amer, the Planner.** Every run has two named agents at the top:
 - **Gestra · Orchestrator** runs the build and delegates.
-- **Amer · Planner** sits beside it on a stronger model and stays idle until you ask it something.
+- **Amer · Planner** sits beside it on the model you choose and stays idle until you ask it something.
 
 Open Amer's thread in the sidebar (or run `bb helm ask "…"`) to ask about the run or change it. It can add a project, add a need such as HIPAA, or change models. It can also design **new kinds of agent** for your run: a GitHub sync agent, a storage guard that keeps work on your external SSD, a HIPAA reviewer, a workflow debugger. Amer names each one and tells you the name; rename any agent with `bb helm rename`. Custom agents report to Gestra, a manager or a lead. Events wake them (no polling), and anything leaving your machine still needs you.
 
@@ -116,6 +116,7 @@ Settings live under `bb plugin config helm`:
 - wave approval (`ask` / `auto`);
 - permission mode per tier;
 - the Planner's and the Orchestrator's names (Amer and Gestra by default);
+- the default Planner and Orchestrator models (also in the panel: **Models → Default models**, or `bb helm defaults`);
 - showing leads in the sidebar;
 - zero-tolerance slop categories;
 - git remotes (off);

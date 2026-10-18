@@ -5,7 +5,8 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { cliCommand, defineCli, PluginCliError, type PluginCliContext, type PluginCliResult } from "@get-bb/plugin-sdk";
-import type { Cascade, Portfolio, Priority, SlotId, SlotMap } from "../shared/types.ts";
+import type { Cascade, ModelRef, Portfolio, Priority, SlotId, SlotMap } from "../shared/types.ts";
+import { resolveModelWord } from "./engine/direct.ts";
 import { Planner } from "./engine/planner.ts";
 import { HelmError } from "./engine/engine.ts";
 import { parseSlotArg, type HelmService } from "./service.ts";
@@ -407,6 +408,31 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             if (i.options.permission && !pm) throw new PluginCliError("Write it as provider=accept-edits|auto|full, e.g. acp-grok=full.", { code: "invalid_value" });
             const r = await svc.setLimits(run.id, { concurrency: i.options.concurrency, budgetCap: i.options.budget, autonomy: i.options.autonomy as "high" | "ask" | undefined, permission: pm ? { providerId: pm[1], mode: pm[2] as "accept-edits" | "auto" | "full" } : undefined });
             return out(i.options.json, { run: r }, line(r));
+          }),
+      }),
+      defaults: cliCommand({
+        summary: "Show or set the default Planner and Orchestrator models (new runs use them when a run leaves those roles empty)",
+        options: {
+          planner: { type: "string", description: "provider/model:reasoning, or none to clear" },
+          orchestrator: { type: "string", description: "provider/model:reasoning, or none to clear" },
+          apply: { type: "boolean", description: "Also move every running run's Planner to the new Planner model now" },
+          json: JSON_OPT,
+        },
+        run: (i) =>
+          guard(async () => {
+            const parse = async (v: string | undefined): Promise<ModelRef | null | undefined> => {
+              if (v === undefined) return undefined;
+              if (/^(none|clear|off|-)$/i.test(v.trim())) return null;
+              const r = resolveModelWord(await svc.engine.catalog(null), v);
+              if ("problem" in r) throw new PluginCliError(r.problem, { code: "invalid_value" });
+              return r.ref;
+            };
+            const planner = await parse(i.options.planner);
+            const orchestrator = await parse(i.options.orchestrator);
+            const r = planner === undefined && orchestrator === undefined ? { ...svc.defaultModels(), moved: [] as string[] } : await svc.setDefaultModels({ planner, orchestrator, applyToPlanners: !!i.options.apply });
+            const lines = [`Planner: ${r.text.planner || "not set (uses the run's Orchestrator model)"}`, `Orchestrator: ${r.text.orchestrator || "not set (choose it in each new run)"}`];
+            if (r.moved.length) lines.push(`Moved the Planner now in: ${r.moved.join(", ")}`);
+            return out(i.options.json, r, lines.join("\n"));
           }),
       }),
       screens: cliCommand({

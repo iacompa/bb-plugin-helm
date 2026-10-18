@@ -48,6 +48,8 @@ export const RPC_SCHEMAS = {
   /** Read-only: whether a planned run can start (models, folders) and what Helm will do with each folder. */
   run_readiness: { input: Run, output: Any },
   settings_permissions: { input: z.object({}), output: Any },
+  settings_models: { input: z.object({}), output: Any },
+  settings_setModels: { input: z.object({ planner: ModelRefZ.nullable().optional(), orchestrator: ModelRefZ.nullable().optional(), applyToPlanners: z.boolean().optional() }), output: Any },
   screens_list: { input: z.object({ runId: Id, appId: z.string().max(80).nullish(), fresh: z.boolean().optional() }), output: Any },
   screens_image: { input: z.object({ runId: Id, appId: z.string().min(1).max(80), path: z.string().min(1).max(1500) }), output: Any },
   settings_setPermissions: { input: z.object({ modes: z.record(z.enum(["orchestrator", "manager", "lead", "specialist", "gate"]), z.enum(["auto", "accept-edits", "full"])).optional(), approvePrompts: z.enum(["supervisor", "human"]).optional() }), output: Any },

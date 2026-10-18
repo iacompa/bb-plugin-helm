@@ -228,7 +228,7 @@ The open decisions from the brief (§17.2) took their defaults. Where reality on
     - **Who it is.** Every run gets a `planner` node (tier and role `planner`, no parent) when it starts. Older running runs get one on the next refresh.
       - Labels show name and role: "Amer · Planner", "Gestra · Orchestrator". Default names are settings (`plannerName`, `orchestratorName`); any agent can be renamed (`bb helm rename`, `node_rename`, `helm_rename_agent`). Names are unique among live agents, and the BB thread title follows.
       - Its thread is visible in the sidebar.
-      - Its model is the new `planner` slot. When that is empty, it uses the highest-weight live model on the Orchestrator's provider at its highest reasoning, so it is stronger than the Orchestrator.
+      - Its model is the new `planner` slot, else the Default Planner model setting, else the Orchestrator's model (decision 47).
     - **Idle by design.** It answers, acts, writes PLANNER-NOTES.md and stops.
       - An idle Planner holds no concurrency, since only running agents count.
       - Refresh does not restart it. The Watcher ignores it.
@@ -265,3 +265,9 @@ The open decisions from the brief (§17.2) took their defaults. Where reality on
     - **File names give the screen and its variant.** For example `<screen>--<state>--<size>--<theme>.png` and `<route>-<width>-<theme>.png`.
     - **The screen map.** The UI builder writes `reports/screens/screens.json`: page names, order, the start page, and tappable areas (fractions of the image) that open another page. The helm-ui skill says how. Without a map, every screenshot is still a page. Map problems (unknown targets, bad paths, invalid JSON) are shown, not fatal.
     - **Read-only and contained.** Two host methods: `screensScan` (walks the given folders, at most 600 files in 10 s) and `screenImage` (png/jpg/gif/webp, at most 8 MB). The server reads only paths the scan returned, and images reach the panel as data URLs over `screens_image`. `bb helm screens --app <name>` lists the pages and links.
+
+47. **Default Planner and Orchestrator models (user request).** "I need to be able in the settings to pick the default planner model and the default orchestrator model … it started with Fable 5.1 on ultracode … that's too expensive."
+    - **The Planner no longer picks a model by itself.** Decision 43 gave it the strongest live model at its highest reasoning; that is gone. Its model is now the run's `planner` slot, else the **Default Planner model** setting, else the run's Orchestrator model. It is never marked as a human override.
+    - **New settings** `plannerModel` and `orchestratorModel` (`provider/model:reasoning`; an unreadable value is ignored with a warning). `createRun` fills an empty Orchestrator or Planner role from them, and the New run wizard pre-fills those roles when they are empty.
+    - **Where to set them.** In the panel: Model Studio's **Default models** bar, with a catalog picker. In the terminal: `bb helm defaults --planner … --orchestrator …` (`none` clears).
+    - **Moving live Planners.** Saving a Planner default can also move every running run's Planner now ("Also switch the Planner in running runs", on by default; `--apply` on the CLI). The move is a recorded `slots` directive for the `planner` role, so another provider gets a new thread with a hand-over. Saving an Orchestrator default never moves a live Orchestrator.
