@@ -106,3 +106,21 @@ test("FYI lines ride along with the next Helm tool result instead of costing a t
   const rec = h.repo.recipients(runId, h.repo.listDirectives(runId, 1)[0].id).find((x) => x.nodeId === mgr.id)!;
   assert.ok(rec.deliveredAt, "the digest receipt is marked delivered");
 });
+
+test("a builder that already reported done is woken by tell or a new task; pause on it is a no-op", async () => {
+  const { h, runId, lead, spec } = await setup();
+  const done = () => h.repo.updateNode(runId, spec.id, { status: "done", endedAt: h.clock.now() });
+  done();
+  const p = await as(h, runId, lead, "helm_direct", { to: spec.id, action: "pause" });
+  assert.match(p.text, /is done; pause has no effect\. To give it more work, use tell/);
+  const r = await as(h, runId, lead, "helm_direct", { to: spec.id, action: "tell", text: "Add the offline banner to Settings too" });
+  assert.equal(r.isError, false, r.text);
+  assert.match(r.text, /it was done, so Helm woke it/);
+  assert.equal(h.repo.getNode(runId, spec.id)!.status, "waiting");
+  const d = h.repo.listDirectives(runId, 1)[0];
+  assert.ok(h.repo.outboxForRun(runId).some((o) => o.kind === "send" && o.idemKey === `${d.id}:${spec.id}`), "the builder is sent the instruction");
+  done();
+  const t = await as(h, runId, lead, "helm_set_task", { nodeId: spec.id, task: "Own the Settings offline banner end to end." });
+  assert.match(t.text, /had reported done, so Helm woke it/);
+  assert.equal(h.repo.getNode(runId, spec.id)!.status, "waiting");
+});

@@ -325,7 +325,19 @@ export class RealBB implements BbPort {
   }
 
   async respondInteraction(args: { threadId: string; interactionId: string; answer: InteractionAnswer }): Promise<void> {
-    await this.sdk.threads.interactions.resolve({ threadId: args.threadId, interactionId: args.interactionId, resolution: toResolution(args.answer) as never });
+    const target = { threadId: args.threadId, interactionId: args.interactionId };
+    // a plugin's form takes a value through `respond`; BB refuses it on `resolve` (HTTP 400)
+    if (args.answer.kind === "value") {
+      await this.sdk.threads.interactions.respond({ ...target, value: args.answer.value as never });
+      return;
+    }
+    try {
+      await this.sdk.threads.interactions.resolve({ ...target, resolution: toResolution(args.answer) as never });
+    } catch (err) {
+      if (!/respond endpoint/i.test(String(err))) throw err;
+      const value = args.answer.kind === "answer" ? (args.answer.answers as never) : args.answer.kind === "allow" ? true : false;
+      await this.sdk.threads.interactions.respond({ ...target, value });
+    }
   }
 
   async listPlugins(): Promise<PluginLite[]> {

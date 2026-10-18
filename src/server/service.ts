@@ -111,7 +111,7 @@ export class HelmService {
     }
     const byLabel = nodes.filter((n) => this.engine.label(n).toLowerCase() === lower);
     if (byLabel.length === 1) return byLabel[0];
-    throw new HelmError(`No agent ${JSON.stringify(ref)} in this run.`, "not_found", "Use a node id such as ledgerly.ui, an app name (its lead) or orch. `bb helm world` lists them.");
+    throw new HelmError(`No agent ${JSON.stringify(ref)} in this run.`, "not_found", "Use a node id such as ledgerly.ui, an app name (its lead), orch, planner or git. `bb helm nodes` lists every agent's id.");
   }
 
   // ───────── the Planner, names and custom agents ─────────
@@ -152,7 +152,10 @@ export class HelmService {
   appFor(runId: string, ref: string) {
     const lower = ref.trim().toLowerCase();
     const app = this.repo.listApps(runId).find((a) => a.id === lower || a.name.toLowerCase() === lower);
-    if (!app) throw new HelmError(`No app ${JSON.stringify(ref)} in this run.`, "not_found");
+    if (!app) {
+      const names = this.repo.listApps(runId).map((a) => a.name);
+      throw new HelmError(`No app ${JSON.stringify(ref)} in this run.`, "not_found", names.length ? `Its apps: ${names.slice(0, 30).join(", ")}${names.length > 30 ? ", …" : ""}.` : "This run has no apps.");
+    }
     return app;
   }
 
@@ -193,7 +196,9 @@ export class HelmService {
   /** Per-role permission modes and who approves agents' prompts (Helm settings, shared with BB's Settings page). */
   permissions() {
     const s = this.engine.settings;
-    return { modes: { ...s.permissionMode }, approvePrompts: s.approvePrompts };
+    // only the roles that have a setting: the panel sends this object back as it is
+    const modes = Object.fromEntries(Object.keys(PERMISSION_KEYS).map((t) => [t, s.permissionMode[t as Tier]])) as Partial<Record<Tier, PermissionMode>>;
+    return { modes, approvePrompts: s.approvePrompts };
   }
 
   async setPermissions(input: { modes?: Partial<Record<Tier, PermissionMode>>; approvePrompts?: "supervisor" | "human" }) {
@@ -259,7 +264,7 @@ export class HelmService {
     return { ...this.defaultModels(), moved };
   }
 
-  /** Every app's worktrees in a run (the rule is two per app), as text and data. */
+  /** Every app's worktrees in a run (checkout, shared work worktree, lanes up to the limit), as text and data. */
   async worktrees(runId: string, app?: string) {
     this.engine.run(runId);
     const appId = app ? this.appFor(runId, app).id : undefined;
@@ -267,7 +272,7 @@ export class HelmService {
     return { apps: list, text: worktreesText(list) };
   }
 
-  /** Bring one app to two worktrees (the human asked; refuses while anything could be lost). */
+  /** Move one app's per-agent worktrees onto the shared work worktree (the human asked; refuses while anything could be lost). */
   async consolidate(runId: string, app: string) {
     return { text: await consolidate(this.engine, runId, this.appFor(runId, app).id, "the human") };
   }
@@ -480,7 +485,7 @@ export class HelmService {
     const lines = [
       `${run.name} (${run.id}) — ${run.status}${run.dryRun ? " · dry run" : ""}${run.spawnsPaused ? " · SPAWNS PAUSED" : ""}`,
       `agents: ${w.agents.spawned} spawned · ${w.agents.running} running · ${w.agents.queued} queued · ${w.agents.planned} planned (cap ${w.agents.cap}) · spend ${this.engine.spend(id).toFixed(1)} of ${run.budgetCap} u`,
-      `apps: ${apps.map((a) => `${a.name} ${a.stage}`).join(" · ")}`,
+      `apps: ${apps.slice(0, 30).map((a) => `${a.name} ${a.stage}`).join(" · ")}${apps.length > 30 ? ` · …and ${apps.length - 30} more (bb helm world --json)` : ""}`,
       `needs you: ${needs.length ? needs.map((n) => `${n.id} ${n.title}`).join(" | ") : "nothing"}`,
     ];
     return `${lines.join("\n")}\n`;
@@ -557,9 +562,10 @@ export class HelmService {
     if (!run || !run.appsRoot || run.status === "planning") return;
     const path = `${this.engine.studioPath(run)}/PORTFOLIO.md`;
     const host = this.engine.host(runId);
-    const cur = (await host.readFile({ path })).content ?? "";
+    const root = this.engine.studioPath(run);
+    const cur = (await host.readFile({ path, root })).content ?? "";
     const next = replaceWorldBlock(cur, worldBlock(this.engine, runId));
-    if (next !== cur) await host.writeFile({ path, content: next });
+    if (next !== cur) await host.writeFile({ path, content: next, root });
     this.repo.updateRun(runId, { portfolioDirty: false });
   }
 

@@ -153,7 +153,12 @@ export function useRunData(rpc: HelmRpc, runId: string | null, onEffects?: (fx: 
     rpc.call("run_get", { runId: id }).then(
       (s: Snapshot) => {
         inflight.current = false;
-        if (runRef.current !== id) return;
+        // the tab switched while this was loading: load the run now shown
+        if (runRef.current !== id) {
+          again.current = false;
+          load();
+          return;
+        }
         stateRef.current = fromSnapshot(s, stateRef.current?.seq ?? 0);
         setError(null);
         setLoading(false);
@@ -165,9 +170,17 @@ export function useRunData(rpc: HelmRpc, runId: string | null, onEffects?: (fx: 
       },
       (e: unknown) => {
         inflight.current = false;
-        if (runRef.current !== id) return;
+        if (runRef.current !== id) {
+          again.current = false;
+          load();
+          return;
+        }
         setError(errMsg(e));
         setLoading(false);
+        if (again.current) {
+          again.current = false;
+          load();
+        }
       },
     );
   }, [rpc]);

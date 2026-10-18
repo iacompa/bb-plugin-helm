@@ -8,7 +8,32 @@ import { errMsg, TYPE_LABEL } from "../format.ts";
 import { ancestorsOf, type RunState } from "../store.ts";
 import { useHelm } from "../ctx.tsx";
 
-/** Load node_get for the selected node; refetch (debounced) on every store change. Keeps the last detail while reloading. */
+/**
+ * `value`, changing at most once per `ms` and always within `ms` of the latest change. A debounce
+ * would never fire while realtime keeps changing the store; this keeps details current in a busy run.
+ */
+export function useThrottled<T>(value: T, ms: number): T {
+  const [v, setV] = useState(value);
+  const latest = useRef(value);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  latest.current = value;
+  useEffect(() => {
+    if (timer.current || Object.is(value, v)) return;
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      setV(latest.current);
+    }, ms);
+  }, [value, v, ms]);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+  return v;
+}
+
+/** Load node_get for the selected node; refetch (throttled) as the store changes. Keeps the last detail while reloading. */
 export function useNodeDetail(nodeId: string | null): { detail: NodeDetail | null; error: string | null; reload: () => void } {
   const h = useHelm();
   const [detail, setDetail] = useState<NodeDetail | null>(null);
@@ -36,20 +61,21 @@ export function useNodeDetail(nodeId: string | null): { detail: NodeDetail | nul
     load();
   }, [nodeId, load]);
   const first = useRef(true);
+  const rev = useThrottled(h.rev, 1500);
   useEffect(() => {
     if (first.current) {
       first.current = false;
       return;
     }
-    const t = setTimeout(load, 800);
-    return () => clearTimeout(t);
-  }, [h.rev, load]);
+    load();
+  }, [rev, load]);
   return { detail: detail && detail.node.id === nodeId ? detail : null, error, reload: load };
 }
 
 export function useAppDetail(appId: string | null | undefined): AppDetail | null {
   const h = useHelm();
   const [detail, setDetail] = useState<AppDetail | null>(null);
+  const rev = useThrottled(h.rev, 1500);
   useEffect(() => {
     if (!appId || !h.runId) {
       setDetail(null);
@@ -66,7 +92,7 @@ export function useAppDetail(appId: string | null | undefined): AppDetail | null
       live = false;
       clearTimeout(t);
     };
-  }, [appId, h.runId, h.rpc, h.rev]);
+  }, [appId, h.runId, h.rpc, rev]);
   return detail && detail.app.id === appId ? detail : null;
 }
 

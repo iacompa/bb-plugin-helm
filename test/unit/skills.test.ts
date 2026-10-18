@@ -42,3 +42,24 @@ test("every skill's frontmatter is valid YAML that BB can read (no bare ': ' or 
     }
   }
 });
+
+test("every helm_* tool a skill names exists, and each role skill's tool table lists only tools that role has", async () => {
+  const { TOOL_NAMES } = await import("../../src/server/agent/tools.ts");
+  const { TOOLS_BY_TIER } = await import("../../src/server/domain/roles.ts");
+  const known = new Set(TOOL_NAMES);
+  const files = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? files(join(dir, d.name)) : d.name.endsWith(".md") ? [join(dir, d.name)] : []));
+  for (const f of files(root)) {
+    for (const m of readFileSync(f, "utf8").matchAll(/\bhelm_[a-z_]+\b/g)) assert.ok(known.has(m[0]), `${f.slice(root.length + 1)} names ${m[0]}, which is not a Helm tool`);
+  }
+  // the "## Your tools" table of a role's own skill: a tool listed there must be callable by that role
+  const owner: Record<string, keyof typeof TOOLS_BY_TIER> = { "helm-lead": "lead" };
+  for (const r of Object.values(ROLES)) owner[r.skill] ??= r.tier;
+  for (const [skill, tier] of Object.entries(owner)) {
+    const text = readFileSync(join(root, skill, "SKILL.md"), "utf8");
+    const section = text.match(/## Your tools[^\n]*\n([\s\S]*?)(\n## |\n---)/)?.[1] ?? "";
+    for (const row of section.split("\n").filter((l) => l.startsWith("| `helm_"))) {
+      for (const m of row.split("|")[1].matchAll(/helm_[a-z_]+/g)) assert.ok(TOOLS_BY_TIER[tier].includes(m[0]), `${skill}'s tool table lists ${m[0]}, which a ${tier} cannot call`);
+    }
+  }
+});

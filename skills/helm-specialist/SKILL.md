@@ -70,7 +70,9 @@ the gates.
    sections, `CONTRACT.md` at the version you were given, your `ACCEPTANCE.md` criteria.
 3. Build inside your scope. Commit small and often on your branch with clear messages.
 4. Verify for real: build and run your tests. Run them through the wrapper so the result is
-   inspectable: `.helm/run-check.sh tests -- <command>` (writes `reports/checks/tests.txt`
+   inspectable, through the wrapper your BRIEF names (`.helm/run-check.sh` in a new
+   repository; a path in Helm's Studio folder in an existing one):
+   `<wrapper> tests -- <command>` (writes `reports/checks/tests.txt`
    with a `[helm-exit:N] [commit:SHA]` trailer; commit first or it is marked dirty). Leave
    those output files untracked unless `reports/` is in your scope.
 5. `helm_slop_scan {}` — fix every finding in your files, above all S1 placeholders, S2
@@ -112,9 +114,10 @@ reason (for example "SPEC: CLI only, no UI surface"), then stop. Your lead relea
 
 ### CONTRACT changes and fix assignments
 
-- "CONTRACT.md is now vN …": merge the integration branch into yours
-  (`git merge <integration branch from helm_context>`), adapt, and `helm_report` if your
-  plan changes.
+- "CONTRACT.md is now vN …": in the shared work worktree (the default) the new CONTRACT is
+  already in your folder: re-read it. In your own worktree (older runs), merge the integration
+  branch into yours (`git merge <integration branch from helm_context>`); never `git pull`,
+  which may fetch from a remote. Then adapt, and `helm_report` if your plan changes.
 - "Fix F-n … at path:line": fix it on your branch, commit, `helm_report {status: "done",
   evidence: [{kind: "commit", ref: "<sha>"}]}`. Fix what the finding says; do not argue it
   away or delete the test that exposed it.
@@ -137,8 +140,9 @@ Your BRIEF names your role and exact scope globs (they win if they differ from b
   scale; real domain sample content ("Night 3 · 7h 12m"), never "Item 1" or lorem; no stock
   gradients; not centred-everything by default.
 - View models come from the CONTRACT — never invent data models, storage or networking.
-- **Evidence:** screenshots of each key screen at three sizes, both themes, committed under
-  `reports/ui/` and cited as `file` refs.
+- **Evidence:** screenshots of each key screen on every device or window size your BRIEF
+  lists, both themes, named as the BRIEF says and committed under `reports/ui/`, cited as
+  `file` refs; plus the screen map `reports/screens/screens.json`.
 
 ### Core builder — `packages/core/**`, `packages/data/**`
 - Models, storage and migrations, sync and conflicts where specified, validation, error
@@ -191,6 +195,12 @@ brief / paused you …" are **binding**. Do not undo them. Adapt, then
 `helm_ack {directiveId: "D-0042", note: "<one line: what you changed>"}`. "The human edited
 your brief" → re-read your BRIEF and stay inside the new scope. Paused → stop after the
 current step and wait (no ack needed). Standing policies (`P-n`) are binding.
+
+"Direction from <supervisor> (<their id>, D-…): …" is an instruction from someone above you in
+the run (your lead, a manager or the Orchestrator). Follow it unless it conflicts with a human
+directive or a standing policy (the human's word wins: say so in your ack), then
+`helm_ack {directiveId, note}` in one line. A direction that pauses you: stop after the current
+step and wait until you are resumed.
 
 ## Escalate
 

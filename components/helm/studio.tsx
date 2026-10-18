@@ -393,6 +393,10 @@ function StudioModalInner() {
   const finished = run && (run.status === "done" || run.status === "cancelled");
   const readOnly = !run || !!finished;
   const changes = changedSlots(draft, base);
+  // Esc, a click outside or Cancel would otherwise drop every role just picked
+  const dismiss = async () => {
+    if (!changes.length || readOnly || (await askConfirm({ title: "Discard your model changes?", body: `${plural(changes.length, "change")} not applied yet.`, ok: "Discard", danger: true }))) close();
+  };
   const started = run && run.status !== "planning";
   // "all" reaches every agent in the changed roles that is not done, per-agent overrides and failed agents included
   const inRoles = nodes.filter((n) => changes.includes(n.slot) && n.status !== "done");
@@ -436,8 +440,8 @@ function StudioModalInner() {
   };
 
   return (
-    <Modal label="Model Studio" cls="lg" onClose={close}>
-      <ModalHead title="Model Studio" onClose={close}>
+    <Modal label="Model Studio" cls="lg" onClose={() => void dismiss()}>
+      <ModalHead title="Model Studio" onClose={() => void dismiss()}>
         {run ? <span className={cx("pill", run.status === "running" ? "run" : run.status === "planning" ? "acc" : "")}>{run.status}</span> : null}
         <span className="muted" style={{ fontSize: 12 }}>
           Which model does each role use? Changes apply to future spawns — and optionally to agents that already exist.
@@ -499,7 +503,7 @@ function StudioModalInner() {
             <span className="hint-t">No changes yet. Pick a role, then a model.</span>
           )}
         </div>
-        <button type="button" className="btn" onClick={close}>
+        <button type="button" className="btn" onClick={() => void dismiss()}>
           Cancel
         </button>
         <button type="button" className="btn primary" disabled={readOnly || busy || !changes.length} onClick={apply}>

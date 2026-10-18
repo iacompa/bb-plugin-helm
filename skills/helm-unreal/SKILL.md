@@ -9,6 +9,8 @@ This skill covers what excellent Unreal Engine 5 work looks like when the only i
 
 Unreal changes between minor versions. Before relying on a flag, API or plugin, check it against the installed engine: its `--help`/`-help` output, its source headers (the engine ships with source headers under `Engine/Source`), or Epic's documentation for that version. Do not claim exact version numbers you have not read from the machine.
 
+**Where evidence goes.** `reports/unreal/…` below means a `unreal/` folder inside your own reports folder, the one in your BRIEF's write scope (`reports/core/unreal/` for the Core builder, `reports/<platform>/unreal/` for a platform builder; a solo lead may use `reports/unreal/`). Never write outside your scope to follow a path in this skill.
+
 ---
 
 ## 1. Find the engine and pin the version

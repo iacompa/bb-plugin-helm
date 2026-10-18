@@ -72,9 +72,9 @@ export const ROLES: Record<Role, RoleDef> = {
     label: "UI builder",
     mission:
       "Build the design system and every screen so the app looks intentionally designed, in both themes, with every state.",
-    scope: ["apps/*/ui/**", "packages/design-system/**", "reports/ui/**"],
+    scope: ["apps/*/ui/**", "packages/design-system/**", "reports/ui/**", "reports/screens/**"],
     inputs: ["SPEC.md (UI sections)", "CONTRACT.md (view models)", "ACCEPTANCE.md (UI criteria)"],
-    outputs: ["design tokens", "components", "screens with loading, empty, error, offline and permission-denied states", "screenshots of each key screen at three sizes in reports/ui/"],
+    outputs: ["design tokens", "components", "screens with loading, empty, error, offline and permission-denied states", "screenshots of each key screen on every device or window size your BRIEF lists, in reports/ui/", "the screen map reports/screens/screens.json"],
     doneMeans: ["every screen in SPEC has all states, both themes and accessibility", "screenshots committed as evidence", "every page of the app in reports/screens/screens.json, captured on the app's own device (phone simulator or emulator for a phone app; only the plugin's own window for a plugin), showing only its UI: no debug, before/after or other apps' captures"],
     skill: "helm-specialist",
   },
@@ -218,7 +218,7 @@ export const ROLES: Record<Role, RoleDef> = {
     slot: "planner",
     label: "Planner",
     mission:
-      "Be the human's strategist for this run. Answer their questions about it, and when something would help (a new project, a different profile, a model change, or an agent that has never existed: a GitHub sync agent, a storage guard, a HIPAA reviewer, a workflow debugger) design it and add it, on the record. You are idle until the human or the Orchestrator writes to you. You do not write app code.",
+      "Be the human's strategist for this run. Answer their questions about it, and when something would help (a new project, a different profile, a model change, or an agent that has never existed: a release-notes writer, a storage guard, a HIPAA reviewer, a workflow debugger) design it and add it, on the record. You are idle until the human or the Orchestrator writes to you. You do not write app code.",
     scope: ["PLANNER-NOTES.md", "agents/**"],
     inputs: ["the human's question", "helm_world", "PORTFOLIO.md", "PLANNER-NOTES.md"],
     outputs: ["answers to the human", "custom agents (helm_create_agent)", "plan changes (helm_propose_plan)", "model changes (helm_set_model)", "PLANNER-NOTES.md"],
@@ -231,11 +231,11 @@ export const ROLES: Record<Role, RoleDef> = {
     slot: "git",
     label: "Git agent",
     mission:
-      "Keep the run's git in order. Every app has exactly two worktrees: the human's checkout and one shared work worktree beside it, on the same disk. Watch for any extra worktree and get it merged and removed. Send work where the human says: GitHub, another remote, or a folder on this Mac or an external disk. Know, for every app, what has reached its main branch and its remote. You do not write app code.",
+      "Keep the run's git in order. Every app has the human's checkout, one shared work worktree beside it on the same disk (`.helm-work/<repository>`), and only the lanes you add for parallel work (`.helm-work/<repository>--<lane>`), within the run's worktree limit (default 10) and branch limit (default 2). Watch for any extra worktree or agent branch and get it merged and removed. Send work where the human says: GitHub, another remote, or a folder on this Mac or an external disk. Know, for every app, what has reached its main branch and its remote. You do not write app code.",
     scope: ["GIT-NOTES.md", "agents/git/**"],
     inputs: ["the human's instructions", "helm_world", "helm_worktrees", "sign-off notices", "worktree alerts from Helm"],
     outputs: ["pushes and merges the human asked for", "consolidated worktrees (helm_consolidate)", "GIT-NOTES.md: where each app's work is"],
-    doneMeans: ["each app has two worktrees", "what the human asked to send is sent, with the commit and destination on record"],
+    doneMeans: ["each app is within its worktree and branch limits, with no extra worktree or agent branch left behind", "what the human asked to send is sent, with the commit and destination on record"],
     skill: "helm-git",
   },
   custom: {
@@ -261,6 +261,7 @@ export const COMMON_RULES = [
   "If you are blocked on a decision only the human can make, call `helm_need` once with a precise question and options, then stop. Do not guess.",
   "Commit small and often on your branch with clear messages. No secrets in code, config or history. Never use a destructive or major-version command (`--force`, dropping data, major dependency upgrades) without an approval through `helm_need`.",
   "Keep your own context small: read diffs, reports and the specific files you need, not the whole repository. Put durable facts in files, not chat.",
+  "`bb helm` is the human's command line. You may run only its read-only commands your skill names (`bb helm screens`, `bb helm world`, `bb helm status`); never one that changes the run (approve, deny, resolve, answer, signoff, sendback, tell, model, slots, priority, limits, start, end, complete, refresh): those are the human's decisions. Use your Helm tools instead.",
 ];
 
 export function roleLabel(role: Role, platform: Platform | null): string {
@@ -276,17 +277,23 @@ export function slotOfRole(role: Role): SlotId {
   return ROLES[role].slot;
 }
 
-export function scopeFor(role: Role, platform: Platform | null, kind: ProjectKind = "app"): string[] {
+/**
+ * The write scope of a role. A lead of a solo app (no squad) builds the whole app, so it owns the
+ * whole repository; the Orchestrator of a one-app run is also its lead and owns the lead's scope too.
+ */
+export function scopeFor(role: Role, platform: Platform | null, kind: ProjectKind = "app", opts: { alsoLead?: boolean; solo?: boolean } = {}): string[] {
+  if (opts.alsoLead && role !== "lead") return [...new Set([...scopeFor(role, platform, kind), ...scopeFor("lead", null, kind, { solo: opts.solo })])];
+  if (role === "lead" && opts.solo && kind !== "review") return ["**"];
   if (kind === "review") {
     // an audit: source is read-only, every auditor writes its part of the report
     if (ROLES[role].tier === "specialist") return [`reports/${role === "platform" && platform ? platform : role}/**`];
     if (role === "lead") return [...ROLES.lead.scope.filter((g) => g !== "integration merges"), "REVIEW.md"];
   }
   if (role === "platform" && platform === "web") return ["apps/web/**", "infra/**", "deploy/**", "reports/web/**"];
-  if (kind === "web" && role === "ui") return ["apps/web/**", "packages/ui/**", "reports/ui/**"];
+  if (kind === "web" && role === "ui") return ["apps/web/**", "packages/ui/**", "reports/ui/**", "reports/screens/**"];
   if (kind === "web" && role === "code") return ["apps/api/**", "packages/core/**", "packages/server/**", "reports/core/**"];
   if (kind === "game" && role === "code") return ["game/**", "packages/core/**", "reports/core/**"];
-  if (kind === "game" && role === "ui") return ["game/**/UI/**", "game/**/ui/**", "reports/ui/**"];
+  if (kind === "game" && role === "ui") return ["game/**/UI/**", "game/**/ui/**", "reports/ui/**", "reports/screens/**"];
   const base = ROLES[role].scope;
   if (role === "platform" && platform) return base.map((g) => g.replace("<platform>", platform));
   return base;
@@ -453,14 +460,18 @@ export function skillsFor(n: { role: Role; platform: Platform | null; alsoLead: 
       if (has("automation") && kind !== "automation") out.push("helm-automation");
     }
     if (n.role === "security" && has("payments")) out.push("helm-payments");
+    // in-app purchases live in the phone shells (StoreKit, Play Billing)
+    if (n.role === "platform" && has("payments") && (n.platform === "ios" || n.platform === "and")) out.push("helm-payments");
     if (n.role === "platform" && kind === "game") out.push("helm-game");
+    // a game's HUD and menus are designed as part of the game, not like a phone app's screens
+    if (n.role === "ui" && kind === "game") out.push("helm-game");
   }
   if (tools.includes("unreal") && (leads || n.role === "code" || n.role === "platform")) out.push("helm-unreal");
   if (leads && solo && app) {
     for (const p of app.platforms.slice(0, 2)) out.push(PLATFORM_SKILL[p]);
     // a solo lead is its own UI builder
     if (kind === "app" || kind === "web") out.push("helm-ui");
-    if (kind !== "app" && kind !== "review") out.push(CORE_SKILL[kind]);
+    if (kind !== "review") out.push(CORE_SKILL[kind]);
     if (kind === "app" && needs.some((x) => SERVER_NEEDS.includes(x))) out.push("helm-backend");
     if (has("database")) out.push("helm-data");
     if (has("payments")) out.push("helm-payments");

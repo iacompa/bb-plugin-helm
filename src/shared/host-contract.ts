@@ -62,7 +62,7 @@ export const HOST_CONTRACT = defineRpcContract({
   worktrees: {
     input: z.object({ repo: z.string().min(1).max(1000), status: z.boolean().optional() }),
     output: z.object({
-      worktrees: z.array(z.object({ path: z.string(), branch: z.string().nullable(), head: z.string().nullable(), main: z.boolean(), dirty: z.number(), missing: z.boolean() })),
+      worktrees: z.array(z.object({ path: z.string(), branch: z.string().nullable(), head: z.string().nullable(), main: z.boolean(), dirty: z.number(), missing: z.boolean(), statusUnknown: z.boolean().optional() })),
       /** Every local branch (at most 300). */
       branches: z.array(z.string()).optional(),
     }),
@@ -110,16 +110,19 @@ export const HOST_CONTRACT = defineRpcContract({
     input: z.object({ repo: z.string().min(1), ref: z.string().min(1), path: z.string().min(1), maxBytes: z.number().int().positive().max(4_000_000).optional() }),
     output: z.object({ content: z.string().nullable() }),
   },
+  /** A worktree's HEAD, branch and uncommitted paths. `missing`: the folder is gone; `error`: git could not tell (never read that as clean); `dirtyCount`: the full count when `dirty` was capped. */
   status: {
     input: z.object({ path: z.string().min(1) }),
-    output: z.object({ head: z.string().nullable(), branch: z.string().nullable(), clean: z.boolean(), dirty: z.array(z.string()) }),
+    output: z.object({ head: z.string().nullable(), branch: z.string().nullable(), clean: z.boolean(), dirty: z.array(z.string()), missing: z.boolean().optional(), error: z.string().optional(), dirtyCount: z.number().optional() }),
   },
+  /** `root`: the file must resolve inside it. Without one, a symbolic link at the path is not followed. */
   readFile: {
-    input: z.object({ path: z.string().min(1), maxBytes: z.number().int().positive().max(4_000_000).optional() }),
+    input: z.object({ path: z.string().min(1), maxBytes: z.number().int().positive().max(4_000_000).optional(), root: z.string().min(1).max(1000).optional() }),
     output: z.object({ content: z.string().nullable() }),
   },
+  /** Written to a temporary file and renamed into place (a link at the path is replaced, not followed). `root`: the file's folder must resolve inside it. */
   writeFile: {
-    input: z.object({ path: z.string().min(1), content: z.string().max(2_000_000) }),
+    input: z.object({ path: z.string().min(1), content: z.string().max(2_000_000), root: z.string().min(1).max(1000).optional() }),
     output: z.object({ ok: z.boolean() }),
   },
   log: {

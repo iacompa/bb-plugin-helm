@@ -11,11 +11,14 @@ Leads → specialists (UI, Core, Platform, Security, optional Test) plus two gat
 is a human directive**: it is binding on the agents it reaches, it is recorded in the ledger,
 and the Orchestrator sees it in world state. Run mutating commands only when the user asked
 for that action; confirm irreversible ones (`stop`, `signoff`, `sendback`, `complete`,
-`deny`) with the user first.
+`deny`) with the user first. Agents that Helm runs may only read (`status`, `world`, `needs`,
+`screens`, `nodes`, …): Helm refuses every other command from their threads.
 
 ## Conventions
 
-- `--run <id>` works on every command; default is the **latest active run**.
+- `--run <id>` picks the run on most commands; the default is the **latest active run**. `start` and
+  `export` take the run id as a positional instead; `runs`, `plan`, `models`, `defaults`, `doctor`,
+  `errors` and `reconcile` take no run.
 - `--json` prints machine-readable output. On failure it prints
   `{"ok":false,"error":{"code":"…","message":"…","hint":"…"}}` and exits non-zero. Prefer
   `--json` in scripts and when you need to parse ids.
@@ -33,10 +36,11 @@ for that action; confirm irreversible ones (`stop`, `signoff`, `sendback`, `comp
 
   Short one-line values (`--reason`, `--name`) go in **single** quotes.
 
-**Node ids:** `orch` (Orchestrator) · `m1`, `m2` … (Managers) · `<app>.lead` ·
-`<app>.code` · `<app>.ui` · `<app>.p.mac|win|ios|and` (platform builders) ·
-`<app>.security` · `<app>.test` · `<app>.research` · `<app>.docs` · `<app>.review` ·
-`<app>.slop`. Get real ids from `bb helm world --json`.
+**Node ids:** `orch` (Orchestrator) · `planner` · `git` (Git agent) · `m1`, `m2` … (Managers) ·
+`<app>.lead` · `<app>.code` · `<app>.ui` · `<app>.p.mac|win|ios|and|web` (platform builders) ·
+`<app>.security` · `<app>.test` · `<app>.research` · `<app>.docs` · `<app>.data` ·
+`<app>.compliance` · `<app>.assets` · `<app>.review` · `<app>.slop`. Commands also take an app name
+(its lead) or an agent's personal name. Get real ids from `bb helm nodes`.
 
 **Stages:** intake → spec → build → integrate → review → slop → (fix) → ready → done.
 Stages advance only on verified evidence (commits, checks run through the evidence wrapper,
@@ -49,7 +53,8 @@ gate verdicts). Only the human moves Ready → Done (`signoff`) or Ready → Bui
 | `bb helm status` | Current run summary: apps by stage, agents, spend, open needs. |
 | `bb helm runs` | All runs with ids and status. |
 | `bb helm world [--run <id>]` | The same data the Orchestrator's `helm_world` returns: stages, open needs, recent directives with receipts, touched agents, policies, managers and apps. |
-| `bb helm needs` | Open Needs-you items (`N-…`): kind, title, asking node, age. |
+| `bb helm nodes [--app <name>]` | Every agent of the run: id, status, label and model. |
+| `bb helm needs [<id>]` | Open Needs-you items (`N-…`): kind, title, who raised it, age, and the exact command for each choice. Sign-off items, or one item asked for by id, show the full body and evidence. |
 | `bb helm errors [--hours <n>] [--all] [--json] [--clear]` | Helm's error journal, newest first. It covers server, RPC, agent-tool and panel failures; `--all` adds refused requests. Run it first whenever something in Helm fails; `bb helm doctor` shows the last 24 hours' count. |
 | `bb helm ledger [--limit <n>]` | Recent directives (`D-…`) with per-agent receipts (queued → delivered → ack/rec, or failed). It includes steers by supervisors (`Manager → Agent: …`), which agents give with `helm_direct`; the human's directives always win. |
 | `bb helm models` | Live model catalog with NEW flags and the current slots. |
@@ -68,8 +73,9 @@ bb helm start <runId> --yes          # approve and start (no prompt)
 - `plan` reads the brief, proposes the portfolio and prints the shape, the forecast and what
   happens to each folder. It is a dry run: no run agents spawn until `start`.
 - **Apps can live anywhere.** `- Name — tagline · macOS · /path/to/folder` puts the app in that
-  folder. An **existing repository** is adopted on a new `helm/<run>/<app>` branch (the human's
-  checkout, uncommitted changes and branches are never touched, and Helm never merges). A missing
+  folder. An **existing repository** is adopted on one `<app>-work` branch at its HEAD (the human's
+  checkout, uncommitted changes and other branches are never touched); on sign-off the Git agent merges
+  it into main and pushes both, unless the setting says push only or report only. A missing
   or empty folder becomes a new repository. `· reads /path/a, ~/path/b` lists read-only
   folders its agents may read. `--root` sets where apps without a folder go for this run
   (default: the apps root setting). One app per repository; a folder inside another repository,
@@ -94,10 +100,13 @@ bb helm start <runId> --yes          # approve and start (no prompt)
   any questions the planner prints.
 - `--preset`: a Model Studio preset (`Studio default`, `Cheap dev run`, `Max quality`, or
   one the user saved). `--slot slot=provider/model:reasoning` overrides one slot; repeat it.
-  Slots: `orchestrator manager lead ui code platform security test review slop research docs`
-  (Data builders use the `code` model, Compliance the `security` model, Asset builders the `ui` model).
+  Slots: `orchestrator manager lead ui code platform security test review slop research docs planner
+  git watcher` (Data builders use the `code` model, Compliance the `security` model, Asset builders the
+  `ui` model; `planner` and `git` fall back to the default models, then the Orchestrator's; `watcher` is
+  optional).
   Check model ids and reasoning levels with `bb helm models` — never guess them.
-- Run `start --dry-run` first and show the user the result; `start` without `--yes` asks.
+- Run `start --dry-run` first and show the user the result. `start` without `--yes` changes nothing: it
+  exits with `confirmation_required` and says how many projects and agents it would create.
 
 ## Steer agents
 
@@ -167,7 +176,7 @@ bb helm retire <agent> --yes [--reason "<why>"]
 - The Planner names each agent and says the name; the user can change it. `rename` works on
   any agent (node id, current name, an app's lead, `orch`, `planner`) and the thread title
   follows. Names are unique in a run.
-- `agents` lists the Planner, the Orchestrator and every custom agent with mission and status.
+- `agents` lists the Planner, the Orchestrator, the Git agent and every custom agent with mission and status.
   `retire` stops and archives a custom agent; built-in agents change through the plan instead.
 
 ### Who decides what
@@ -185,33 +194,44 @@ Helm runs like a company:
 ## Answer Needs-you
 
 ```bash
-bb helm needs
+bb helm needs [<needId>]
 bb helm approve <needId> [--reason 'one line']
 bb helm deny <needId> [--reason 'one line']
 bb helm answer <needId> --message-file answer.md
+bb helm resolve <needId> <choice> [--reason '…' | --message-file f] [--model p/m:level] [--value N] [--findings F-1,F-2] [--rotated] [--yes]
 ```
 
-- `approve` / `deny` — approvals, plan deltas and waves proposed by the Orchestrator,
-  destructive-command requests from agents.
+- `needs` prints, under each item, the exact command for each of its choices. Use those.
+- `approve` / `deny` — only approvals (agents' permission requests), waves and plan changes
+  proposed by the Orchestrator, and the "complete the run?" card. On any other kind they refuse
+  and print the right command.
 - `answer` — a question or decision an agent asked with `helm_need`; the text is delivered
-  into that agent's thread.
+  into that agent's thread. A card asking which permission mode a provider should use is
+  answered with `bb helm limits --permission <provider>=<mode>`.
+- `resolve` — every other choice, the same as the panel's buttons: `retry`, `change-model`,
+  `stop` (failed or stalled agents); `nudge` (stalled); `raise-cap --value N`, `keep-paused`,
+  `stop-run` (budget); `sendback --reason`, `waive --findings … --reason`, `stop` (fix rounds
+  used up, slop); `complete`, `keep-open` (complete-the-run card). `stop` and `stop-run` need
+  `--yes`. Sign-off cards use `signoff` / `sendback` below.
 - Waiving a gate finding is the human's call and needs a typed reason (≥ 20 characters for
-  zero-tolerance slop; secrets also need confirmation the credential was rotated). Agents
-  can never waive.
+  zero-tolerance slop; secrets also need `--rotated`, confirming the credential was rotated).
+  Agents can never waive.
 
 ## Finish apps and runs
 
 ```bash
-bb helm signoff <app>                       # Ready → Done; squad archived bottom-up
+bb helm signoff <app>                       # Ready → Done; squad archived; the Git agent merges and pushes (per the setting)
 bb helm sendback <app> --message-file why.md   # Ready → Build; gates reset, the lead is told why
-bb helm complete [--run <id>]               # stop and archive every remaining agent; repos stay
+bb helm complete --yes [--run <id>]         # stop and archive every remaining agent; repos stay
 bb helm end --run <id> --yes                # end a run now (cancel), or discard a draft plan
-bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provider=mode]   # show or change a run's limits now
+bb helm limits [--run <id>] [--concurrency N] [--budget N] [--autonomy high|ask] [--permission provider=mode]   # show or change a run's limits now
 ```
 
 - `signoff` is the human's acceptance of the app as judged — including anything listed as
-  unverified (e.g. "Windows build not verified on this machine"). Show the user the sign-off
-  item from `bb helm needs` first; never sign off on your own initiative.
+  unverified (e.g. "Windows build not verified on this machine"). With the default setting it
+  also has the Git agent merge `<app>-work` into main and push both. Show the user the sign-off
+  item from `bb helm needs` first (it prints the gates' summaries, the checks, the evidence and
+  what signing off sends); never sign off on your own initiative.
 - `sendback` needs a reason file stating exactly what to redo.
 - `complete` is for when every app is done or cancelled (Helm raises a need suggesting it).
 
@@ -219,6 +239,7 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
 
 | Command | Use |
 |---|---|
+| `bb helm defaults [--planner p/m:level] [--orchestrator p/m:level] [--git p/m:level] [--apply]` | Show or set the default Planner, Orchestrator and Git agent models for new runs (`none` clears one); `--apply` also moves running runs' Planner and Git agent now. |
 | `bb helm reconcile` | Re-sync Helm's database with BB threads and the outbox (after a crash or plugin reload). Safe to repeat. |
 | `bb helm export <run> --out <file>` | JSON snapshot of the run: runs, nodes, directives, findings. |
 
@@ -288,7 +309,7 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
   this keep their `helm/<run>/<app>` branch as the work branch.
 - **Git agent** → every run has one (`git`, the free-standing node beside the Orchestrator).
   Its instructions on git are binding on every agent (delivered as "Git rule"). `bb helm git`
-  opens it; tell it in its thread where to send work (GitHub or any remote, a bare
+  starts it if the run has none and prints its thread; tell it in that thread where to send work (GitHub or any remote, a bare
   repository or folder on the Mac or an external disk). Settings: "Git agent" model and reasoning,
   name, and "When you sign a project off, the Git agent" (merge and push / push / report only). It never
   force-pushes or handles credentials.
@@ -305,8 +326,11 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
 - **"We're out of usage on Codex, move everything to X"** → `bb helm models` to confirm X's
   id, then `bb helm slots --replace codex --with <provider>/<model>:<level>`. Then
   `bb helm needs` to check that the failed cards closed.
-- **"Sign off Tide"** → `bb helm needs` (find the sign-off item, read its evidence and
-  unverified notes to the user), confirm, `bb helm signoff tide`.
+- **"Sign off Tide"** → `bb helm needs` (find the sign-off item; read its evidence, the
+  unverified notes and what signing off sends to the user), confirm, `bb helm signoff tide`.
+- **"Retry the failed agent" / "raise the budget"** → `bb helm needs`, then run the command it
+  prints for that choice (`bb helm resolve N-… retry`, `bb helm resolve N-… raise-cap --value 4000`).
+  A direct `bb helm retry <node>` retries but leaves the failed card open.
 
 ## Never
 

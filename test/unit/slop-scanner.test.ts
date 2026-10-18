@@ -13,6 +13,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { scan, type ScanFile, type ScanFinding, type ScanInput, type AllowEntry } from "../../src/server/domain/slop/scan.ts";
 import { validateVerdict, VerdictSchema, type VerdictEnvironment } from "../../src/server/domain/verdict.ts";
+import { redactSecrets } from "../../src/server/domain/slop/rules.ts";
 
 const ROOT = fileURLToPath(new URL("../fixtures/slop/", import.meta.url));
 const ZERO_TOLERANCE = new Set(["S1", "S2", "S3", "S5", "S6"]);
@@ -160,7 +161,9 @@ test("scanner output is deterministic, sorted, and independent of file order", (
         if (f.line > 0) {
           const file = input.files.find((x) => x.path === f.path);
           assert.ok(file, `${f.path} is a scanned file`);
-          assert.equal(file.content.split(/\r?\n/)[f.line - 1].trim().slice(0, 200), f.quote, `${fmt(f)}: quote is the exact line`);
+          // a secret's quote is its line with the value redacted
+          const exact = file.content.split(/\r?\n/)[f.line - 1];
+          assert.equal((f.rule === "S6" ? redactSecrets(exact) : exact).trim().slice(0, 200), f.quote, `${fmt(f)}: quote is the exact line`);
         }
       }
     }

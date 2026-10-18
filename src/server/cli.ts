@@ -6,8 +6,8 @@ import { githubViewFor, githubText } from "./github-view.ts";
 import { readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { cliCommand, defineCli, PluginCliError, type PluginCliContext, type PluginCliResult } from "@get-bb/plugin-sdk";
-import type { Cascade, ModelRef, Portfolio, Priority, SlotId, SlotMap } from "../shared/types.ts";
-import { resolveModelWord } from "./engine/direct.ts";
+import type { Cascade, ModelRef, NeedInfo, NeedKind, Portfolio, Priority, SlotId, SlotMap } from "../shared/types.ts";
+import { resolveModelWord, type NeedResolution } from "./engine/direct.ts";
 import { Planner } from "./engine/planner.ts";
 import { HelmError } from "./engine/engine.ts";
 import { parseSlotArg, type HelmService } from "./service.ts";
@@ -17,6 +17,11 @@ import { PLATFORM_LABEL, roleLabel } from "./domain/roles.ts";
 import { errorsText } from "./journal.ts";
 
 const MAX_TEXT = 20_000;
+const PLAN_APPS_SHOWN = 40;
+/** What a relative unit is, wherever the CLI prints one. */
+const UNIT_NOTE = "1 u ≈ 133k tokens on a weight-1.0 model such as Sonnet";
+/** The plan's sizing rule in words (C1–C3 are the spec's names for them). */
+const ruleText = (rule: string) => ({ C1: "one app: the Orchestrator is also its lead", C2: "no manager layer", C3: "managers over groups of apps" } as Record<string, string>)[rule] ?? rule;
 /** How long `bb helm plan` waits for a planner before handing back its id. */
 const PLANNER_WAIT_MS = 150_000;
 
@@ -41,6 +46,46 @@ async function readText(path: string, ctx: PluginCliContext, what: string): Prom
   return text.trim();
 }
 
+/** What each Needs-you kind accepts from the terminal: the panel's buttons, by name. */
+const NEED_CHOICES: Record<NeedKind, string[]> = {
+  approval: ["approve", "deny"],
+  question: ["answer"],
+  plan: ["approve", "deny"],
+  signoff: ["signoff", "sendback"],
+  failed: ["retry", "change-model", "stop", "sendback", "waive"],
+  slop: ["sendback", "waive", "stop"],
+  budget: ["raise-cap", "keep-paused", "stop-run"],
+  stalled: ["nudge", "retry", "stop"],
+  model: ["change-model"],
+  decision: ["answer"],
+};
+const CHOICE_ACTION: Record<string, NeedResolution["action"]> = {
+  approve: "approve", deny: "deny", answer: "answer", signoff: "signoff", sendback: "sendback", retry: "retry", nudge: "nudge", stop: "stop", waive: "waive",
+  "change-model": "change_model", "raise-cap": "raise_cap", "keep-paused": "keep_paused", "stop-run": "stop_run", complete: "complete_run", "keep-open": "dismiss",
+};
+const isCompleteCard = (n: NeedInfo) => !!(n.data as { completeRun?: boolean } | null)?.completeRun;
+const permissionOf = (n: NeedInfo) => n.data as { permissionFor?: string; choices?: Record<string, string> } | null;
+const choicesFor = (n: NeedInfo) => (isCompleteCard(n) ? ["complete", "keep-open"] : NEED_CHOICES[n.kind] ?? []);
+
+/** The exact command for each choice on a Needs-you item. */
+function needCommands(n: NeedInfo, app: string | null): string[] {
+  const id = n.id;
+  if (n.kind === "question" || (n.kind === "decision" && !isCompleteCard(n))) {
+    const perm = permissionOf(n);
+    if (perm?.permissionFor) return [`bb helm limits --permission ${perm.permissionFor}=${Object.values(perm.choices ?? {}).join("|")}`];
+    return [`bb helm answer ${id} --message-file <file>${n.options.length ? `   (options: ${n.options.join(" · ")})` : ""}`];
+  }
+  return choicesFor(n).map((c) => {
+    if (c === "signoff") return `bb helm signoff ${app ?? "<app>"}`;
+    if (c === "sendback") return n.kind === "signoff" ? `bb helm sendback ${app ?? "<app>"} --message-file <file>` : `bb helm resolve ${id} sendback --reason '<what to fix>'`;
+    if (c === "waive") return `bb helm resolve ${id} waive --findings F-1,F-2 --reason '<why>'`;
+    if (c === "change-model") return `bb helm resolve ${id} change-model --model provider/model:reasoning`;
+    if (c === "raise-cap") return `bb helm resolve ${id} raise-cap --value <units>`;
+    if (c === "stop" || c === "stop-run") return `bb helm resolve ${id} ${c} --yes`;
+    return `bb helm resolve ${id} ${c}`;
+  });
+}
+
 /** Run a command body, turning Helm's errors into CLI errors. */
 async function guard(fn: () => Promise<PluginCliResult>): Promise<PluginCliResult> {
   try {
@@ -52,8 +97,49 @@ async function guard(fn: () => Promise<PluginCliResult>): Promise<PluginCliResul
   }
 }
 
+/** What an agent Helm runs may use: reading only. Every other command is the human's decision. */
+const AGENT_READ_ONLY = new Set(["status", "runs", "nodes", "world", "agents", "needs", "screens", "ledger", "models", "errors", "doctor"]);
+
 export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: boolean; lines: string[]; checks: unknown[] }> }) {
+  /** Is the caller a thread Helm itself runs? The plan chat (a conversation with the human) may also plan. */
+  const callerOf = (ctx: PluginCliContext | undefined): "agent" | "planchat" | null => {
+    const t = ctx?.threadId;
+    if (!t) return null;
+    if (svc.repo.getMeta(`planchat-thread:${t}`)) return "planchat";
+    if (svc.repo.nodeByThread(t) || svc.repo.getMeta(`planner-thread:${t}`)) return "agent";
+    for (const run of svc.repo.activeRuns()) {
+      if (svc.engine.retiredThreads(run.id).includes(t)) return "agent";
+      if ((svc.repo.getMeta(`watcher:${run.id}`) ?? "").includes(t)) return "agent";
+    }
+    return null;
+  };
+  /** Commands that change state refuse agents Helm runs: approving, signing off, limits and ending runs belong to the human. */
+  const humanOnly = <T extends Record<string, unknown>>(cmds: T): T => {
+    for (const [name, c] of Object.entries(cmds)) {
+      const cmd = c as { run?: (i: unknown, ctx: PluginCliContext) => Promise<PluginCliResult> };
+      if (AGENT_READ_ONLY.has(name) || typeof cmd.run !== "function") continue;
+      const run = cmd.run;
+      cmd.run = async (i, ctx) => {
+        const who = callerOf(ctx);
+        if (who === "agent" || (who === "planchat" && name !== "plan"))
+          throw new PluginCliError(`bb helm ${name} is the human's command; an agent Helm runs may only read (${[...AGENT_READ_ONLY].join(", ")}).`, { code: "forbidden", hint: "Use your Helm tools (helm_need, helm_report, helm_message) and let the human decide." });
+        return run(i, ctx);
+      };
+    }
+    return cmds;
+  };
+
   const runOf = (r?: string) => svc.runFor(r ?? null);
+  const needOf = (runId: string, ref: string) => svc.repo.getNeed(runId, ref.toUpperCase().startsWith("N-") ? ref.toUpperCase() : `N-${ref}`);
+  const appNameOf = (runId: string, n: NeedInfo) => (n.appId ? (svc.repo.getApp(runId, n.appId)?.name ?? n.appId) : null);
+  const signoffText = (app: string) => {
+    const g = svc.engine.settings.gitOnSignoff;
+    return g === "merge-push"
+      ? `${app} is signed off. The Git agent now merges its work branch into main and pushes both (setting: When you sign a project off).`
+      : g === "push"
+        ? `${app} is signed off. The Git agent now pushes its work branch; main is left for you to merge.`
+        : `${app} is signed off. Nothing is merged or pushed (the Git agent only reports); merge its work branch into main yourself.`;
+  };
 
   const lifecycle = (type: "pause" | "resume" | "stop" | "retry", summary: string) =>
     cliCommand({
@@ -77,10 +163,13 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
       run: (i) =>
         guard(async () => {
           const run = runOf(i.options.run);
-          const need = svc.repo.getNeed(run.id, i.positionals.needId!.toUpperCase().startsWith("N-") ? i.positionals.needId!.toUpperCase() : `N-${i.positionals.needId}`);
-          const isComplete = !!(need?.data as { completeRun?: boolean } | undefined)?.completeRun;
+          const need = needOf(run.id, i.positionals.needId!);
+          const isComplete = !!need && isCompleteCard(need);
+          // approve/deny only act on approvals, waves and plan changes; anything else would close the card and do nothing
+          if (need?.state === "open" && !isComplete && need.kind !== "approval" && need.kind !== "plan")
+            throw new PluginCliError(`${need.id} is a ${need.kind} item; ${action} does not act on it.`, { code: "invalid_value", hint: `Use one of:\n  ${needCommands(need, appNameOf(run.id, need)).join("\n  ")}` });
           const r = await svc.resolve(run.id, i.positionals.needId!, { action: isComplete ? (action === "approve" ? "complete_run" : "dismiss") : action, text: i.options.reason });
-          return out(i.options.json, r, `${r.need?.id} ${action === "approve" ? "approved" : "denied"}${r.directive ? ` (${r.directive.id})` : ""}.`);
+          return out(i.options.json, r, r.already ?? `${r.need?.id} ${action === "approve" ? "approved" : "denied"}${r.directive ? ` (${r.directive.id})` : ""}.`);
         }),
     });
 
@@ -88,7 +177,7 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
     name: "helm",
     summary: "Run a portfolio of apps, websites, games, automation and reviews with a supervised hierarchy of agents",
     description: "Helm plans an org (Orchestrator, Managers, App Leads, Specialists, gates), spawns it lazily and lets you steer any agent; every change reaches its whole chain of command.",
-    commands: {
+    commands: humanOnly({
       status: cliCommand({
         summary: "Current run summary",
         options: { run: RUN, json: JSON_OPT },
@@ -99,24 +188,42 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
           }),
       }),
       runs: cliCommand({
-        summary: "List runs",
-        options: { json: JSON_OPT },
+        summary: "List runs, newest first",
+        options: { json: JSON_OPT, limit: { type: "integer", min: 1, max: 500, description: "How many (default 20)" } },
         run: (i) =>
           guard(async () => {
-            const runs = svc.repo.listRuns().sort((a, b) => b.createdAt - a.createdAt);
-            const text = runs.length ? runs.map((r) => `${r.id}  ${r.status.padEnd(9)} ${r.name}`).join("\n") : "No runs yet.";
+            const all = svc.repo.listRuns().sort((a, b) => b.createdAt - a.createdAt);
+            const runs = all.slice(0, i.options.limit ?? 20);
+            const text = runs.length ? [...runs.map((r) => `${r.id}  ${r.status.padEnd(9)} ${r.name}`), all.length > runs.length ? `…and ${all.length - runs.length} older (--limit N).` : ""].filter(Boolean).join("\n") : "No runs yet.";
             return out(i.options.json, { runs }, text);
           }),
       }),
+      nodes: cliCommand({
+        summary: "Every agent of a run: id, role, status and model (the ids other commands take)",
+        options: { run: RUN, app: { type: "string", description: "Only this app's agents (name or id)" }, json: JSON_OPT },
+        run: (i) =>
+          guard(async () => {
+            const run = runOf(i.options.run);
+            const appId = i.options.app ? svc.appFor(run.id, i.options.app).id : null;
+            const nodes = svc.repo.listNodes(run.id).filter((n) => !appId || n.appId === appId);
+            const model = (n: (typeof nodes)[number]) => {
+              const m = n.model ?? svc.engine.effectiveModel(run, n);
+              return m ? `${m.providerId}/${m.modelId}${m.reasoning ? `:${m.reasoning}` : ""}` : "no model";
+            };
+            const w = Math.min(28, Math.max(...nodes.map((n) => n.id.length), 4));
+            const text = nodes.length ? nodes.map((n) => `${n.id.padEnd(w)}  ${n.status.padEnd(8)} ${svc.engine.label(n)}  ·  ${model(n)}`).join("\n") : "No agents.";
+            return out(i.options.json, { nodes: nodes.map((n) => ({ id: n.id, label: svc.engine.label(n), role: n.role, status: n.status, appId: n.appId, model: model(n) })) }, text);
+          }),
+      }),
       plan: cliCommand({
-        summary: "Create a plan from a brief (nothing spawns); prints the shape and forecast",
+        summary: "Create a plan from a brief; prints the shape, forecast and problems. No run agent spawns (a free-text brief starts one short planner thread to read it)",
         options: {
           "brief-file": { type: "string", required: true, description: "File with the plain-language brief", placeholder: "file" },
           preset: { type: "string", description: "Model preset (e.g. \"Cheap dev run\")" },
           slot: { type: "string", repeatable: true, description: "slot=provider/model:reasoning (repeatable)" },
           name: { type: "string", description: "Run name" },
           concurrency: { type: "integer", min: 1, max: 48, description: "Concurrent agents" },
-          auto: { type: "boolean", description: "Admit later waves without asking" },
+          auto: { type: "boolean", description: "Admit later waves without asking (with autonomy high, the default, the Orchestrator admits them anyway)" },
           shape: { type: "enum", values: ["solo", "lean", "full"], description: "Squad shape for every app (default full)" },
           "planner-model": { type: "string", description: "Model for reading a free-text brief: provider/model:reasoning (default: the code slot at medium)" },
           planner: { type: "string", description: "Use the portfolio of a finished planner (id from an earlier bb helm plan)" },
@@ -147,11 +254,12 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             const r = await svc.plan({ brief, portfolio, name: i.options.name, preset: i.options.preset, slots, limits: i.options.concurrency ? { concurrency: i.options.concurrency } : undefined, autoAdvance: i.options.auto ? "auto" : "ask", shape: i.options.shape as "solo" | "lean" | "full" | undefined, appsRoot: i.options.root });
             const c = r.plan.counts;
             const lines = [
-              `Plan ${r.runId}: ${c.apps} apps · ${c.managers} managers · ${c.leads} leads · ${c.specialists} specialists · ${c.gates} gates · ${c.total} agents (${r.plan.rule})`,
+              `Plan ${r.runId}: ${c.apps} apps · ${c.managers} managers · ${c.leads} leads · ${c.specialists} specialists · ${c.gates} gates · ${c.total} agents, plus the Planner and the Git agent (${ruleText(r.plan.rule)})`,
               r.plan.why,
               "Projects:",
-              ...r.plan.apps.slice(0, 40).map((a) => `  · ${a.name} — ${profileLine(a)}${a.platforms.length ? ` · ${a.platforms.map((x) => PLATFORM_LABEL[x]).join(" ")}` : ""} · ${a.shape}: ${a.squad.filter((m) => m.role !== "review" && m.role !== "slop").map((m) => roleLabel(m.role, m.platform)).join(", ") || "the lead builds it"} (+ Reviewer, Slop Hunter)`),
-              `Forecast: ${fmtUnits(r.forecast.low)}–${fmtUnits(r.forecast.high)} (estimate)`,
+              ...r.plan.apps.slice(0, PLAN_APPS_SHOWN).map((a) => `  · ${a.name} — ${profileLine(a)}${a.platforms.length ? ` · ${a.platforms.map((x) => PLATFORM_LABEL[x]).join(" ")}` : ""} · ${a.shape}: ${a.squad.filter((m) => m.role !== "review" && m.role !== "slop").map((m) => roleLabel(m.role, m.platform)).join(", ") || "the lead builds it"} (+ Reviewer, Slop Hunter)`),
+              ...(r.plan.apps.length > PLAN_APPS_SHOWN ? [`  …and ${r.plan.apps.length - PLAN_APPS_SHOWN} more (--json lists them all)`] : []),
+              `Forecast: ${fmtUnits(r.forecast.low)}–${fmtUnits(r.forecast.high)} (estimate; ${UNIT_NOTE})`,
               ...(portfolio ? [`Read by the planner: ${portfolio.apps.map((a) => a.name).join(", ")}`] : []),
               ...(questions.length ? ["The planner asks:", ...questions.map((q) => `  ? ${q}`)] : []),
               ...(r.assumed.length ? [`Assumed: ${r.assumed.join("; ")}`] : []),
@@ -171,15 +279,15 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             const run = svc.runFor(i.positionals.runId);
             if (!i.options.yes && !i.options["dry-run"]) {
               const c = svc.engine.plan(run.id).counts;
-              throw new PluginCliError(`Starting ${run.name} creates up to ${c.apps} projects and spawns up to ${c.total} agents over the run.`, { code: "confirmation_required", hint: `Re-run with --yes to start, or --dry-run to only write the plan files.` });
+              throw new PluginCliError(`Starting ${run.name} creates up to ${c.apps} projects and spawns up to ${c.total + 2} agents over the run (with the Planner and the Git agent), each its own thread on your providers. Budget cap: ${Math.round(run.budgetCap)} u (${UNIT_NOTE}).`, { code: "confirmation_required", hint: `Re-run with --yes to start, or --dry-run to only write the plan files.` });
             }
             const r = await svc.start(run.id, { dryRun: i.options["dry-run"] });
-            if (!r.ok) throw new PluginCliError(`Cannot start yet:\n${r.problems.map((p) => `  - ${p}`).join("\n")}`, { code: "not_ready" });
+            if (!r.ok) throw new PluginCliError(`Cannot start yet:\n${r.problems.map((p) => `  - ${p}`).join("\n")}`, { code: "not_ready", hint: `Models: bb helm slots --run ${run.id} --slot role=provider/model:reasoning works on a plan. Folders: fix the brief or --root and run bb helm plan again.` });
             return out(i.options.json, r, r.dryRun ? `Dry run written to ${r.studioPath}. Nothing was spawned.` : `${r.run.name} is running. Watch it with: bb helm status`);
           }),
       }),
       world: cliCommand({
-        summary: "The same data as helm_world",
+        summary: "Full world state as JSON: stages, open needs, recent directives with receipts, policies, managers and apps",
         options: { run: RUN, json: JSON_OPT },
         run: (i) =>
           guard(async () => {
@@ -326,20 +434,87 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
         run: (i) =>
           guard(async () => {
             const run = runOf(i.options.run);
-            if (!i.options.yes) throw new PluginCliError("Retiring stops the agent for good. Re-run with --yes.", { code: "confirm_required" });
+            if (!i.options.yes) throw new PluginCliError("Retiring stops the agent for good.", { code: "confirmation_required", hint: "Re-run with --yes." });
             const text = svc.retire(run.id, i.positionals.agent!, i.options.reason ?? "");
             return out(i.options.json, { result: text }, text);
           }),
       }),
       needs: cliCommand({
-        summary: "Open Needs-you items",
+        summary: "Open Needs-you items: what each is about, its evidence, and the command for each choice",
+        positionals: [{ name: "needId", description: "Show one item in full (N-12 or 12)", required: false }] as const,
         options: { run: RUN, json: JSON_OPT },
         run: (i) =>
           guard(async () => {
             const run = runOf(i.options.run);
-            const needs = svc.repo.listNeeds(run.id, "open");
-            const text = needs.length ? needs.map((n) => `${n.id}  [${n.kind}]  ${n.title}\n      ${n.body.split("\n")[0].slice(0, 160)}\n      options: ${n.options.join(" · ")}`).join("\n") : "Nothing needs you.";
+            const one = i.positionals.needId ? needOf(run.id, i.positionals.needId) : null;
+            if (i.positionals.needId && !one) throw new PluginCliError(`No need ${i.positionals.needId} in ${run.name}.`, { code: "not_found", hint: "bb helm needs lists the open ones." });
+            const needs = one ? [one] : svc.repo.listNeeds(run.id, "open");
+            const SHOWN = 30;
+            const indent = (t: string) => t.split("\n").map((l) => `      ${l}`).join("\n");
+            const card = (n: NeedInfo) => {
+              // a sign-off, or one item asked for by id, shows everything: what was judged, what is unverified, what signing off sends
+              const full = !!one || n.kind === "signoff";
+              const body = full ? n.body : n.body.split("\n").slice(0, 3).join("\n").slice(0, 400);
+              const who = n.nodeId ? svc.repo.getNode(run.id, n.nodeId) : null;
+              const mins = Math.max(0, Math.round((svc.engine.now() - n.createdAt) / 60_000));
+              return [
+                `${n.id}  [${n.kind}]  ${n.title}${n.state === "open" ? "" : `  (resolved)`}`,
+                `      from ${who ? svc.engine.label(who) : "Helm"} · ${mins < 90 ? `${mins} min` : `${Math.round(mins / 60)} h`} ago`,
+                body ? indent(body) : "",
+                full && n.evidence ? indent(`Evidence: ${n.evidence}`) : "",
+                n.state === "open" ? `      → ${needCommands(n, appNameOf(run.id, n)).join("\n      → ")}` : "",
+              ].filter(Boolean).join("\n");
+            };
+            const text = needs.length
+              ? [...needs.slice(0, SHOWN).map(card), needs.length > SHOWN ? `…and ${needs.length - SHOWN} more (--json lists them all).` : "", one || needs.every((n) => n.kind === "signoff") ? "" : "bb helm needs <id> shows one item in full."].filter(Boolean).join("\n")
+              : "Nothing needs you.";
             return out(i.options.json, { needs }, text);
+          }),
+      }),
+      resolve: cliCommand({
+        summary: "Act on a Needs-you item with one of its choices (the panel's buttons): retry, stop, change-model, raise-cap, keep-paused, stop-run, nudge, sendback, waive, complete, keep-open, approve, deny, answer",
+        positionals: [
+          { name: "needId", description: "N-12 or 12", required: true },
+          { name: "choice", description: "What to do; bb helm needs prints the choices for each item", required: true },
+        ] as const,
+        options: {
+          reason: { type: "string", description: "One-line reason or answer (sendback, waive and answer need one)" },
+          "message-file": { type: "string", description: "File with the reason or answer, instead of --reason", placeholder: "file" },
+          model: { type: "string", description: "change-model: provider/model:reasoning (check bb helm models)" },
+          value: { type: "integer", min: 1, max: 1000000, description: "raise-cap: the new budget cap in relative units" },
+          findings: { type: "string", description: "waive: comma-separated finding ids, e.g. F-3,F-7" },
+          rotated: { type: "boolean", description: "waive a secret finding: confirm the credential was rotated" },
+          yes: { type: "boolean", description: "Confirm stop and stop-run" },
+          run: RUN,
+          json: JSON_OPT,
+        },
+        run: (i, ctx) =>
+          guard(async () => {
+            const run = runOf(i.options.run);
+            const need = needOf(run.id, i.positionals.needId!);
+            if (!need) throw new PluginCliError(`No need ${i.positionals.needId} in ${run.name}.`, { code: "not_found", hint: "bb helm needs lists the open ones." });
+            const choice = i.positionals.choice!.trim().toLowerCase().replace(/_/g, "-");
+            const allowed = need.kind === "question" || (need.kind === "decision" && !isCompleteCard(need)) ? ["answer"] : choicesFor(need);
+            if (need.state === "open" && !allowed.includes(choice))
+              throw new PluginCliError(`${need.id} (${need.kind}) takes: ${allowed.join(", ")}.`, { code: "invalid_value", hint: needCommands(need, appNameOf(run.id, need)).join("\n") });
+            if ((choice === "stop" || choice === "stop-run") && !i.options.yes && need.state === "open")
+              throw new PluginCliError(choice === "stop-run" ? `This stops ${run.name}: every remaining agent is stopped.` : `This stops ${need.nodeId ?? "the agent"}${need.kind === "slop" || need.kind === "signoff" ? " and its team" : ""}; it is not restarted.`, { code: "confirmation_required", hint: "Re-run with --yes." });
+            const text = i.options["message-file"] ? await readText(i.options["message-file"], ctx, "reason") : (i.options.reason ?? "").trim();
+            let model: ModelRef | undefined;
+            if (choice === "change-model") {
+              if (!i.options.model) throw new PluginCliError("Say which model with --model provider/model:reasoning.", { code: "missing_required", hint: "bb helm models lists them." });
+              const m = resolveModelWord(await svc.engine.catalog(svc.repo.runHost(run.id)), i.options.model);
+              if ("problem" in m) throw new PluginCliError(m.problem, { code: "invalid_value" });
+              model = m.ref;
+            }
+            const findingIds = choice === "waive" ? (i.options.findings ?? "").split(/[,\s]+/).map((x) => x.trim().toUpperCase()).filter(Boolean) : undefined;
+            if (choice === "waive" && !findingIds?.length) throw new PluginCliError("Name the findings to waive with --findings F-1,F-2.", { code: "missing_required" });
+            if (need.kind === "signoff" && choice === "signoff") {
+              const r = await svc.resolve(run.id, need.id, { action: "signoff", text });
+              return out(i.options.json, r, r.already ?? signoffText(appNameOf(run.id, need) ?? "The app"));
+            }
+            const r = await svc.resolve(run.id, need.id, { action: CHOICE_ACTION[choice] ?? (choice as NeedResolution["action"]), text, model, value: i.options.value, findingIds, rotatedConfirmed: i.options.rotated });
+            return out(i.options.json, r, r.already ?? `${need.id}: ${choice} done${r.directive ? ` (${r.directive.id}; the chain above was told)` : ""}.`);
           }),
       }),
       approve: decide("approve"),
@@ -353,7 +528,7 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             const run = runOf(i.options.run);
             const text = await readText(i.options["message-file"], ctx, "answer");
             const r = await svc.resolve(run.id, i.positionals.needId!, { action: "answer", text });
-            return out(i.options.json, r, `${r.need?.id} answered${r.directive ? ` (${r.directive.id})` : ""}.`);
+            return out(i.options.json, r, r.already ?? `${r.need?.id} answered${r.directive ? ` (${r.directive.id})` : ""}.`);
           }),
       }),
       signoff: cliCommand({
@@ -364,7 +539,7 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
           guard(async () => {
             const run = runOf(i.options.run);
             const r = await svc.signoffApp(run.id, i.positionals.app!, i.options.accept);
-            return out(i.options.json, r, `Signed off. Its agents are being archived; the repo and branches stay.`);
+            return out(i.options.json, r, r.already ?? `${signoffText(svc.appFor(run.id, i.positionals.app!).name)} Its agents are being archived; the repository stays.`);
           }),
       }),
       sendback: cliCommand({
@@ -380,12 +555,12 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
           }),
       }),
       complete: cliCommand({
-        summary: "Complete a run whose apps are all signed off (stops and archives every remaining agent)",
+        summary: "Complete a run whose apps are all signed off (stops and archives every remaining agent); bb helm end cancels one that is not",
         options: { run: RUN, yes: { type: "boolean", description: "Confirm" }, cancel: { type: "boolean", description: "Cancel the run instead (apps need not be done)" }, json: JSON_OPT },
         run: (i) =>
           guard(async () => {
             const run = runOf(i.options.run);
-            if (!i.options.yes) throw new PluginCliError(`This stops and archives every remaining agent of ${run.name}, including the Orchestrator. Repos and branches stay.`, { code: "confirmation_required", hint: "Re-run with --yes." });
+            if (!i.options.yes) throw new PluginCliError(`This stops and archives every remaining agent of ${run.name}, including the Orchestrator. Repos and branches stay.`, { code: "confirmation_required", hint: i.options.cancel ? "Re-run with --yes." : "Re-run with --yes. To end a run whose apps are not all done, use bb helm end --yes." });
             const r = await svc.finish(run.id, i.options.cancel ? "cancelled" : "done");
             return out(i.options.json, { run: r }, `${r.name} is ${r.status}.`);
           }),
@@ -395,7 +570,7 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
         options: {
           run: RUN,
           concurrency: { type: "integer", min: 1, max: 48, description: "Agents allowed to run at once in this run" },
-          budget: { type: "integer", min: 1, max: 1000000, description: "Budget cap in relative units (raising it above the spend lifts a budget pause)" },
+          budget: { type: "integer", min: 1, max: 1000000, description: "Budget cap in relative units (1 u is about 133k tokens on a weight-1.0 model such as Sonnet; raising it above the spend lifts a budget pause)" },
           autonomy: { type: "enum", values: ["high", "ask"], description: "high: the Orchestrator decides everything except credentials, spending, private data and access; ask: every question, wave and plan change asks you" },
           permission: { type: "string", description: "provider=accept-edits|auto|full: the mode for a provider that cannot run Helm's configured one (e.g. acp-grok=full)" },
           json: JSON_OPT,
@@ -439,7 +614,7 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
           }),
       }),
       worktrees: cliCommand({
-        summary: "Every app's worktrees (the rule is two: your checkout and one shared work worktree); --consolidate <app> brings an app back to two",
+        summary: "Every app's worktrees: your checkout, the one shared work worktree, and any lanes the Git agent added (limit: worktrees per project); --consolidate <app> moves an older app's per-agent worktrees onto the shared one",
         options: {
           run: RUN,
           app: { type: "string", description: "Only this app (name or id)" },
@@ -452,7 +627,7 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
           guard(async () => {
             const run = runOf(i.options.run);
             if (i.options.consolidate) {
-              if (!i.options.yes) throw new PluginCliError(`This stops ${i.options.consolidate}'s agents, removes their own worktrees (only when everything there is committed and merged) and restarts them in the shared work worktree. Re-run with --yes.`, { code: "confirm" });
+              if (!i.options.yes) throw new PluginCliError(`This stops ${i.options.consolidate}'s agents, removes their own worktrees (only when everything there is committed and merged) and restarts them in the shared work worktree. `, { code: "confirmation_required", hint: "Re-run with --yes." });
               const r = await svc.consolidate(run.id, i.options.consolidate);
               return out(i.options.json, r, r.text);
             }
@@ -466,7 +641,7 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
           }),
       }),
       git: cliCommand({
-        summary: "Start the run's Git agent if it has none (runs started before it existed); talk to it in its thread",
+        summary: "Start the run's Git agent if it has none (runs started before it existed) and print its thread; talk to it there",
         options: { run: RUN, json: JSON_OPT },
         run: (i) =>
           guard(async () => {
@@ -568,7 +743,7 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
           }),
       }),
       reconcile: cliCommand({
-        summary: "Compare Helm's state with BB's and repair it (§9.4)",
+        summary: "Compare Helm's state with BB's threads and repair it (after a crash or a plugin reload); safe to repeat",
         options: { json: JSON_OPT },
         run: (i) =>
           guard(async () => {
@@ -588,6 +763,6 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             return out(i.options.json, { file }, `Wrote ${file}`);
           }),
       }),
-    },
+    }),
   });
 }

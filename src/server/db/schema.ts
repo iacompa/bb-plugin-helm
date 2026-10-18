@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS outbox(
   result_json TEXT                                             -- +
 );
 CREATE INDEX IF NOT EXISTS outbox_state ON outbox(state, next_attempt_at);
+CREATE INDEX IF NOT EXISTS outbox_node ON outbox(run_id, node_id, state);
 CREATE TABLE IF NOT EXISTS findings(
   id TEXT, run_id TEXT, app_id TEXT, gate TEXT, rule TEXT, severity TEXT,
   path TEXT, line INTEGER, quote TEXT, why TEXT, fix TEXT, commit_sha TEXT,

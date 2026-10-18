@@ -134,6 +134,10 @@ test("formatting never shows dollars and tokens are raw counts", () => {
   assert.equal(fmtTokens(1_400_000), "1.4M");
   assert.deepEqual(allowedTypes({ tier: "specialist", status: "planned", threadId: null }), ["tell", "model", "scope", "priority", "spawn"]);
   assert.ok(allowedTypes({ tier: "gate", status: "running", threadId: "t" }).includes("waive"));
+  // a plan or a paused run spawns nothing, so Spawn now is not offered there
+  assert.ok(allowedTypes({ tier: "specialist", status: "planned", threadId: null }, "running").includes("spawn"));
+  assert.ok(!allowedTypes({ tier: "specialist", status: "planned", threadId: null }, "planning").includes("spawn"));
+  assert.ok(!allowedTypes({ tier: "specialist", status: "queued", threadId: null }, "paused").includes("spawn"));
 });
 
 test("nodes moved by hand: a card moves, an expanded app's squad moves with its frame, group boxes stretch, anything may go above or left of the origin", () => {

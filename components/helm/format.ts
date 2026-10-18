@@ -398,15 +398,18 @@ export function stagePillClass(stage: Stage): string {
 export function isQuestion(text: string): boolean {
   return /\?\s*$/.test(text) || /^(what|which|how|why|who|where|status|summary|show|list|tell me)\b/i.test(text.trim());
 }
+/** Slop rules a waiver needs a 20-character reason for (the server's ZERO_TOLERANCE_RULES). */
+export const ZERO_TOLERANCE = ["S1", "S2", "S3", "S5", "S6"];
 export const SELF_ONLY: DirectiveType[] = ["approve", "deny", "answer", "plan", "signoff", "sendback", "waive", "slots", "spawn"];
-export function allowedTypes(node: { tier: string; status: string; threadId?: string | null }): DirectiveType[] {
+/** What the human can direct at a node now. Spawn needs a running run: a plan or a paused run spawns nothing. */
+export function allowedTypes(node: { tier: string; status: string; threadId?: string | null }, runStatus?: string): DirectiveType[] {
   const hasThread = !!node.threadId;
   const out: DirectiveType[] = ["tell", "model", "scope", "priority"];
   if (node.status === "paused") out.push("resume");
   else if (!["done", "idle", "failed", "planned"].includes(node.status)) out.push("pause");
   if (hasThread && !["done", "idle"].includes(node.status)) out.push("stop");
   if (["failed", "idle"].includes(node.status) && hasThread) out.push("retry");
-  if (node.status === "planned" || node.status === "queued") out.push("spawn");
+  if ((node.status === "planned" || node.status === "queued") && (runStatus === undefined || runStatus === "running")) out.push("spawn");
   if (node.tier === "gate") out.push("waive");
   return out;
 }

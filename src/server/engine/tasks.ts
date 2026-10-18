@@ -5,6 +5,7 @@
 
 import type { NodeInfo } from "../../shared/types.ts";
 import type { Engine } from "./engine.ts";
+import { isInFlight } from "../domain/stages.ts";
 
 /** A task is at most this long (about 1,500 tokens). */
 export const TASK_MAX = 6000;
@@ -55,9 +56,13 @@ export function setTask(e: Engine, by: NodeInfo, nodeId: string, text: string): 
   const err = storeTask(e, by, target, text);
   if (err) return err;
   const task = getTask(e, by.runId, target.id)!;
-  const live = !!target.threadId && !["done", "planned"].includes(target.status);
+  const app = target.appId ? e.repo.getApp(by.runId, target.appId) : null;
+  // a builder that already reported done, in an app still in flight, is woken with its new task
+  const wake = target.status === "done" && target.tier === "specialist" && !!target.threadId && !!app && isInFlight(app.stage);
+  const live = (!!target.threadId && !["done", "planned"].includes(target.status)) || wake;
   e.repo.tx(() => {
     e.repo.event(by.runId, target.id, "task", `task set by ${e.label(by)}: ${task.text.slice(0, 200)}`);
+    if (wake) e.repo.updateNode(by.runId, target.id, { status: "waiting", endedAt: null });
     if (live) {
       const run = e.run(by.runId);
       e.repo.enqueue({ id: e.oid(), runId: by.runId, kind: "file", nodeId: null, payload: { path: e.briefPath(run, target.id), content: e.buildBrief(run, e.node(by.runId, target.id)) }, idemKey: `task-brief:${by.runId}:${target.id}:${task.at}` });
@@ -65,5 +70,7 @@ export function setTask(e: Engine, by: NodeInfo, nodeId: string, text: string): 
     }
   });
   e.outbox.kick();
-  return live ? `Task set for ${e.label(target)}; it was told and its brief file was rewritten.` : `Task set for ${e.label(target)}; it starts with it.`;
+  if (wake) return `Task set for ${e.label(target)}; it had reported done, so Helm woke it with this task and rewrote its brief file. It reports done again when finished.`;
+  if (live) return `Task set for ${e.label(target)}; it was told and its brief file was rewritten.`;
+  return target.status === "done" ? `Task stored for ${e.label(target)}, but it is done and will not be woken.` : `Task set for ${e.label(target)}; it starts with it.`;
 }

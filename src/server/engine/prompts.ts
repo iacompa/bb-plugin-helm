@@ -31,6 +31,11 @@ export function getPrompt(e: Engine, runId: string, interactionId: string): Rout
   }
 }
 
+/** Forget a routed prompt (answered, or answered in BB directly). */
+export function dropPrompt(e: Engine, runId: string, interactionId: string): void {
+  e.repo.deleteMeta(key(runId, interactionId));
+}
+
 export function pendingPrompts(e: Engine, runId: string): RoutedPrompt[] {
   return e.repo.metaByPrefix(`prompt:${runId}:`).flatMap(([, v]) => {
     try {

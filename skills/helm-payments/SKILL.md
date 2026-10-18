@@ -9,6 +9,8 @@ Excellent payments work means card data never touches our servers, every state c
 
 The Core builder implements payments. The Security specialist reviews them with this skill and `helm-security` (section 14 is the review list). Product rules (what is sold, prices, trial length, refund policy) come from SPEC and CONTRACT; if they are missing, ask the lead rather than inventing a pricing model.
 
+**Where evidence goes.** `reports/payments/…` below means a `payments/` folder inside your own reports folder, the one in your BRIEF's write scope (`reports/core/payments/` for the Core builder, `reports/ios/payments/` or `reports/and/payments/` for a phone builder doing in-app purchases; Security writes its review in SECURITY.md). Never write outside your scope to follow a path in this skill.
+
 ---
 
 ## 1. Money stays in test mode until the human decides

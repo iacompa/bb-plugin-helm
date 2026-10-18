@@ -52,10 +52,11 @@ test("§5.1: every other (from, to) pair is refused, naming what the lead may re
       const r = leadTransition(from, to, green());
       assert.equal(r.ok, false, `${from} → ${to} must be refused`);
       const reason = reasonOf(r)!;
-      assert.ok(reason.startsWith(`helm_stage cannot move ${stageLabel(from)} → ${stageLabel(to)}.`), reason);
+      if (from !== to) assert.ok(reason.startsWith(`helm_stage cannot move ${stageLabel(from)} → ${stageLabel(to)}`), reason);
       const allowed = LEAD_TRANSITIONS[from];
-      if (allowed) assert.match(reason, new RegExp(`may only request ${allowed.map(stageLabel).join(" or ")}\\.$`));
-      else assert.match(reason, /may only request nothing — this stage advances on gate verdicts or the human\.$/);
+      if (from === to) assert.match(reason, /is already in .*; nothing to request\.$/);
+      else if (allowed) assert.match(reason, new RegExp(`you can request only ${allowed.map(stageLabel).join(" or ")}\\.$`));
+      else assert.match(reason, /there is nothing for you to request in /);
       refused++;
     }
   assert.equal(refused, ALL_STAGES.length * ALL_STAGES.length - 4);
@@ -64,11 +65,11 @@ test("§5.1: every other (from, to) pair is refused, naming what the lead may re
 test("refusal wording for gate-driven stages and skipping ahead", () => {
   assert.equal(
     reasonOf(leadTransition("review", "slop", green())),
-    "helm_stage cannot move Review → Slop check. From Review a lead may only request nothing — this stage advances on gate verdicts or the human.",
+    "helm_stage cannot move Review → Slop check: there is nothing for you to request in Review; Helm moves it on the Reviewer's verdict and tells you.",
   );
-  assert.equal(reasonOf(leadTransition("spec", "integrate", green())), "helm_stage cannot move Spec → Integrate. From Spec a lead may only request Build.");
-  assert.equal(reasonOf(leadTransition("integrate", "ready", green())), "helm_stage cannot move Integrate → Ready. From Integrate a lead may only request Review.");
-  assert.equal(reasonOf(leadTransition("fix", "build", green())), "helm_stage cannot move Fix → Build. From Fix a lead may only request Integrate.");
+  assert.equal(reasonOf(leadTransition("spec", "integrate", green())), "helm_stage cannot move Spec → Integrate. From Spec you can request only Build.");
+  assert.equal(reasonOf(leadTransition("integrate", "ready", green())), "helm_stage cannot move Integrate → Ready. From Integrate you can request only Review.");
+  assert.equal(reasonOf(leadTransition("fix", "build", green())), "helm_stage cannot move Fix → Build. From Fix you can request only Integrate.");
   assert.match(reasonOf(leadTransition("cancelled", "spec", green()))!, /cannot move Cancelled → Spec/);
 });
 
@@ -95,21 +96,21 @@ test("spec → build does not depend on builders or checks", () => {
 
 test("build → integrate requires every builder's verified done report", () => {
   const r = leadTransition("build", "integrate", green({ buildersDone: false, buildersPending: ["lumen.ui", "lumen.code"] }));
-  assert.equal(reasonOf(r), "Builders without a verified done report: lumen.ui, lumen.code.");
+  assert.equal(reasonOf(r), "Builders without a verified done report: lumen.ui, lumen.code. Helm messages you as each report arrives, so wait for those rather than asking again; steer a builder that is stuck with helm_direct.");
   // checks are not required to *enter* Integrate — that is where they run
   assert.deepEqual(leadTransition("build", "integrate", green({ checksGreen: false, checksMissing: ["build"], integrationHead: null })), { ok: true });
 });
 
 test("fix → integrate requires fixes reported with evidence", () => {
   const r = leadTransition("fix", "integrate", green({ buildersDone: false, buildersPending: ["lumen.platform.ios"] }));
-  assert.equal(reasonOf(r), "Fixes not reported with evidence yet: lumen.platform.ios.");
+  assert.equal(reasonOf(r), "Fixes not reported with evidence yet: lumen.platform.ios. Helm messages you as each report arrives, so wait for those rather than asking again; steer a builder that is stuck with helm_direct.");
 });
 
 test("integrate → review requires an integration HEAD and green checks recorded on it", () => {
   assert.equal(reasonOf(leadTransition("integrate", "review", green({ integrationHead: null }))), "No integration HEAD found.");
   assert.equal(
     reasonOf(leadTransition("integrate", "review", green({ checksGreen: false, checksMissing: ["build", "tests"] }))),
-    "Checks not recorded on 012345678: build, tests. Run them through .helm/run-check.sh and call helm_record_check.",
+    "Checks not recorded on 012345678: build, tests. Run them through the check wrapper your BRIEF names and call helm_record_check.",
   );
   assert.equal(
     reasonOf(leadTransition("integrate", "review", green({ checksGreen: false, checksFailing: ["lint"] }))),

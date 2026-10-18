@@ -7,7 +7,7 @@ description: Database craft (choice, schema, migrations, indexes, tenant isolati
 
 Excellent data work means the schema enforces the CONTRACT on its own, every change to it is a reviewed, tested, forward-only migration, every hot query has an index someone proved with `EXPLAIN`, sensitive columns are known, protected and deletable, and a backup has actually been restored. Another builder can read `CONTRACT.md` and `reports/data/` and know what is stored, why, and how to get it back. `helm-specialist` covers how you work inside Helm.
 
-Your default write scope is `db/**`, `migrations/**`, `prisma/**`, `supabase/**`, `drizzle/**`, `packages/db/**` and `reports/data/**` (your BRIEF and ARCHITECTURE.md win if they differ). Application code that calls the database belongs to the Core builder unless your BRIEF says you own both; agree the boundary (repository functions, query module, generated client) with them through `helm_message`.
+Your default write scope is `db/**`, `migrations/**`, `prisma/**`, `supabase/**`, `drizzle/**`, `packages/db/**` and `reports/data/**` (your BRIEF and ARCHITECTURE.md win if they differ). When there is no Data builder and you follow this skill as the Core builder, `reports/data/…` below means `reports/core/data/…`: stay inside your BRIEF's write scope. Application code that calls the database belongs to the Core builder unless your BRIEF says you own both; agree the boundary (repository functions, query module, generated client) with them through `helm_message`.
 
 ---
 

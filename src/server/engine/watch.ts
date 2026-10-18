@@ -101,7 +101,9 @@ export async function sweep(e: Engine, run: RunInfo): Promise<string[]> {
   const text = `${lines.join("\n")}\n\nCall helm_watch with a verdict for each id.`;
   const s = state(e, run.id);
   let threadId = s.threadId;
-  const fresh = !threadId || s.sweeps >= SWEEPS_PER_THREAD || !(await e.port.threadState(threadId).catch(() => null));
+  const cur = threadId ? await e.port.threadState(threadId).catch(() => null) : null;
+  // a watcher thread that errored or was archived is replaced, not written to
+  const fresh = !threadId || s.sweeps >= SWEEPS_PER_THREAD || !cur || cur.archived || cur.status === "error";
   if (fresh) {
     const old = threadId;
     const orch = e.repo.getNode(run.id, "orch");
@@ -147,6 +149,11 @@ export async function applyVerdicts(e: Engine, runId: string, verdicts: Array<{ 
     const n = e.repo.getNode(runId, v.nodeId);
     if (!n) {
       out.push(`${v.nodeId}: no such agent`);
+      continue;
+    }
+    // the Watcher judges only the agents Helm sent it, never the Orchestrator or a gate it was not shown
+    if (!e.repo.getMeta(watchedKey(runId, n.id))) {
+      out.push(`${n.id}: not in a packet Helm sent you; left alone`);
       continue;
     }
     const note = v.note.trim().slice(0, 600);

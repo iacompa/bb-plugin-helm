@@ -30,6 +30,8 @@ export interface WorktreeRow {
   head: string | null;
   dirty: number;
   missing: boolean;
+  /** git status failed (a timeout on a big folder): `dirty` is unknown, not zero. */
+  statusUnknown?: boolean;
   /** checkout (the human's) · work (the shared one) · lane (one the Git agent added beside it) · extra (anything else). */
   role: "checkout" | "work" | "lane" | "extra";
   /** The agents whose BB environment is this folder. */
@@ -97,7 +99,7 @@ export async function appWorktrees(e: Engine, runId: string, opts: { appId?: str
       const res = await e.host(runId).worktrees({ repo: app.repoPath, status: opts.status ?? true });
       const who = opts.status === false ? new Map<string, string[]>() : await agentsByPath(e, nodes.filter((n) => n.appId === app.id || (n.alsoLead && apps[0]?.id === app.id)));
       const lanePrefix = work ? `${work}--` : null;
-      row.worktrees = res.worktrees.map((w) => ({ path: w.path, branch: w.branch, head: w.head, dirty: w.dirty, missing: w.missing, role: w.main ? "checkout" : w.path === work ? "work" : lanePrefix && w.path.startsWith(lanePrefix) ? "lane" : "extra", agents: who.get(w.path) ?? [] }));
+      row.worktrees = res.worktrees.map((w) => ({ path: w.path, branch: w.branch, head: w.head, dirty: w.dirty, missing: w.missing, ...(w.statusUnknown ? { statusUnknown: true } : {}), role: w.main ? "checkout" : w.path === work ? "work" : lanePrefix && w.path.startsWith(lanePrefix) ? "lane" : "extra", agents: who.get(w.path) ?? [] }));
       row.extra = Math.max(0, row.worktrees.length - cap);
       row.legacy = !work && row.worktrees.length > MAX_WORKTREES;
       const all = res.branches ?? [];
@@ -134,7 +136,7 @@ export function worktreesText(list: AppWorktrees[]): string {
   for (const a of list) {
     lines.push(`\n${a.name} (${a.appId}): ${a.repo ?? "no repository yet"} · work branch ${a.branch ?? "not yet"}${a.work ? "" : a.repo ? " · no shared work worktree yet (one worktree per agent until consolidated)" : ""}`);
     if (a.error) lines.push(`  could not list worktrees: ${a.error}`);
-    for (const w of a.worktrees) lines.push(`  - ${w.role.padEnd(8)} ${w.path} · ${w.branch ?? "detached"} @ ${w.head?.slice(0, 9) ?? "?"}${w.missing ? " · MISSING on disk (git worktree prune)" : w.dirty ? ` · ${w.dirty} uncommitted` : " · clean"}${w.agents.length ? ` · agents: ${w.agents.join(", ")}` : ""}`);
+    for (const w of a.worktrees) lines.push(`  - ${w.role.padEnd(8)} ${w.path} · ${w.branch ?? "detached"} @ ${w.head?.slice(0, 9) ?? "?"}${w.missing ? " · MISSING on disk (git worktree prune)" : w.statusUnknown ? " · status unknown (git status failed; check it before removing anything)" : w.dirty ? ` · ${w.dirty} uncommitted` : " · clean"}${w.agents.length ? ` · agents: ${w.agents.join(", ")}` : ""}`);
     if (a.laneBranches.length) lines.push(`  lane branches (yours, within the limit of ${a.branchCap}): ${a.laneBranches.join(", ")}`);
     if (a.overBranches > 0) lines.push(`  ${a.overBranches} branch(es) over the limit of ${a.branchCap}`);
     if (a.extraBranches.length) lines.push(`  agent branches to remove once merged into the work branch (git branch -d, never -D): ${a.extraBranches.slice(0, 30).join(", ")}${a.extraBranches.length > 30 ? " …" : ""}`);
@@ -253,10 +255,17 @@ export async function consolidate(e: Engine, runId: string, appId: string, by: s
   const problems: string[] = [];
   for (const m of moving) {
     if (!m.path) continue;
-    const st = await host.status({ path: m.path }).catch(() => null);
-    if (!st) continue; // already gone from disk
+    const st = await host.status({ path: m.path }).catch((err: unknown) => ({ error: err instanceof Error ? err.message.slice(0, 200) : String(err) }) as const);
+    if ("missing" in st && st.missing) continue; // already gone from disk
+    // a status git could not read is unknown, never clean: nothing is removed on a guess
+    if ("error" in st && st.error) {
+      problems.push(`${e.label(m.n)} (${m.n.id}): could not read ${m.path} (${st.error}). Check it by hand (\`git -C ${m.path} status\`), then try again.`);
+      continue;
+    }
+    if (!("dirty" in st)) continue;
     const dirty = st.dirty.filter((p) => !p.startsWith("reports/checks/"));
-    if (dirty.length) problems.push(`${e.label(m.n)} (${m.n.id}): ${dirty.length} uncommitted file(s) in ${m.path}: ${dirty.slice(0, 6).join(", ")}${dirty.length > 6 ? " …" : ""}. Have them committed (code) or copied into the shared worktree's same paths (untracked reports), then try again.`);
+    const more = (st.dirtyCount ?? st.dirty.length) - st.dirty.length;
+    if (dirty.length) problems.push(`${e.label(m.n)} (${m.n.id}): ${dirty.length + more} uncommitted file(s) in ${m.path}: ${dirty.slice(0, 6).join(", ")}${dirty.length > 6 || more ? " …" : ""}. Have them committed (code) or copied into the shared worktree's same paths (untracked reports), then try again.`);
     if (st.head) {
       const merged = await host.isAncestor({ repo: app.repoPath, ancestor: st.head, descendant: branch }).then((r) => r.ok, () => false);
       if (!merged) problems.push(`${e.label(m.n)} (${m.n.id}): ${st.branch ?? "its branch"} @ ${st.head.slice(0, 9)} is not on the integration branch ${branch}. Merge it first (the app lead, or you: \`git -C <the integration branch's worktree> merge ${st.head.slice(0, 12)}\`), then try again.`);

@@ -10,7 +10,7 @@ import { AGENT_ACTIONS, agentNoticeText, agentSummary, bottomUp, buildAgentModel
 import { modelName, validateRef } from "../domain/models.ts";
 import { hhmm, pad4 } from "./context.ts";
 import { waiverProblem } from "../domain/verdict.ts";
-import { appMoveRule, stagePct, taskMoveRule, type TaskCol } from "../domain/stages.ts";
+import { appMoveRule, isInFlight, stageLabel, stagePct, taskMoveRule, type TaskCol } from "../domain/stages.ts";
 import { ORCH_ID } from "../domain/topology.ts";
 import type { InteractionAnswer } from "../bb/port.ts";
 import { applyDelta, type PlanDelta } from "./delta.ts";
@@ -388,7 +388,15 @@ export async function agentDirect(e: Engine, by: NodeInfo, p: { to: string; acti
   const text = (p.text ?? "").trim();
   if (p.action === "tell" && !text) return "Rejected: say what you want (text).";
   if (p.action === "priority" && !["low", "normal", "high"].includes(String(p.priority))) return "Rejected: priority must be low, normal or high.";
-  if (target.status === "done") return `Rejected: ${e.label(target)} is done.`;
+  // a finished agent in a live app can be handed more work, as helm_assign_fix does; anything else has nothing to steer
+  let reopen = false;
+  if (target.status === "done") {
+    const app = target.appId ? e.repo.getApp(runId, target.appId) : null;
+    if (app && !isInFlight(app.stage)) return `Rejected: ${e.label(target)} is done and ${app.name} is ${stageLabel(app.stage)}; there is nothing left to steer.`;
+    if (p.action !== "tell") return `${e.label(target)} is done; ${p.action} has no effect. To give it more work, use tell (Helm wakes it).`;
+    if (target.tier !== "specialist" || !target.threadId) return `Rejected: ${e.label(target)} is done${target.role === "custom" ? " (retired)" : ""}; only a builder that reported done can be woken for more work.`;
+    reopen = true;
+  }
   if (p.action === "pause" && (target.status === "paused" || TERMINAL.has(target.status))) return `${e.label(target)} is ${target.status}; nothing to pause.`;
   if (p.action === "resume" && target.status !== "paused") return `${e.label(target)} is not paused.`;
   const history = e.repo.directivesTouching(runId, target.id).filter((d) => d.affected.includes(target.id));
@@ -404,9 +412,10 @@ export async function agentDirect(e: Engine, by: NodeInfo, p: { to: string; acti
   const mine = e.repo.listDirectives(runId, 200).filter((d) => d.byNode === by.id && d.ts >= since);
   if (mine.filter((d) => d.targetNodeId === target.id).length >= STEER_PER_TARGET) return `Rejected: you already steered ${e.label(target)} ${STEER_PER_TARGET} times in 10 minutes. Put everything in one message and let it work.`;
   if (mine.length >= STEER_PER_SUPERVISOR) return `Rejected: ${STEER_PER_SUPERVISOR} directives in 10 minutes is the limit. Batch your instructions.`;
+  if (reopen) e.repo.updateNode(runId, target.id, { status: "waiting", endedAt: null });
   const d = await createDirective(e, runId, { type: p.action, target: target.id, text, value: p.action === "priority" ? p.priority : undefined, mode: p.urgent === false ? "queue" : "steer", byNode: by.id });
   const told = d.recipients.filter((r) => r.level === "digest").length;
-  const when = target.threadId ? (TERMINAL.has(target.status) ? "it was not woken; it reads this when it next starts" : "delivered now") : "it reads this when it starts";
+  const when = reopen ? "it was done, so Helm woke it; it reports done again when finished" : target.threadId ? (TERMINAL.has(target.status) ? "it was not woken; it reads this when it next starts" : "delivered now") : "it reads this when it starts";
   return `${d.id} sent to ${e.label(target)} (${when}). ${told ? `${told} above ${told === 1 ? "it sees" : "them see"} one FYI line. ` : ""}You will get its acknowledgement as FYI.`;
 }
 
@@ -641,10 +650,33 @@ export interface NeedResolution {
   actor?: "human" | "system";
 }
 
-export async function resolveNeed(e: Engine, runId: string, needId: string, res: NeedResolution, hooks: { signoff(appId: string, d: DirectiveInfo): Promise<void>; sendback(appId: string, d: DirectiveInfo): Promise<void> }): Promise<{ need: ReturnType<Engine["repo"]["getNeed"]>; directive: DirectiveInfo | null }> {
+type ResolveHooks = { signoff(appId: string, d: DirectiveInfo): Promise<void>; sendback(appId: string, d: DirectiveInfo): Promise<void> };
+type Resolved = { need: ReturnType<Engine["repo"]["getNeed"]>; directive: DirectiveInfo | null; already?: string };
+
+/** Needs being resolved right now: a double click, or the panel and the CLI together, must not apply a decision twice. */
+const RESOLVING = new Set<string>();
+
+export async function resolveNeed(e: Engine, runId: string, needId: string, res: NeedResolution, hooks: ResolveHooks): Promise<Resolved> {
+  const key = `${runId}:${needId}`;
+  if (RESOLVING.has(key)) return { need: e.repo.getNeed(runId, needId), directive: null, already: `${needId} is already being resolved; nothing more to do.` };
+  RESOLVING.add(key);
+  try {
+    return await resolveNeedOnce(e, runId, needId, res, hooks);
+  } finally {
+    RESOLVING.delete(key);
+  }
+}
+
+async function resolveNeedOnce(e: Engine, runId: string, needId: string, res: NeedResolution, hooks: ResolveHooks): Promise<Resolved> {
   const need = e.repo.getNeed(runId, needId);
   if (!need) throw new HelmError(`No need ${needId}.`, "not_found");
-  if (need.state !== "open") throw new HelmError(`${needId} is already resolved.`, "bad_state");
+  // a second click, a stale card or another resolver got there first: say so instead of failing
+  if (need.state !== "open") {
+    const how = (need.resolution as { action?: string } | null)?.action;
+    const mins = need.resolvedAt ? Math.max(1, Math.round((e.now() - need.resolvedAt) / 60_000)) : 0;
+    const ago = mins ? ` ${mins < 90 ? `${mins} min` : `${Math.round(mins / 60)} h`} ago` : "";
+    return { need, directive: null, already: `${needId} was already resolved${how ? ` (${how})` : ""}${ago}; nothing more to do.` };
+  }
   const target = need.nodeId ?? ORCH_ID;
   const text = res.text?.trim() ?? "";
   let directive: DirectiveInfo | null = null;
@@ -688,8 +720,22 @@ export async function resolveNeed(e: Engine, runId: string, needId: string, res:
       directive = await createDirective(e, runId, { type: res.action, target, text: text || (res.action === "approve" ? "approved" : "denied"), needId });
       break;
     }
+    case "nudge": {
+      // a working agent is asked for a status report and gets another stall window; a stopped one is retried
+      const n = need.nodeId ? e.repo.getNode(runId, need.nodeId) : null;
+      if (n?.threadId && !["failed", "idle", "needs"].includes(n.status)) {
+        e.repo.tx(() => {
+          e.repo.updateNode(runId, n.id, { nudgedAt: e.now() });
+          e.sendFromHelm(runId, n.id, `status check: the human asks for a helm_report (progress, blocked or done, with evidence).${text ? ` ${text}` : ""}`, { mode: "steer", key: `nudge-human:${runId}:${needId}` });
+          e.repo.event(runId, n.id, "nudge", "nudged again by the human");
+        });
+        e.outbox.kick();
+        break;
+      }
+      directive = await createDirective(e, runId, { type: "retry", target, text });
+      break;
+    }
     case "retry":
-    case "nudge":
       directive = await createDirective(e, runId, { type: "retry", target, text });
       break;
     case "change_model":
@@ -721,8 +767,10 @@ export async function resolveNeed(e: Engine, runId: string, needId: string, res:
       break;
     case "stop_run":
       directive = await createDirective(e, runId, { type: "stop", target: ORCH_ID, cascade: "subtree", text: text || "run stopped from the budget prompt" });
-      e.repo.updateRun(runId, { status: "cancelled", endedAt: e.now() });
-      break;
+      // like ending the run: every agent (the Planner and Git agent have no parent) is stopped and archived
+      e.repo.tx(close);
+      await completeRun(e, runId, "cancelled");
+      return { need: e.repo.getNeed(runId, needId), directive };
     case "signoff":
       if (!need.appId) throw new HelmError("This item is not about an app.", "bad_state");
       directive = await createDirective(e, runId, { type: "signoff", target: e.leadOf(runId, need.appId)!.id, text, needId });
@@ -735,8 +783,21 @@ export async function resolveNeed(e: Engine, runId: string, needId: string, res:
       await hooks.sendback(need.appId, directive);
       break;
     case "waive": {
-      const gate = need.appId ? e.repo.getNode(runId, `${need.appId}.slop`) ?? e.repo.getNode(runId, `${need.appId}.review`) : null;
+      const app = need.appId ? e.repo.getApp(runId, need.appId) : null;
+      // the gate judging now (the app sits in its stage after the fix-round cap), else either gate
+      const atGate = app && (app.stage === "review" || app.stage === "slop") ? e.repo.getNode(runId, `${app.id}.${app.stage}`) : null;
+      const gate = atGate ?? (need.appId ? e.repo.getNode(runId, `${need.appId}.slop`) ?? e.repo.getNode(runId, `${need.appId}.review`) : null);
       directive = await createDirective(e, runId, { type: "waive", target: gate?.id ?? target, findingIds: res.findingIds, text, rotatedConfirmed: res.rotatedConfirmed });
+      // a waiver alone moves nothing: the gate judges the same commit again with those findings set aside
+      const head = app ? e.repo.appExtra(runId, app.id).integrationHead : null;
+      if (atGate?.threadId && head) {
+        const d = directive;
+        e.repo.tx(() => {
+          e.repo.updateNode(runId, atGate.id, { status: "running", lastActivityAt: e.now(), nudgedAt: null });
+          e.sendFromHelm(runId, atGate.id, `Re-check commit ${head}: the human waived ${(res.findingIds ?? []).join(", ") || "findings"} (${d.id}${text ? `: ${text}` : ""}). Leave the waived findings out, confirm nothing else blocks, and submit one helm_verdict for ${head}.`, { key: `waive-recheck:${runId}:${atGate.id}:${d.id}` });
+        });
+        e.outbox.kick();
+      }
       break;
     }
     case "complete_run":
@@ -776,7 +837,7 @@ export function startAppNow(e: Engine, runId: string, appId: string): void {
     const lead = e.leadOf(runId, appId);
     if (lead) e.repo.updateNode(runId, lead.id, { firstInLine: true });
   });
-  void e.pump(runId);
+  e.fire(e.pump(runId), `pump ${runId}`);
 }
 
 export function stagePctOf(stage: Parameters<typeof stagePct>[0]): number {

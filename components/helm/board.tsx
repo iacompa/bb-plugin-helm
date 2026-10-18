@@ -11,6 +11,8 @@ import { STAGES, TASK_COLS, appMoveRule, appStatus, colOfStatus, errMsg, kindLab
 import { Dot, Ic, ModelChip, RoleTile, StagePill, StatusPill, askConfirm, askReason, cx } from "./ui.tsx";
 
 type Drag = { kind: "app"; id: string } | { kind: "task"; id: string };
+/** Cancelled apps sit in the Done column (their card says Cancelled), so the header count matches the cards. */
+const inCol = (a: { stage: string }, col: string) => a.stage === col || (col === "done" && a.stage === "cancelled");
 const LIM = 30;
 const ORDER: Record<string, number> = { needs: 0, failed: 0, running: 1, waiting: 2, queued: 3, paused: 3, idle: 3, planned: 4, done: 5 };
 
@@ -238,7 +240,7 @@ function AppCard({ data, a, dragProps, dragging }: { data: RunState; a: SnapApp;
       role="button"
       tabIndex={0}
       className={cx("bcard", `s-${st}`, sel && "sel", dragging && "dragging")}
-      aria-label={`${a.name}, ${statusLabel(st)}, ${a.pct}%`}
+      aria-label={`${a.name}, ${a.stage === "cancelled" ? "cancelled" : statusLabel(st)}, ${a.pct}%`}
       onClick={open}
       onDoubleClick={() => {
         h.setDrill(a.id);
@@ -255,6 +257,7 @@ function AppCard({ data, a, dragProps, dragging }: { data: RunState; a: SnapApp;
       <div className="row" style={{ gap: 6 }}>
         <b className="b-name">{a.name}</b>
         <span className="grow" />
+        {a.stage === "cancelled" ? <span className="pill">Cancelled</span> : null}
         {nNeed ? (
           <span className="pill warn" title="Needs you">
             <Ic name="BellDot" size="sm" />
@@ -358,7 +361,7 @@ function AppsLens({
       <div className="bgrid" style={{ gridTemplateColumns: cols }}>
         {stages.map((s) => {
           const z = zone(`a:${s.id}`, "app", s.id);
-          const list = apps.filter((a) => a.stage === s.id);
+          const list = apps.filter((a) => inCol(a, s.id));
           return (
             <div key={s.id} className={cx("bcol", z.className)} onDragOver={z.onDragOver} onDragLeave={z.onDragLeave} onDrop={z.onDrop} aria-label={`${s.label} column`}>
               <div className="bcol-h" title={s.hint}>
@@ -384,7 +387,7 @@ function AppsLens({
         {stages.map((s) => (
           <div key={s.id} className="ch" title={s.hint}>
             {s.label}
-            <span className="count">{apps.filter((a) => a.stage === s.id).length}</span>
+            <span className="count">{apps.filter((a) => inCol(a, s.id)).length}</span>
           </div>
         ))}
       </div>
@@ -406,7 +409,7 @@ function AppsLens({
             </div>
             {stages.map((s) => {
               const z = zone(`a:${m.id}:${s.id}`, "app", s.id);
-              const list = as.filter((a) => a.stage === s.id);
+              const list = as.filter((a) => inCol(a, s.id));
               return (
                 <div key={s.id} className={cx("cell", z.className)} onDragOver={z.onDragOver} onDragLeave={z.onDragLeave} onDrop={z.onDrop} aria-label={`${m.name} · ${s.label}`}>
                   {list.length ? cards(list, `a:${m.id}:${s.id}`) : null}

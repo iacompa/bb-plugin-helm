@@ -89,6 +89,10 @@ test("the panel reads and writes the permission settings (per role, and who appr
     Object.assign(h.engine.settings, toHelmSettings(stored));
   };
   assert.deepEqual(svc.permissions().approvePrompts, "supervisor");
+  // the panel sends what it read straight back: it must pass the request schema (it used to carry planner, git, custom)
+  const { RPC_SCHEMAS } = await import("../../src/shared/rpc-schemas.ts");
+  assert.deepEqual(Object.keys(svc.permissions().modes).sort(), ["gate", "lead", "manager", "orchestrator", "specialist"]);
+  assert.equal(RPC_SCHEMAS.settings_setPermissions.input.safeParse(svc.permissions()).success, true);
   const r = await svc.setPermissions({ modes: { lead: "full", specialist: "accept-edits" }, approvePrompts: "human" });
   assert.deepEqual(stored, { permissionLead: "full", permissionSpecialist: "accept-edits", approvePrompts: "human" });
   assert.equal(r.modes.lead, "full");

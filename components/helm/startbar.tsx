@@ -41,6 +41,7 @@ export function StartBar() {
   const [ready, setReady] = useState<Readiness | null>(null);
   const [busy, setBusy] = useState<"start" | "dry" | "discard" | null>(null);
   const [open, setOpen] = useState(false);
+  const [check, setCheck] = useState(0);
   const startRun = useStartRun();
   const nodes = useMemo(() => (h.data ? Object.values(h.data.nodes) : []), [h.data]);
   const fc = useMemo(() => (run ? forecastNodes(nodes, run.slots, h.catalog) : null), [nodes, run, h.catalog]);
@@ -56,7 +57,12 @@ export function StartBar() {
     return () => {
       live = false;
     };
-  }, [h.rpc, planning, runId, slotsKey]);
+  }, [h.rpc, planning, runId, slotsKey, check]);
+  // a folder fixed on disk or a provider signed in elsewhere: read the machine again, then the plan
+  const recheck = async () => {
+    await h.loadCatalog({ refresh: true }).catch(() => null);
+    setCheck((x) => x + 1);
+  };
 
   if (!run || !planning) return null;
   const problems = ready?.problems ?? [];
@@ -76,12 +82,14 @@ export function StartBar() {
     }
   };
   const discard = async () => {
-    if (!(await askConfirm({ title: "Discard this plan?", body: "Nothing was spawned. The plan is closed as cancelled and leaves the session tabs.", ok: "Discard", danger: true }))) return;
+    if (!(await askConfirm({ title: "Discard this plan?", body: "Nothing was spawned. The plan is closed as cancelled and its tab is closed.", ok: "Discard", danger: true }))) return;
     setBusy("discard");
     try {
       await h.rpc.call("run_finish", { runId: run.id, status: "cancelled" });
+      toast.success("Plan discarded");
       h.refetch();
       h.refreshRuns();
+      h.closeTab(run.id);
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -109,6 +117,11 @@ export function StartBar() {
         <button type="button" className="btn sm ghost" aria-expanded={open} onClick={() => setOpen((x) => !x)}>
           {open ? "Hide details" : "Details"}
         </button>
+        {ready && !ready.ok ? (
+          <button type="button" className="btn sm ghost" onClick={() => void recheck()} title="Check models and folders again">
+            <Ic name="RotateCcw" size="sm" /> Check again
+          </button>
+        ) : null}
         <button type="button" className="btn sm" onClick={() => h.openStudio()} title="Which model each role uses">
           <Ic name="Brain" size="sm" /> Models
         </button>
@@ -128,7 +141,7 @@ export function StartBar() {
           {open ? (
             <>
               <ul className="sb-list">
-                <li>Starting admits the first wave of apps right away. {run.autoAdvance === "auto" ? "Later waves start on their own as capacity frees up." : "Helm asks you before each later wave (in Needs you)."}</li>
+                <li>Starting admits the first wave of apps right away. {run.autoAdvance === "auto" || run.limits?.autonomy === "high" ? "Later waves start on their own as capacity frees up." : "Helm asks you before each later wave (in Needs you)."}</li>
                 {ready?.runFolder ? (
                   <li>
                     New app folders and Helm's own notes (<span className="mono">_studio</span>) go under <span className="mono">{ready.runFolder}</span>.

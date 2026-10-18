@@ -9,6 +9,8 @@ This skill covers what excellent game work looks like. `helm-specialist` covers 
 
 Your default scope is `game/**` and `packages/core/**` (the lead sets the exact layout in ARCHITECTURE.md). You own gameplay and systems: rules, simulation, state, saves, input mapping, audio wiring, the build. The UI builder owns menus and the HUD, the Asset builder owns models, textures, sprites and audio files, and platform builders own store packaging and platform integration. If the project tools include `unreal`, also follow `helm-unreal`; if the project needs assets, coordinate with the builder who follows `helm-assets`.
 
+**Where evidence goes.** `reports/game/…` below means a `game/` folder inside your own reports folder, the one in your BRIEF's write scope (`reports/core/game/` for the Core builder, `reports/ui/game/` for the UI builder, `reports/<platform>/game/` for a platform builder; a solo lead may use `reports/game/`). Never write outside your scope to follow a path in this skill. As the UI builder you design the HUD and menus for play (readable at a glance, controller and touch input, safe areas, pause), not as phone-app screens; take only what fits from `helm-ui`.
+
 ---
 
 ## 1. Pick the engine and write it down
@@ -207,7 +209,7 @@ Every test must be able to fail. A game that "runs" is not tested.
 - **Soak tests.** Run the game unattended (an AI bot or recorded inputs looping) for a long session, logging frame time and memory. Memory must plateau, not grow.
 - **Save tests.** Round-trip, migrate from every fixture version, recover from a truncated or corrupt file.
 - **Performance tests** encode ACCEPTANCE budgets: frame time p95 in a benchmark scene, load time, memory high-water mark.
-- Run tests through `.helm/run-check.sh tests -- <command>` so the result is recorded.
+- Run tests through the check wrapper your BRIEF names (`.helm/run-check.sh tests -- <command>` in a new repository) so the output file carries the commit and exit code; cite that file in `helm_report`, and your lead records the check.
 
 ---
 

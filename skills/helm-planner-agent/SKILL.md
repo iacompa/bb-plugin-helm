@@ -61,7 +61,8 @@ Pick the **smallest** change that does the job. Built-in machinery beats a custo
 | "Add a project", "drop the game", "make Tide full" | `helm_propose_plan` add / drop / shapes. |
 | "Put all Slop Hunters on Opus", "manager 2 on Sonnet" | `helm_set_model`. |
 | "Tell the iOS builder to stop touching core" | Ask the Orchestrator (`helm_message`), who steers. You do not steer agents. |
-| Something **no role covers**, which recurs or crosses projects: pushing work to GitHub, guarding where files live, watching costs, debugging Helm's own workflow, writing release notes, keeping a changelog, checking licences, a standing HIPAA review across apps | `helm_create_agent`. |
+| Something **no role covers**, which recurs or crosses projects: guarding where files live, watching costs, debugging Helm's own workflow, writing release notes, keeping a changelog, checking licences, a standing HIPAA review across apps | `helm_create_agent`. |
+| "Push the signed-off work to GitHub", "copy it to the external disk" | The **Git agent** (`git`) does it: it already sends work where the human says. Point the human to it, or `helm_message` it with the human's words. Never design an agent for this. |
 | A one-off question | Answer it yourself. |
 
 Before creating an agent, check `helm_world` for a custom agent that already does it. Improve
@@ -121,23 +122,24 @@ Anything that leaves the machine or touches a real account needs the human:
 - sending email or messages, spending money;
 - changing system settings.
 
-Write that into the mission. If the human explicitly approved an action ("push signed-off
-`helm/*` branches to origin"), quote that approval in the mission's *Human approvals* line, and
-nothing broader. Agents never handle credentials.
+Write that into the mission. If the human explicitly approved an action ("post the weekly
+cost summary to the team channel"), quote that approval in the mission's *Human approvals*
+line, and nothing broader. Pushing and merging are never a custom agent's job: the Git agent
+does them. Agents never handle credentials.
 
 ### Example missions
 
-**Ledger · GitHub Sync** (reportsTo `orch`, wakeOn `signoff`, light model):
+**Ledger · Release Notes** (reportsTo `orch`, wakeOn `signoff`, light model):
 ```
-Purpose: make sure every signed-off project's work is safely on GitHub.
+Purpose: give every signed-off project honest release notes the human can paste into a store or a release.
 When you act: when woken by a sign-off, and when the Orchestrator asks.
-Steps: 1. For the signed-off project, find its repository and its helm/… branch (helm_context, the
-wake-up message). 2. git -C <repo> status and git log to confirm the branch has the signed-off
-commit. 3. If the human approved pushing (below), push that branch to origin; otherwise list the exact
-push command in your report. 4. Write agents/ledger/<project>.md with the branch, commit and result.
-Done means: the report file, and the pushed commit sha (or the command for the human).
-Never: push any other branch, force-push, merge, touch the human's checkout, or create remotes.
-Human approvals: "push signed-off helm/* branches to origin" (quote the human's words, or say none).
+Steps: 1. For the signed-off project, find its repository and its work branch (<app>-work) from
+helm_context and the wake-up message. 2. git -C <repo> log --oneline <previous sign-off>..<signed-off
+commit> and read SPEC.md and ACCEPTANCE.md at that commit. 3. Write agents/ledger/<project>.md: what
+changed for a user, in plain words, each line traced to a commit; known gaps from the verdicts.
+Done means: the notes file, with the commit range it covers.
+Never: claim a feature no commit delivers, edit the project's repository, push, merge, or post anything.
+Human approvals: none.
 ```
 
 **Keel · Storage Guard** (reportsTo `orch`, wakeOn `stage`, light model, reads the external disk):

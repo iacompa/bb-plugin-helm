@@ -25,7 +25,7 @@ test("a website run: profiles are stored, briefs carry the project section with 
   const data = h.repo.getNode(runId, "storefront.data")!;
   assert.equal(data.slot, "code");
   assert.ok(h.repo.getNode(runId, "storefront.p.web"), "a Web builder");
-  assert.deepEqual(h.repo.getNode(runId, "storefront.ui")!.scopeGlobs, ["apps/web/**", "packages/ui/**", "reports/ui/**"]);
+  assert.deepEqual(h.repo.getNode(runId, "storefront.ui")!.scopeGlobs, ["apps/web/**", "packages/ui/**", "reports/ui/**", "reports/screens/**"]);
   assert.deepEqual((await h.engine.startRun(runId)).problems, []);
   const lead = h.engine.leadOf(runId, "storefront")!;
   await until(h, runId, lead.id);

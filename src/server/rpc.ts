@@ -160,7 +160,7 @@ export function registerRpc(bb: BbPluginApi, svc: HelmService): void {
     board_moveTask: ({ runId, nodeId, to }) => moveTask(e, runId, nodeId, to as TaskCol),
     observatory_list: (input) => e.port.listForeignThreads({ limit: input?.limit ?? 200 }),
     settings_get: () => e.settings,
-    outbox_retry: ({ outboxId }) => ({ ok: e.outbox.retry(outboxId) }),
+    outbox_retry: ({ runId, outboxId }) => ({ ok: e.repo.getOutbox(outboxId)?.runId === runId && e.outbox.retry(outboxId) }),
     planner_start: ({ brief, model }) => svc.plannerStart({ brief, model: (model as ModelRef | undefined) ?? null }),
     planner_get: ({ id }) => svc.plannerGet(id),
     planchat_start: ({ model, text }) => svc.planChatStart({ model: (model as ModelRef | null | undefined) ?? null, text: text ?? null }),

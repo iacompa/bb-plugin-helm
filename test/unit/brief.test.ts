@@ -223,13 +223,13 @@ test("property: random app lists rendered to text parse back to the same names, 
 
 test("app folders and read-only folders in a structured brief; path words never count as platforms", () => {
   const r = parseBrief(`# Portfolio
-- Lumen — finish the loan tracker · iOS Android · /Volumes/💾My Disk's SSD X1/APP/app builds/studio/.worktrees/lumen-T-01 · reads /Volumes/💾My Disk's SSD X1/APP/app builds/studio/shared-core, ~/shared/design
+- Lumen — finish the loan tracker · iOS Android · /Volumes/💾Team's Disk/Work/app builds/studio/.worktrees/lumen-T-01 · reads /Volumes/💾Team's Disk/Work/app builds/studio/shared-core, ~/shared/design
 - Mac Tool — utility · /Volumes/mac-ssd/tools/thing
 - Plain — no folder · Windows`);
   assert.equal(r.structured, true);
   const [lumen, tool, plain] = r.portfolio.apps;
-  assert.equal(lumen.path, "/Volumes/💾My Disk's SSD X1/APP/app builds/studio/.worktrees/lumen-T-01");
-  assert.deepEqual(lumen.reads, ["/Volumes/💾My Disk's SSD X1/APP/app builds/studio/shared-core", "~/shared/design"]);
+  assert.equal(lumen.path, "/Volumes/💾Team's Disk/Work/app builds/studio/.worktrees/lumen-T-01");
+  assert.deepEqual(lumen.reads, ["/Volumes/💾Team's Disk/Work/app builds/studio/shared-core", "~/shared/design"]);
   assert.deepEqual(lumen.platforms.sort(), ["and", "ios"]);
   assert.equal(tool.path, "/Volumes/mac-ssd/tools/thing");
   assert.deepEqual(tool.platforms, ["ios", "and"], "'mac-ssd' in a path is not macOS: platforms stay assumed");

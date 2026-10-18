@@ -1,6 +1,6 @@
 # Helm — absorption of the old plugins
 
-The brief (§12) asks for each replaced plugin's installed source and skills to be read, with anything its reconstructed table misses listed here. This was done read-only on 2026-10-16. Nothing was enabled, imported or modified, and every plugin below still shows `disabled` in `bb plugin list`.
+The brief (§12) asks for each replaced plugin's installed source and skills to be read, with anything its reconstructed table misses listed here. This was done read-only on 2026-10-16. Nothing was enabled, imported or modified, and every plugin below still shows `disabled` in `bb plugin list`. It is a snapshot from that date: the panel has since been built (rows marked “UI in progress” are in it now), and work now reaches `main` through the Git agent on sign-off (see the crew table).
 
 Status words used below:
 
@@ -93,11 +93,11 @@ It only reads and displays. It has no agent tools, no skills, no storage and nev
 | Shared **channel** that wakes nobody unless `@member` is used | FYI inbox plus digest | Covered (differently) |
 | **Work queue**: create, claim, handoff, done, fail | Work is the node itself. Fixes are routed with `helm_assign_fix`. | Out of scope |
 | `crew_rebase` onto base, with `merge-conflict` on Needs you | Specialists branch from the integration branch at spawn. Only the lead merges (`skills/helm-lead`). | Partial |
-| `crew_deliver` / integrator merge **into `main`**, merging only when `checks` exits 0, with "main moved" notes | The deliverable is the lead's integration branch, gated by the Reviewer and Slop Hunter plus `helm_record_check`. Helm never merges into `main`. | Partial (deliberate) |
+| `crew_deliver` / integrator merge **into `main`**, merging only when `checks` exits 0, with "main moved" notes | The deliverable is the app's work branch (`<app>-work`), gated by the Reviewer and Slop Hunter plus `helm_record_check`. Agents never merge into `main`; when the human signs the app off, the Git agent merges the work branch into `main` and pushes both (or only pushes, or only reports: the "When you sign a project off" setting). | Covered (merged on sign-off) |
 | Add or remove members mid-crew, with a confirm form | `helm_spawn_squad` with `release` (DECISIONS 15), the `spawn` directive, plan deltas | Covered |
 | **Cross-crew dependencies** `waitsFor` (merged, done, or a comment keyword), polled every minute (`dependencies` cron) | Apps are independent. Waves order them, but no app waits on another. | Gap (small) |
 | **Follow-up ladder** (`follow-ups` cron): remind, remind, escalate, then Needs you | One watchdog nudge, then `stalled`. Unacked directive reminders through `remindUnacked`. | Partial |
-| **Relief / handover**: context at 60 % / 80 % → "Handover suggested" → new shift with a handover brief | Helm compacts at 70 % instead (`events.ts COMPACT_AT`, §8.6). A replacement thread (retry of a node whose thread is gone, gate respawn after send-back) gets a hand-over built from Helm's records: the predecessor's last reports and verified evidence (DECISIONS 20). There is no context-based relief; compaction covers that. | Partial (hand-over on replacement; no 60/80 % relief) |
+| **Relief / handover**: context at 60 % / 80 % → "Handover suggested" → new shift with a handover brief | Helm compacts at 70 % instead (`engine/context.ts COMPACT_AT`, §8.6), once the agent's thread is idle. A replacement thread (retry of a node whose thread is gone, gate respawn after send-back) gets a hand-over built from Helm's records: the predecessor's last reports and verified evidence (DECISIONS 20). There is no context-based relief; compaction covers that. | Partial (hand-over on replacement; no 60/80 % relief) |
 | **Snapshot / restore** (bindings, open work, undelivered messages) | `bb helm export` writes a JSON snapshot. A `snapshots` table and repo methods exist with no writer. No restore. | Gap (planned: Phase 6) |
 | **Replay** of the comms strip on the canvas | The `comms` table is written (`repo.comms`), but Replay is not built | Gap (planned: Phase 6) |
 | Crash journal: intent before spawn, `recoverOrphan` | Outbox, then spawn lookup by `pluginMetadata` key, then reconcile (§9.2, §9.4) | Covered |

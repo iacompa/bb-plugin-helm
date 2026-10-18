@@ -4,7 +4,7 @@
 // only paths this scan returned.
 
 import { existsSync } from "node:fs";
-import { open, readFile, readdir, stat } from "node:fs/promises";
+import { lstat, open, readFile, readdir, stat } from "node:fs/promises";
 import { extname, join, relative, sep } from "node:path";
 
 // agents' proof folders are skipped too: their captures are never pages
@@ -103,6 +103,8 @@ export function createScreenOps() {
     async screenImage({ path }: { path: string }) {
       const ext = extname(path).toLowerCase();
       if (!MIME[ext] || !existsSync(path)) return { data: null, mime: "" };
+      // the walk never lists links; a path from screens.json that is one is not followed either
+      if ((await lstat(path)).isSymbolicLink()) return { data: null, mime: "" };
       const st = await stat(path);
       if (!st.isFile() || st.size > 8 * 1024 * 1024) return { data: null, mime: "" };
       return { data: (await readFile(path)).toString("base64"), mime: MIME[ext] };

@@ -26,7 +26,7 @@ const SIZES_AGENT_MS = 10 * 60_000;
 export type WtState = "running" | "editing" | "idle" | "missing";
 
 export interface WtDisk {
-  /** The disk's name: an external volume's ("SSD X31"), or "internal" for the computer's own. */
+  /** The disk's name: an external volume's ("Team SSD"), or "internal" for the computer's own. */
   name: string;
   external: boolean;
 }

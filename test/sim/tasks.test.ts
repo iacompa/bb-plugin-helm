@@ -22,7 +22,7 @@ test("each builder loads its craft skill next to the protocol skill; a solo lead
   assert.deepEqual(skillsFor({ role: "platform", platform: "ios", alsoLead: false }, null), ["helm-specialist", "helm-ios"]);
   assert.deepEqual(skillsFor({ role: "platform", platform: "and", alsoLead: false }, null), ["helm-specialist", "helm-android"]);
   assert.deepEqual(skillsFor({ role: "slop", platform: null, alsoLead: false } as never, null), ["helm-slop-hunter"]);
-  assert.deepEqual(skillsFor({ role: "lead", platform: null, alsoLead: false }, { shape: "solo", platforms: ["mac", "win"] }), ["helm-lead", "helm-macos", "helm-windows", "helm-ui"]);
+  assert.deepEqual(skillsFor({ role: "lead", platform: null, alsoLead: false }, { shape: "solo", platforms: ["mac", "win"] }), ["helm-lead", "helm-macos", "helm-windows", "helm-ui", "helm-code"]);
   assert.deepEqual(skillsFor({ role: "lead", platform: null, alsoLead: false }, { shape: "full", platforms: ["ios"] }), ["helm-lead"]);
 });
 

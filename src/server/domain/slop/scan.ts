@@ -2,7 +2,7 @@
 // files of one commit (and optionally added lines from history) and it returns
 // the same sorted findings every time. No network, no model.
 import type { Severity } from "../../../shared/types.ts";
-import { ASSERTION_TOKENS, BLOCK_RULES, LINE_RULES, SECRET_NAME, USER_DATA, WHY_SIGNAL, type LangFamily } from "./rules.ts";
+import { ASSERTION_TOKENS, BLOCK_RULES, LINE_RULES, SECRET_NAME, USER_DATA, WHY_SIGNAL, emptyBodyEnd, redactSecrets, type LangFamily } from "./rules.ts";
 
 export interface ScanFile {
   path: string;
@@ -121,6 +121,8 @@ const trimQuote = (s: string) => {
   const t = s.trim();
   return t.length > 200 ? t.slice(0, 200) : t;
 };
+/** A secret's quote never carries the secret: the value is redacted before it is trimmed. */
+const secretQuote = (s: string) => trimQuote(redactSecrets(s));
 
 function lineOfIndex(content: string, index: number): number {
   let line = 1;
@@ -216,7 +218,7 @@ function readManifests(files: ScanFile[]): Manifests {
       for (const g of f.content.matchAll(/\b(?:namespace|applicationId)\s*=?\s*"([\w.]+)"/g)) m.kotlinPackages.add(g[1]);
     }
     if (/\.(kt|java)$/.test(base)) {
-      const pk = f.content.match(/^\s*package\s+([\w.]+)/m);
+      const pk = f.content.match(/^[ \t]*package\s+([\w.]+)/m);
       if (pk) m.kotlinPackages.add(pk[1]);
     }
     if (base.endsWith(".swift")) {
@@ -552,7 +554,7 @@ export function scan(input: ScanInput): ScanResult {
 
     // S6 committed env files
     if (/^\.env(\.|$)/.test(base) && !/\.(example|sample|template)$/.test(base)) {
-      findings.push({ rule: "S6", ruleId: "S6-envfile", severity: "blocker", path: f.path, line: 1, quote: trimQuote(f.content.split(/\r?\n/)[0] ?? base), why: "An .env file is committed.", fix: "Remove it from the repository and history, add it to .gitignore, and rotate what it held." });
+      findings.push({ rule: "S6", ruleId: "S6-envfile", severity: "blocker", path: f.path, line: 1, quote: secretQuote(f.content.split(/\r?\n/)[0] ?? base), why: "An .env file is committed.", fix: "Remove it from the repository and history, add it to .gitignore, and rotate what it held." });
     }
     if (LOCKFILES.test(f.path)) continue;
 
@@ -576,12 +578,13 @@ export function scan(input: ScanInput): ScanResult {
           loggerExempt++;
           continue;
         }
-        findings.push({ rule: r.rule, ruleId: r.id, severity: r.severityFor?.(line) ?? r.severity, path: f.path, line: i + 1, quote: trimQuote(line), why: r.why, fix: r.fix });
+        findings.push({ rule: r.rule, ruleId: r.id, severity: r.severityFor?.(line) ?? r.severity, path: f.path, line: i + 1, quote: r.rule === "S6" ? secretQuote(line) : trimQuote(line), why: r.why, fix: r.fix });
       }
       // S6 high-entropy assignment to a secret-looking name (all files)
-      const asg = line.match(/([A-Za-z_][\w.-]*)\s*[:=]\s*["'`]([^"'`\s]{24,})["'`]/);
+      // the name is bounded: unbounded, every start in a long run of word characters rescanned the run (quadratic)
+      const asg = line.match(/([A-Za-z_][\w.-]{0,80})\s*[:=]\s*["'`]([^"'`\s]{24,})["'`]/);
       if (asg && SECRET_NAME.test(asg[1]) && shannonEntropy(asg[2]) >= 4.0 && !/^(https?:|process\.env|<)/.test(asg[2]) && !asg[2].includes("${") && !looksLikeIdentifierPath(asg[2]))
-        findings.push({ rule: "S6", ruleId: "S6-entropy", severity: "blocker", path: f.path, line: i + 1, quote: trimQuote(line), why: `High-entropy value assigned to "${asg[1]}" looks like a credential.`, fix: "Load it at runtime from the keychain/keystore or environment and rotate it." });
+        findings.push({ rule: "S6", ruleId: "S6-entropy", severity: "blocker", path: f.path, line: i + 1, quote: secretQuote(line), why: `High-entropy value assigned to "${asg[1]}" looks like a credential.`, fix: "Load it at runtime from the keychain/keystore or environment and rotate it." });
     });
 
     // S12 multi-line empty catch
@@ -589,9 +592,19 @@ export function scan(input: ScanInput): ScanResult {
       for (const b of BLOCK_RULES) {
         if (!b.languages.includes(lang)) continue;
         for (const mt of f.content.matchAll(b.regex)) {
-          if (b.excludeIf?.(mt[0])) continue;
-          const ln = lineOfIndex(f.content, mt.index ?? 0);
-          findings.push({ rule: b.rule, ruleId: b.id, severity: b.severity, path: f.path, line: ln, quote: trimQuote(lines[ln - 1] ?? mt[0]), why: b.why, fix: b.fix });
+          const start = mt.index ?? 0;
+          let stop = emptyBodyEnd(f.content, start + mt[0].length - 1);
+          if (stop < 0) continue;
+          if (b.after) {
+            b.after.lastIndex = stop;
+            const tail = b.after.exec(f.content);
+            if (!tail) continue;
+            stop += tail[0].length;
+          }
+          const match = f.content.slice(start, stop);
+          if (b.excludeIf?.(match)) continue;
+          const ln = lineOfIndex(f.content, start);
+          findings.push({ rule: b.rule, ruleId: b.id, severity: b.severity, path: f.path, line: ln, quote: trimQuote(lines[ln - 1] ?? match), why: b.why, fix: b.fix });
         }
       }
 
@@ -637,7 +650,7 @@ export function scan(input: ScanInput): ScanResult {
   for (const h of input.history ?? []) {
     for (const r of LINE_RULES.filter((x) => x.rule === "S6")) {
       if (r.regex.test(h.line))
-        findings.push({ rule: "S6", ruleId: "S6-history", severity: "blocker", path: h.path, line: 0, quote: trimQuote(h.line), why: `A credential was committed in ${h.commit.slice(0, 9)} (still in history).`, fix: "Rotate it; rewriting history alone is not enough." });
+        findings.push({ rule: "S6", ruleId: "S6-history", severity: "blocker", path: h.path, line: 0, quote: secretQuote(h.line), why: `A credential was committed in ${h.commit.slice(0, 9)} (still in history).`, fix: "Rotate it; rewriting history alone is not enough." });
     }
   }
 
@@ -645,8 +658,14 @@ export function scan(input: ScanInput): ScanResult {
   if (!manifests.swiftDeps && files.some((f) => langOf(f.path) === "swift") && files.some((f) => /\.xcodeproj\//.test(f.path)))
     unverified.push("Swift imports: Xcode project without Package.swift — only Apple frameworks and local modules recognized");
 
-  // allowlist
-  const allow = input.allow ?? [];
+  // allowlist: the lead can edit this file, so stubs, fakes and secrets stay hidden only behind a human waiver
+  // it cites (D-…); other entries (a logger wrapper, say) are project configuration
+  const WAIVER_ONLY = new Set(["S1", "S2", "S3", "S6"]);
+  const allow = (input.allow ?? []).filter((a) => {
+    if (!WAIVER_ONLY.has(a.rule) || /\bD-\d{4,}\b/.test(a.reason ?? "")) return true;
+    unverified.push(`.helm/slop-allow.json: the ${a.rule} entry for ${a.path} was ignored because it cites no human waiver (D-…)`);
+    return false;
+  });
   let exempted = loggerExempt;
   const kept = findings.filter((f) => {
     const hit = allow.some((a) => a.rule === f.rule && (a.path === f.path || (a.path.endsWith("/**") && f.path.startsWith(a.path.slice(0, -3)))));

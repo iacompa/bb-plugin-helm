@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRealtime } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import type { ModelRef, PlanPreview, PlannedApp, Portfolio, ProjectKind, ProjectNeed, Shape, SlotId, SlotMap } from "./types.ts";
-import { KINDS, NEEDS, PLAT, SEED_PRESETS, SLOT_DEFS, clamp, errMsg, familyWarnings, fmtUnits, needLabel, plural, toolLabel } from "./format.ts";
+import { KINDS, NEEDS, PLAT, SEED_PRESETS, SLOT_DEFS, clamp, errMsg, familyWarnings, fmtUnits, needLabel, plural, refProblem, toolLabel } from "./format.ts";
 import { useHelm } from "./ctx.tsx";
 import { Banner, Ic, Modal, ModelChip, askConfirm, cx } from "./ui.tsx";
 import { StudioPanel } from "./studio.tsx";
@@ -44,6 +44,8 @@ const PLACEHOLDER = `Describe what you want to build, in your own words. Structu
 - Name — tagline · macOS · /path/to/existing/repo · reads /path/to/shared/code`;
 
 type Limits = { managerSpan: number; orchestratorSpan: number; concurrency: number; budgetCap: number };
+/** Before Helm's settings arrive (the same numbers as Helm's own defaults). */
+const WIZ_LIMITS: Limits = { managerSpan: 4, orchestratorSpan: 6, concurrency: 24, budgetCap: 2500 };
 
 function squadHas(a: PlannedApp, role: string): boolean {
   return (a.squad as unknown as Array<string | { role: string }>).some((m) => (typeof m === "string" ? m === role || m.endsWith(`.${role}`) : m.role === role));
@@ -93,7 +95,7 @@ function WizardInner() {
     seededFrom.current = b;
     lsSet(`${WIZ}seededFrom`, JSON.stringify(b));
   };
-  const [limits, setLimits] = useStored<Limits>(`${WIZ}limits`, { managerSpan: 4, orchestratorSpan: 6, concurrency: 24, budgetCap: 2500 }, (v) => isObj(v) && typeof (v as Limits).concurrency === "number");
+  const [limits, setLimits] = useStored<Limits>(`${WIZ}limits`, WIZ_LIMITS, (v) => isObj(v) && typeof (v as Limits).concurrency === "number");
   const [slots, setSlots] = useStored<SlotMap>(`${WIZ}slots`, () => JSON.parse(JSON.stringify(SEED_PRESETS["Studio default"])) as SlotMap);
   // the default Planner and Orchestrator models (Models → Default models) fill those roles when empty
   useEffect(() => {
@@ -112,6 +114,26 @@ function WizardInner() {
   const [autoAdvance, setAutoAdvance] = useStored<"ask" | "auto">(`${WIZ}autoAdvance`, "ask", (v) => v === "ask" || v === "auto");
   const [dryRun, setDryRun] = useStored(`${WIZ}dryRun`, false);
   const [autonomy, setAutonomy] = useStored<"high" | "ask">(`${WIZ}autonomy`, "high", (v) => v === "high" || v === "ask");
+  // a fresh draft starts from Helm's settings (concurrency, budget cap, spans, who decides), not fixed numbers
+  const fresh = useRef({ limits: readStored<unknown>(`${WIZ}limits`, null) === null, autonomy: readStored<unknown>(`${WIZ}autonomy`, null) === null });
+  useEffect(() => {
+    if (!fresh.current.limits && !fresh.current.autonomy) return;
+    let live = true;
+    h.rpc.call("settings_get", {}).then(
+      (st: { limits?: Partial<Limits> & { autonomy?: string } } | null) => {
+        const l = st?.limits;
+        if (!live || !l) return;
+        const num = (x: unknown, d: number) => (typeof x === "number" && Number.isFinite(x) ? x : d);
+        if (fresh.current.limits)
+          setLimits((x) => (JSON.stringify(x) !== JSON.stringify(WIZ_LIMITS) ? x : { managerSpan: num(l.managerSpan, x.managerSpan), orchestratorSpan: num(l.orchestratorSpan, x.orchestratorSpan), concurrency: num(l.concurrency, x.concurrency), budgetCap: num(l.budgetCap, x.budgetCap) }));
+        if (fresh.current.autonomy && (l.autonomy === "high" || l.autonomy === "ask")) setAutonomy((a) => (a === "high" ? (l.autonomy as "high" | "ask") : a));
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [h.rpc]); // eslint-disable-line react-hooks/exhaustive-deps
   const [preview, setPreview] = useState<PlanPreview | null>(null);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -192,7 +214,8 @@ function WizardInner() {
   const plan = preview?.plan ?? null;
   const appsFound = preview?.portfolio?.apps?.length ?? 0;
   const required: SlotId[] = preview?.required ?? [];
-  const unset = required.filter((id) => !slots[id]);
+  // a preset model this machine does not offer counts as unset: it would only fail at Approve
+  const unset = required.filter((id) => !slots[id] || !!refProblem(h.catalog, slots[id]));
   const fam = familyWarnings(h.catalog, slots);
   const noModels = !!h.catalog && (!h.catalog.models.length || !h.catalog.providers.some((p) => p.available));
 
@@ -266,16 +289,20 @@ function WizardInner() {
         ...(appsRoot.trim() ? { appsRoot: appsRoot.trim() } : {}),
       })) as { runId: string; problems?: string[] };
       h.refreshRuns();
-      if (created.problems?.length) {
-        setProblems(created.problems);
+      // the run exists from here on: never leave the wizard open to create it a second time
+      const blocked = (list: string[]) => {
         h.setRunId(created.runId);
-        setErr("The run was created but not started (it is in planning). Fix what is listed (models in Model Studio; folders by going back to Portfolio and creating the run again), then start it.");
+        h.setWizardOpen(false);
         setBusy(false);
-        return;
-      }
+        toast.error("The run was created but not started", {
+          description: `${list[0]}${list.length > 1 ? ` (+${list.length - 1} more)` : ""} The bar above the run lists what to fix; start it from there. For a wrong folder, discard the plan there and create it again.`,
+        });
+      };
+      if (created.problems?.length) return blocked(created.problems);
       await h.rpc.call("run_setSlots", { runId: created.runId, slots: slots as Record<string, ModelRef> });
-      await h.rpc.call("run_start", { runId: created.runId, dryRun });
+      const started = (await h.rpc.call("run_start", { runId: created.runId, dryRun })) as { ok?: boolean; problems?: string[] } | null;
       h.refreshRuns();
+      if (!started?.ok) return blocked(started?.problems?.length ? started.problems : ["The server did not say why."]);
       h.setRunId(created.runId);
       clearWizardDraft();
       h.setWizardOpen(false);
@@ -350,7 +377,7 @@ function WizardInner() {
                       <>
                         {" "}
                         <b>
-                          Still unset: {unset.map((id) => SLOT_DEFS.find((s) => s.id === id)?.name ?? id).join(", ")}.
+                          Still unset or not available here: {unset.map((id) => SLOT_DEFS.find((s) => s.id === id)?.name ?? id).join(", ")}.
                         </b>
                       </>
                     ) : null}
@@ -597,8 +624,9 @@ function StepPortfolio(p: {
           New app folders go under <span className="faint">(optional)</span>
         </label>
         <input id="wzRoot" className="input mono" value={p.appsRoot} maxLength={500} placeholder="Default: the apps root in Helm settings — or e.g. ~/code/apps" onChange={(e) => p.setAppsRoot(e.target.value)} />
-        <span className="hint-t">Apps without their own folder get a new repository here. Give an app its own folder below to use an existing repository (Helm works on a new helm/… branch and never touches your checkout) or a new folder anywhere.</span>
+        <span className="hint-t">Apps without their own folder get a new repository here. Give an app its own folder below to use an existing repository (Helm works on its own <span className="mono">&lt;app&gt;-work</span> branch in a worktree beside it and never touches your checkout) or a new folder anywhere.</span>
       </div>
+      {p.previewErr ? <Banner tone="crit">{p.previewErr}</Banner> : null}
       <Banner tone={plan.ok ? "info" : "crit"} icon={plan.ok ? "Workflow" : "AlertTriangle"}>
         <b>Why this shape{plan.rule && plan.rule !== "none" ? ` (${plan.rule})` : ""}.</b> {plan.ok ? plan.why : plan.error}
       </Banner>
@@ -770,7 +798,7 @@ function StepApprove(p: {
           <b>Checks before start</b>
         </div>
         <div className="pad col" style={{ gap: 9 }}>
-          {check(!p.unset.length, p.unset.length ? `${plural(p.unset.length, "role")} still without a model: ${p.unset.map((id) => SLOT_DEFS.find((s) => s.id === id)?.name ?? id).join(", ")}` : "Every role has a model you chose")}
+          {check(!p.unset.length, p.unset.length ? `${plural(p.unset.length, "role")} still without a model this machine offers: ${p.unset.map((id) => SLOT_DEFS.find((s) => s.id === id)?.name ?? id).join(", ")}` : "Every role has a model you chose")}
           {check(plan.ok && c.total <= MAX_AGENTS, `Plan fits the agent cap (${c.total} of ${MAX_AGENTS})`)}
           {check(gatesOk, gatesOk ? "Every app gets an independent Reviewer and a Slop Hunter; “ready” also needs green deterministic checks" : "Some apps are missing a Reviewer or Slop Hunter")}
           {check(false, `${plural(c.apps, "new project")} (one repository per app) will be created`, true)}

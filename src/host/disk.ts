@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { lstat, readdir, statfs } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { gitEnv } from "./git-env.ts";
 
 export interface DiskSize {
   path: string;
@@ -78,17 +79,19 @@ async function pool<T, R>(items: T[], n: number, fn: (x: T) => Promise<R>): Prom
 /** The repository's shared git storage (objects and refs every branch and worktree uses). */
 function gitCommonDir(repo: string): Promise<string | null> {
   return new Promise((res) => {
-    execFile("git", ["rev-parse", "--git-common-dir"], { cwd: repo, timeout: 20_000, encoding: "utf8", env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" } }, (err, stdout) => {
+    execFile("git", ["rev-parse", "--git-common-dir"], { cwd: repo, timeout: 20_000, encoding: "utf8", env: gitEnv({ GIT_OPTIONAL_LOCKS: "0" }) }, (err, stdout) => {
       const d = String(stdout ?? "").trim();
       res(err || !d ? null : isAbsolute(d) ? d : resolve(repo, d));
     });
   });
 }
 
-/** Open the file manager on a folder (selected in its parent where the platform can). */
-function openInFileManager(path: string, select: boolean): Promise<boolean> {
-  const [cmd, args] =
-    process.platform === "darwin" ? ["open", select ? ["-R", path] : [path]] : process.platform === "win32" ? ["explorer.exe", select ? [`/select,${path}`] : [path]] : ["xdg-open", [select ? dirname(path) : path]];
+/**
+ * Show a folder in the file manager, selected in its parent where the platform can. Always a
+ * reveal, never an open: opening an app bundle or a file would launch it.
+ */
+function openInFileManager(dir: string): Promise<boolean> {
+  const [cmd, args] = process.platform === "darwin" ? ["open", ["-R", dir]] : process.platform === "win32" ? ["explorer.exe", [`/select,${dir}`]] : ["xdg-open", [dir]];
   return new Promise((res) => {
     // explorer.exe exits 1 even when it opened the window
     execFile(cmd as string, args as string[], { timeout: 15_000 }, (err) => res(!err || process.platform === "win32"));
@@ -101,14 +104,15 @@ export function createDiskOps() {
     async reveal({ path }: { path: string }) {
       if (!isAbsolute(path)) return { ok: false, shown: null };
       let p = resolve(path);
-      let exact = true;
       while (!existsSync(p)) {
         const up = dirname(p);
         if (up === p) return { ok: false, shown: null };
         p = up;
-        exact = false;
       }
-      return { ok: await openInFileManager(p, exact), shown: p };
+      // only plain folders are shown; for anything else (a file, a link) its folder is
+      const st = await lstat(p).catch(() => null);
+      if (!st?.isDirectory()) p = dirname(p);
+      return { ok: await openInFileManager(p), shown: p };
     },
     /** Size of each folder (with `measure`), its disk's free and total space, and each repository's git storage. */
     async diskUsage({ paths, repos, measure: doMeasure }: { paths: string[]; repos?: string[]; measure?: boolean }) {

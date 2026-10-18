@@ -3,19 +3,19 @@
 // a timeout; every path argument is passed as an argument, never interpolated.
 
 import { execFile, spawn } from "node:child_process";
-import { access, chmod, constants as fsc, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { access, chmod, constants as fsc, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
-import { dirname, join, resolve, sep } from "node:path";
+import { randomBytes } from "node:crypto";
+import { basename, dirname, join, relative, resolve, sep, isAbsolute } from "node:path";
 import { homedir, platform, tmpdir } from "node:os";
 import type { HostOps } from "../shared/host-contract.ts";
 import { scan, type ScanFile } from "../server/domain/slop/scan.ts";
 import { createScreenOps } from "./screens.ts";
 import { createDiskOps } from "./disk.ts";
 import { createRemoteOps } from "./remote.ts";
+import { gitEnv, SAFE_GIT_CONFIG } from "./git-env.ts";
 
-const GIT_ENV = {
-  ...process.env,
-  GIT_TERMINAL_PROMPT: "0",
+const GIT_ENV = gitEnv({
   // reads (git status while planning, evidence) must not refresh the index of the
   // human's checkout or worktrees: no optional locks, no index writes
   GIT_OPTIONAL_LOCKS: "0",
@@ -23,7 +23,24 @@ const GIT_ENV = {
   GIT_AUTHOR_EMAIL: "helm@localhost",
   GIT_COMMITTER_NAME: "Helm",
   GIT_COMMITTER_EMAIL: "helm@localhost",
-};
+});
+
+/** Most dirty paths `status` returns, and most findings `scan` returns (the rest are counted). */
+const MAX_DIRTY = 5000;
+const MAX_FINDINGS = 2000;
+
+/** Whether `p` is `root` or inside it (both already resolved). */
+function isInside(root: string, p: string): boolean {
+  const rel = relative(root, p);
+  return rel === "" || (!!rel && !rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/** The real folder a path's parent resolves to must stay inside the real `root`. */
+async function assertInside(root: string, path: string): Promise<void> {
+  const realRoot = await realpath(resolve(root));
+  const realDir = await realpath(dirname(resolve(path)));
+  if (!isInside(realRoot, realDir)) throw new Error(`refusing ${path}: its folder resolves outside ${root}`);
+}
 
 interface RunResult {
   code: number;
@@ -45,7 +62,7 @@ function run(cmd: string, args: string[], opts: { cwd?: string; timeoutMs?: numb
   });
 }
 
-const git = (repo: string, args: string[], timeoutMs?: number, maxBuffer?: number) => run("git", args, { cwd: repo, timeoutMs, maxBuffer });
+const git = (repo: string, args: string[], timeoutMs?: number, maxBuffer?: number) => run("git", [...SAFE_GIT_CONFIG, ...args], { cwd: repo, timeoutMs, maxBuffer });
 
 /** Refs from agents are untrusted: allow only ordinary ref/sha characters, never an option. */
 export function safeRef(ref: string): string | null {
@@ -74,10 +91,17 @@ function safeBranchName(b: string): string | null {
 function hashObject(repo: string, content: string): Promise<string | null> {
   return new Promise((res) => {
     const child = spawn("git", ["hash-object", "-w", "--stdin"], { cwd: repo, env: GIT_ENV });
+    const timer = setTimeout(() => child.kill("SIGKILL"), 60_000);
     let out = "";
     child.stdout.on("data", (d) => (out += String(d)));
-    child.on("close", (code) => res(code === 0 ? out.trim() || null : null));
-    child.on("error", () => res(null));
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      res(code === 0 ? out.trim() || null : null);
+    });
+    child.on("error", () => {
+      clearTimeout(timer);
+      res(null);
+    });
     child.stdin.end(content);
   });
 }
@@ -135,6 +159,8 @@ function catFileBatch(repo: string, specs: string[], maxBytesEach: number): Prom
           continue;
         }
         const size = Number(header.split(" ")[2] ?? 0);
+        // past the batch limit the output was cut off: what is left is unread, never half a file
+        if (pos + size > buf.length) break;
         const body = buf.subarray(pos, pos + size);
         pos += size + 1;
         if (size > maxBytesEach || body.includes(0)) out.set(spec, null);
@@ -157,6 +183,19 @@ function parseHistory(text: string): Array<{ commit: string; path: string; line:
     else if (l.startsWith("+") && !l.startsWith("+++") && commit && path) out.push({ commit, path, line: l.slice(1) });
   }
   return out;
+}
+
+/** `git status --porcelain -z`: "XY path" records; a rename or copy is followed by its old path, which is skipped. */
+export function parseStatusZ(out: string): string[] {
+  const recs = out.split("\0");
+  const paths: string[] = [];
+  for (let i = 0; i < recs.length; i++) {
+    const r = recs[i];
+    if (r.length < 4) continue;
+    paths.push(r.slice(3));
+    if (r[0] === "R" || r[0] === "C" || r[1] === "R" || r[1] === "C") i++;
+  }
+  return paths;
 }
 
 async function versionOf(cmd: string, args: string[], cwd?: string): Promise<string | null> {
@@ -206,7 +245,14 @@ export function createHostOps(): HostOps {
         if (!abs.startsWith(root + sep)) throw new Error(`refusing path outside the repo: ${rel}`);
         if (existsSync(abs)) continue; // never overwrite work
         await mkdir(dirname(abs), { recursive: true });
-        await writeFile(abs, f.content, "utf8");
+        await assertInside(root, abs);
+        try {
+          // wx: never follows a link someone left at the path (even a dangling one) and never overwrites
+          await writeFile(abs, f.content, { encoding: "utf8", flag: "wx" });
+        } catch (err) {
+          if ((err as { code?: string }).code === "EEXIST") continue;
+          throw err;
+        }
         if (f.executable) await chmod(abs, 0o755);
       }
       const head0 = await revParse(root, "HEAD");
@@ -332,8 +378,8 @@ export function createHostOps(): HostOps {
       const out = [];
       for (const [i, w] of list.slice(0, 100).entries()) {
         const missing = !existsSync(w.path);
-        const s = missing || status === false ? null : await git(w.path, ["status", "--porcelain", "--untracked-files=no"], 60_000);
-        out.push({ ...w, main: i === 0, missing, dirty: s && s.code === 0 ? s.stdout.split("\n").filter(Boolean).length : 0 });
+        const s = missing || status === false ? null : await git(w.path, ["status", "--porcelain", "--untracked-files=no"], 120_000);
+        out.push({ ...w, main: i === 0, missing, dirty: s && s.code === 0 ? s.stdout.split("\n").filter(Boolean).length : 0, ...(s && s.code !== 0 ? { statusUnknown: true } : {}) });
       }
       const refs = await git(resolve(repo), ["for-each-ref", "--count=300", "--format=%(refname:short)", "refs/heads"]);
       return { worktrees: out, branches: refs.code === 0 ? refs.stdout.split("\n").filter(Boolean) : [] };
@@ -360,19 +406,23 @@ export function createHostOps(): HostOps {
     },
 
     async status({ path }) {
-      if (!existsSync(path)) return { head: null, branch: null, clean: false, dirty: [] };
+      if (!existsSync(path)) return { head: null, branch: null, clean: false, dirty: [], missing: true };
       const head = await revParse(path, "HEAD");
       const br = await git(path, ["rev-parse", "--abbrev-ref", "HEAD"]);
-      const st = await git(path, ["status", "--porcelain", "--untracked-files=all"]);
-      const dirty = st.stdout
-        .split("\n")
-        .filter(Boolean)
-        .map((l) => l.slice(3).replace(/^"|"$/g, ""));
-      return { head, branch: br.code === 0 ? br.stdout.trim() : null, clean: dirty.length === 0, dirty };
+      const st = await git(path, ["status", "--porcelain", "-z", "--untracked-files=all"], 120_000);
+      // a status git could not finish (a timeout on a big folder, a broken repository) is never "clean"
+      if (st.code !== 0) return { head, branch: br.code === 0 ? br.stdout.trim() : null, clean: false, dirty: [], error: `git status failed (exit ${st.code}): ${st.stderr.trim().slice(0, 200) || "no output"}` };
+      const dirty = parseStatusZ(st.stdout);
+      // paths outside reports/ first, so a cap never hides a change to source
+      const ordered = [...dirty.filter((p) => !p.startsWith("reports/")), ...dirty.filter((p) => p.startsWith("reports/"))];
+      return { head, branch: br.code === 0 ? br.stdout.trim() : null, clean: dirty.length === 0, dirty: ordered.slice(0, MAX_DIRTY), ...(dirty.length > MAX_DIRTY ? { dirtyCount: dirty.length } : {}) };
     },
 
-    async readFile({ path, maxBytes }) {
+    async readFile({ path, maxBytes, root }) {
       try {
+        // a link at the path could point anywhere: follow it only when it stays inside `root`
+        if ((await lstat(path)).isSymbolicLink() && !root) return { content: null };
+        if (root && !isInside(await realpath(resolve(root)), await realpath(path))) return { content: null };
         const s = await stat(path);
         if (!s.isFile() || s.size > (maxBytes ?? 1_000_000)) return { content: null };
         return { content: await readFile(path, "utf8") };
@@ -381,9 +431,19 @@ export function createHostOps(): HostOps {
       }
     },
 
-    async writeFile({ path, content }) {
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, content, "utf8");
+    async writeFile({ path, content, root }) {
+      const abs = resolve(path);
+      await mkdir(dirname(abs), { recursive: true });
+      if (root) await assertInside(root, abs);
+      // written beside it and renamed into place: a link left at the path is replaced, never followed
+      const tmp = join(dirname(abs), `.${basename(abs)}.${randomBytes(6).toString("hex")}.helm-tmp`);
+      try {
+        await writeFile(tmp, content, { encoding: "utf8", flag: "wx" });
+        await rename(tmp, abs);
+      } catch (err) {
+        await rm(tmp, { force: true }).catch(() => undefined);
+        throw err;
+      }
       return { ok: true };
     },
 
@@ -406,9 +466,10 @@ export function createHostOps(): HostOps {
     async scan({ repo, ref, paths, history }) {
       const commit = await revParse(repo, ref);
       if (!commit) return { commit: null, findings: [], filesScanned: 0, shippedFiles: 0, exempted: 0, unverified: [`ref ${ref} not found`] };
-      const ls = await git(repo, ["ls-tree", "-r", "-l", "--full-tree", commit], 30_000);
+      // -z: names git would quote (non-ASCII and others) come through as they are, so they are scanned too
+      const ls = await git(repo, ["ls-tree", "-r", "-l", "-z", "--full-tree", commit], 30_000);
       const entries = ls.stdout
-        .split("\n")
+        .split("\0")
         .filter(Boolean)
         .map((l) => {
           const [meta, p] = l.split("\t");
@@ -422,9 +483,11 @@ export function createHostOps(): HostOps {
       const chosen = entries.filter((e) => !wanted || wanted.has(e.path) || isManifest(e.path));
       const blobs = await catFileBatch(repo, chosen.map((e) => `${commit}:${e.path}`), 1_000_000);
       const files: ScanFile[] = [];
+      let unread = 0;
       for (const e of chosen) {
         const c = blobs.get(`${commit}:${e.path}`);
         if (c != null) files.push({ path: e.path, content: c });
+        else if (c === undefined) unread++;
       }
       let allow: Array<{ rule: string; path: string; reason: string }> | undefined;
       let loggers: string[] | undefined;
@@ -440,12 +503,15 @@ export function createHostOps(): HostOps {
       }
       let hist: Array<{ commit: string; path: string; line: string }> | undefined;
       if (history) {
-        const h = await git(repo, ["log", "-p", "--no-color", "--no-ext-diff", "-n", "300", "--format=%x00%H", commit], 60_000, 24 * 1024 * 1024);
+        const h = await git(repo, ["log", "-p", "--no-color", "--no-ext-diff", "--no-textconv", "-n", "300", "--format=%x00%H", commit], 60_000, 24 * 1024 * 1024);
         if (h.code === 0) hist = parseHistory(h.stdout);
       }
       const res = scan({ files, allow, history: hist, loggers });
-      const findings = wanted ? res.findings.filter((f) => wanted.has(f.path) || f.rule === "S6") : res.findings;
-      return { commit, findings, filesScanned: res.filesScanned, shippedFiles: res.shippedFiles, exempted: res.exempted, unverified: res.unverified };
+      const all = wanted ? res.findings.filter((f) => wanted.has(f.path) || f.rule === "S6") : res.findings;
+      const unverified = [...res.unverified];
+      if (unread) unverified.push(`${unread} file${unread === 1 ? "" : "s"} not read (over the 64 MB read limit for one scan); scan fewer paths to cover them`);
+      if (all.length > MAX_FINDINGS) unverified.push(`${all.length - MAX_FINDINGS} more findings not listed (the first ${MAX_FINDINGS} are)`);
+      return { commit, findings: all.slice(0, MAX_FINDINGS), filesScanned: res.filesScanned, shippedFiles: res.shippedFiles, exempted: res.exempted, unverified };
     },
 
     async toolProbe({ tools }) {

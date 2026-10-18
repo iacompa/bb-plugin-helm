@@ -26,7 +26,7 @@ import {
 import { appMembers, leadOf } from "../store.ts";
 import { useHelm } from "../ctx.tsx";
 import { Banner, Dot, Ic, LevelChip, Sec, StagePill, StatusPill, askConfirm, cx } from "../ui.tsx";
-import { isOrch, notifyChain, sendThreadText, useSendDirective } from "./shared.tsx";
+import { isOrch, notifyChain, sendThreadText, useSendDirective, useThrottled } from "./shared.tsx";
 
 export function Overview({ n, detail }: { n: SnapNode; detail: NodeDetail | null }) {
   const h = useHelm();
@@ -37,11 +37,13 @@ export function Overview({ n, detail }: { n: SnapNode; detail: NodeDetail | null
   const need = s.needs.find((x) => x.state === "open" && x.nodeId === n.id);
   const live = !["planned", "queued"].includes(n.status);
   const m = findModel(h.catalog, n.model);
-  const allowed = allowedTypes(n);
+  const allowed = allowedTypes(n, s.run.status);
   const kids = (s.children[n.id] ?? []).map((id) => s.nodes[id]).filter(Boolean);
   const findings = n.appId && (n.tier === "gate" || n.tier === "lead" || n.alsoLead) ? s.findings.filter((f) => f.appId === n.appId && f.status === "open") : [];
 
+  const [quickBusy, setQuickBusy] = useState(false);
   const quick = async (type: "spawn" | "pause" | "resume" | "retry" | "stop") => {
+    if (quickBusy) return;
     if (type === "stop") {
       const ok = await askConfirm({
         title: `Stop ${trailLabel(n, s.apps)}?`,
@@ -51,7 +53,12 @@ export function Overview({ n, detail }: { n: SnapNode; detail: NodeDetail | null
       });
       if (!ok) return;
     }
-    await send({ type, target: n.id, cascade: "self" });
+    setQuickBusy(true);
+    try {
+      await send({ type, target: n.id, cascade: "self" });
+    } finally {
+      setQuickBusy(false);
+    }
   };
 
   return (
@@ -61,10 +68,10 @@ export function Overview({ n, detail }: { n: SnapNode; detail: NodeDetail | null
           <Banner tone="info" icon="Clock">
             <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
               <span className="grow">
-                <b>Not spawned yet.</b> {n.tier === "gate" ? "The lead spawns gates when integration checks are green, so they judge the merged result." : "Helm spawns it when its stage needs it and capacity allows."} Change its model or brief now and the spawn will use your choice.
+                <b>Not spawned yet.</b> {s.run.status === "planning" ? "Nothing spawns until you start the run." : s.run.status === "paused" ? "The run is paused; nothing spawns until you resume it." : n.tier === "gate" ? "The lead spawns gates when integration checks are green, so they judge the merged result." : "Helm spawns it when its stage needs it and capacity allows."} Change its model or brief now and the spawn will use your choice.
               </span>
               {allowed.includes("spawn") ? (
-                <button type="button" className="btn sm primary" onClick={() => void quick("spawn")}>
+                <button type="button" className="btn sm primary" disabled={quickBusy} onClick={() => void quick("spawn")}>
                   <Ic name="Play" size="sm" /> Spawn now
                 </button>
               ) : null}
@@ -246,27 +253,27 @@ export function Overview({ n, detail }: { n: SnapNode; detail: NodeDetail | null
             <Ic name="Brain" size="sm" /> Change model
           </button>
           {allowed.includes("spawn") ? (
-            <button type="button" className="btn sm" onClick={() => void quick("spawn")}>
+            <button type="button" className="btn sm" disabled={quickBusy} onClick={() => void quick("spawn")}>
               <Ic name="Play" size="sm" /> Spawn now
             </button>
           ) : null}
           {allowed.includes("pause") ? (
-            <button type="button" className="btn sm" onClick={() => void quick("pause")}>
+            <button type="button" className="btn sm" disabled={quickBusy} onClick={() => void quick("pause")}>
               <Ic name="Pause" size="sm" /> Pause
             </button>
           ) : null}
           {allowed.includes("resume") ? (
-            <button type="button" className="btn sm" onClick={() => void quick("resume")}>
+            <button type="button" className="btn sm" disabled={quickBusy} onClick={() => void quick("resume")}>
               <Ic name="Play" size="sm" /> Resume
             </button>
           ) : null}
           {allowed.includes("retry") ? (
-            <button type="button" className="btn sm" onClick={() => void quick("retry")}>
+            <button type="button" className="btn sm" disabled={quickBusy} onClick={() => void quick("retry")}>
               <Ic name="RotateCcw" size="sm" /> Retry
             </button>
           ) : null}
           {allowed.includes("stop") && !isOrch(n) ? (
-            <button type="button" className="btn sm danger" onClick={() => void quick("stop")}>
+            <button type="button" className="btn sm danger" disabled={quickBusy} onClick={() => void quick("stop")}>
               <Ic name="Square" size="sm" /> Stop
             </button>
           ) : null}
@@ -421,6 +428,7 @@ function WorldSection({ n }: { n: SnapNode }) {
   const s = h.data!;
   const [w, setW] = useState<WorldState | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const rev = useThrottled(h.rev, 1500);
   useEffect(() => {
     if (!h.runId) return;
     let live = true;
@@ -438,7 +446,7 @@ function WorldSection({ n }: { n: SnapNode }) {
       live = false;
       clearTimeout(t);
     };
-  }, [h.runId, h.rpc, h.rev]);
+  }, [h.runId, h.rpc, rev]);
 
   const ask = async (q: string) => {
     if (!n.threadId) {

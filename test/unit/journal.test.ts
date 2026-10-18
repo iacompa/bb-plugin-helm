@@ -8,7 +8,7 @@ import { registerRpc } from "../../src/server/rpc.ts";
 import { journaledHandlers, errorsText, inputShape, type RpcHandler } from "../../src/server/journal.ts";
 import { callTool } from "../../src/server/agent/tools.ts";
 import { requestProblem, readableRpcError } from "../../components/helm/rpccheck.ts";
-import { TEXT_MAX } from "../../src/shared/rpc-schemas.ts";
+import { RPC_SCHEMAS, TEXT_MAX } from "../../src/shared/rpc-schemas.ts";
 import { planChatPrompt } from "../../src/server/engine/planner.ts";
 import { parseBrief, SAMPLE_BRIEF } from "../../src/server/domain/brief.ts";
 
@@ -64,4 +64,15 @@ test("agent tool refusals are journaled so agent behaviour can be debugged", asy
   assert.ok(e, "the refusal is journaled");
   assert.match(e!.at, new RegExp(`^helm_direct by ${lead.id.replace(".", "\\.")}$`));
   assert.match(e!.message, /not below you/);
+});
+
+test("the wizard's portfolio keeps kind, needs, tools and all five platforms through the request schema", () => {
+  const app = { name: "Ledgerly", tagline: "Clinic billing", platforms: ["mac", "win", "ios", "and", "web"], platformsAssumed: false, kind: "web", needs: ["hipaa", "payments"], tools: ["plugin:browser-automation"] };
+  const req = { brief: "x", portfolio: { apps: [app], groups: [], assumptions: [], questions: [] } };
+  assert.equal(requestProblem("run_create", req), null);
+  assert.equal(requestProblem("plan_preview", { portfolio: req.portfolio }), null);
+  // zod drops keys a schema does not name: the human's corrections must survive parsing
+  const parsed = RPC_SCHEMAS.run_create.input.parse(req) as { portfolio: { apps: Array<Record<string, unknown>> } };
+  for (const k of ["kind", "needs", "tools", "platformsAssumed", "platforms"]) assert.deepEqual(parsed.portfolio.apps[0][k], app[k as keyof typeof app], k);
+  assert.match(requestProblem("run_create", { ...req, portfolio: { ...req.portfolio, apps: [{ ...app, kind: "spaceship" }] } })!, /expected one of "app"/);
 });

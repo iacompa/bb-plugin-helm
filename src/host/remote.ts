@@ -7,6 +7,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { gitEnv, SAFE_GIT_CONFIG, SAFE_REMOTE_CONFIG } from "./git-env.ts";
 
 export type RemoteBranchState = "synced" | "ahead" | "behind" | "diverged" | "newer" | "local" | "remote";
 
@@ -43,28 +44,35 @@ export interface RemoteStatus {
   error: string | null;
 }
 
-const ENV = {
-  ...process.env,
-  GIT_TERMINAL_PROMPT: "0",
+const ENV = gitEnv({
   GIT_OPTIONAL_LOCKS: "0",
   GCM_INTERACTIVE: "never",
   GIT_ASKPASS: "",
   SSH_ASKPASS: "",
   GIT_SSH_COMMAND: "ssh -o BatchMode=yes -o ConnectTimeout=10",
-};
+});
+
+/** A remote name read from the repository's config: plain characters, never an option. */
+export function safeRemoteName(name: string): boolean {
+  return /^[\w.\/-]{1,100}$/.test(name) && !name.startsWith("-") && !name.includes("..");
+}
 
 function git(cwd: string, args: string[], timeout = 20_000): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((res) => {
-    execFile("git", args, { cwd, timeout, maxBuffer: 8 * 1024 * 1024, env: ENV, encoding: "utf8" }, (err, stdout, stderr) => {
+    const safe = args[0] === "ls-remote" ? SAFE_REMOTE_CONFIG : SAFE_GIT_CONFIG;
+    execFile("git", [...safe, ...args], { cwd, timeout, maxBuffer: 8 * 1024 * 1024, env: ENV, encoding: "utf8" }, (err, stdout, stderr) => {
       const code = err ? (typeof (err as { code?: unknown }).code === "number" ? (err as { code: number }).code : 124) : 0;
       res({ code, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
     });
   });
 }
 
-/** "https://user:token@github.com/o/r.git" → "https://github.com/o/r.git". */
+/**
+ * "https://user:token@github.com/o/r.git" → "https://github.com/o/r.git". Everything up to the last
+ * "@" that is followed by a host goes, so a password holding "/" or "@" does not survive either.
+ */
 export function cleanUrl(url: string): string {
-  return url.replace(/^([a-z+]+:\/\/)[^@/]+@/i, "$1");
+  return url.replace(/^([a-z+]+:\/\/)\S*@(?=[\w.-]+(?::\d+)?(?:\/|$))/i, "$1");
 }
 
 /** The web page of a remote address: https://host/owner/repo (GitHub, GitLab, Bitbucket and the like); null for local folders. */
@@ -84,7 +92,7 @@ function why(stderr: string, code: number, repo: string, remote: string): string
   if (/could not resolve host|network is unreachable|connection refused|unable to access/.test(s) && !/403|401/.test(s)) return "this computer could not reach the remote (offline?)";
   if (/authentication|could not read username|permission denied|403|401|terminal prompts disabled|askpass/.test(s)) return `the remote asked for a login. Run \`git -C "${repo}" ls-remote ${remote}\` once in Terminal so git keeps your login; Helm never handles credentials`;
   if (/not found|does not exist|does not appear to be a git repository/.test(s)) return "the remote has no such repository (or it is private and your login cannot see it)";
-  return (stderr.trim().split("\n").pop() ?? "git ls-remote failed").replace(/[a-z+]+:\/\/[^@\s/]+@/gi, "").slice(0, 200);
+  return (stderr.trim().split("\n").pop() ?? "git ls-remote failed").replace(/([a-z+]+:\/\/)\S*@(?=[\w.-]+(?::\d+)?(?:[\/\s'"]|$))/gi, "$1").slice(0, 200);
 }
 
 export function createRemoteOps() {
@@ -96,7 +104,7 @@ export function createRemoteOps() {
       if (!existsSync(dir)) return { ...out, error: `the repository folder is missing: ${repo}` };
       const rs = await git(dir, ["remote"]);
       if (rs.code !== 0) return { ...out, error: "not a git repository" };
-      out.remotes = rs.stdout.split("\n").map((x) => x.trim()).filter(Boolean);
+      out.remotes = rs.stdout.split("\n").map((x) => x.trim()).filter((x) => x && safeRemoteName(x));
       const remote = want && out.remotes.includes(want) ? want : out.remotes.includes("origin") ? "origin" : out.remotes[0] ?? null;
       // local branches, with their commits and dates
       const refs = await git(dir, ["for-each-ref", "--count=300", "--format=%(refname:short)%09%(objectname)%09%(committerdate:unix)", "refs/heads"]);
@@ -116,7 +124,8 @@ export function createRemoteOps() {
       out.url = u.code === 0 ? cleanUrl(u.stdout.trim()) : null;
       out.web = out.url ? webUrl(out.url) : null;
       // the remote's branch list: names and commits only
-      const ls = await git(dir, ["ls-remote", "--symref", remote, "HEAD", "refs/heads/*"], 30_000);
+      // the stock upload-pack: a remote.<name>.uploadpack in the repository's config would run a program here for a local remote
+      const ls = await git(dir, ["ls-remote", "--upload-pack=git-upload-pack", "--symref", remote, "HEAD", "refs/heads/*"], 30_000);
       if (ls.code !== 0) {
         out.error = why(ls.stderr, ls.code, repo, remote);
         out.branches = [...local].map(([name, l]) => ({ name, local: l.sha, remote: null, state: "local" as const, ahead: null, behind: null, at: l.at }));
@@ -137,7 +146,7 @@ export function createRemoteOps() {
       const known = new Set<string>();
       if (shas.length) {
         const chk = await new Promise<string>((res) => {
-          const p = execFile("git", ["cat-file", "--batch-check"], { cwd: dir, env: ENV, timeout: 20_000, maxBuffer: 8 * 1024 * 1024, encoding: "utf8" }, (_e, stdout) => res(String(stdout ?? "")));
+          const p = execFile("git", [...SAFE_GIT_CONFIG, "cat-file", "--batch-check"], { cwd: dir, env: ENV, timeout: 20_000, maxBuffer: 8 * 1024 * 1024, encoding: "utf8" }, (_e, stdout) => res(String(stdout ?? "")));
           p.stdin?.end(shas.join("\n") + "\n");
         });
         for (const l of chk.split("\n")) {

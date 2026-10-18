@@ -2,7 +2,7 @@
 // notice every recipient will receive (server-rendered), then send it.
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DirectiveInfo, DirectivePreview, DirectiveType, ModelRef, Priority, SnapNode } from "../types.ts";
-import { SELF_ONLY, TYPE_ICON, TYPE_LABEL, allowedTypes, errMsg, fmtUnits, plural, reasonLabel, sameRef, statusLabel, trailLabel } from "../format.ts";
+import { SELF_ONLY, TYPE_ICON, TYPE_LABEL, ZERO_TOLERANCE, allowedTypes, errMsg, fmtUnits, plural, reasonLabel, sameRef, statusLabel, trailLabel } from "../format.ts";
 import { descendantsOf } from "../store.ts";
 import { useHelm } from "../ctx.tsx";
 import { Banner, Ic, LevelChip, ModelChip, ReceiptChip, Seg, cx } from "../ui.tsx";
@@ -11,7 +11,6 @@ import { useSendDirective } from "./shared.tsx";
 
 const ORDER: DirectiveType[] = ["tell", "model", "scope", "priority", "pause", "resume", "stop", "retry", "spawn", "waive"];
 const DLABEL: Partial<Record<DirectiveType, string>> = { tell: "Message", model: "Model", scope: "Role / scope", priority: "Priority", waive: "Waive finding", spawn: "Spawn now" };
-const ZERO_TOLERANCE = ["S1", "S2", "S3", "S5", "S6"];
 type CascadeId = "self" | "reports" | "subtree";
 /** draftType requests already honoured, so a stale request doesn't re-apply on a later mount */
 let consumedKey = 0;
@@ -20,7 +19,7 @@ export function DirectTab({ n }: { n: SnapNode }) {
   const h = useHelm();
   const s = h.data!;
   const send = useSendDirective();
-  const allowed = allowedTypes(n);
+  const allowed = allowedTypes(n, s.run.status);
   const [type, setType] = useState<DirectiveType>(() => {
     const req = h.draftType;
     if (!req || req.key <= consumedKey) return "tell";
@@ -48,7 +47,7 @@ export function DirectTab({ n }: { n: SnapNode }) {
     if (!h.draftType || h.draftType.key === lastKey.current) return;
     lastKey.current = h.draftType.key;
     consumedKey = Math.max(consumedKey, h.draftType.key);
-    if (allowedTypes(n).includes(h.draftType.type)) setType(h.draftType.type);
+    if (allowedTypes(n, s.run.status).includes(h.draftType.type)) setType(h.draftType.type);
   }, [h.draftType, n]);
   useEffect(() => {
     if (!allowed.includes(type)) setType("tell");
@@ -194,7 +193,12 @@ export function DirectTab({ n }: { n: SnapNode }) {
             </div>
             <ModelPicker catalog={h.catalog} value={model} onChange={setModel} label="Reasoning" />
             <Banner tone="info" icon="Brain">
-              Takes effect on the agent’s <b>next turn</b>; no restart and nothing is lost. The change is stored as a per-agent override, so slot changes in Model Studio won’t overwrite it.
+              {model && n.model && model.providerId !== n.model.providerId ? (
+                <>Another provider: a <b>new thread</b> on it takes over in the same workspace, starting from the agent’s brief; the old thread is stopped.</>
+              ) : (
+                <>Takes effect on the agent’s <b>next turn</b>; no restart and nothing is lost.</>
+              )}{" "}
+              The change is stored as a per-agent override, so slot changes in Model Studio won’t overwrite it.
             </Banner>
           </div>
         ) : null}

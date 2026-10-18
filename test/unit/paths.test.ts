@@ -5,7 +5,7 @@ import { expandTilde, isInside, samePath, targetPathProblem } from "../../src/sh
 const HOME = "/Users/someone";
 
 test("app folders may be anywhere except the disk root, the home folder itself and system folders", () => {
-  for (const ok of ["/Volumes/💾My Disk's SSD X1/APP/app builds/studio/lumen", "~/code/tide", "/Users/someone/Projects/x", "/tmp/helm/x", "/var/folders/ab/T/x", "D:\\work\\app"]) assert.equal(targetPathProblem(ok, HOME), null, ok);
+  for (const ok of ["/Volumes/💾Team's Disk/Work/app builds/studio/lumen", "~/code/tide", "/Users/someone/Projects/x", "/tmp/helm/x", "/var/folders/ab/T/x", "D:\\work\\app"]) assert.equal(targetPathProblem(ok, HOME), null, ok);
   const bad: Array<[string, RegExp]> = [
     ["/", /root of the disk/],
     ["~", /home folder/],

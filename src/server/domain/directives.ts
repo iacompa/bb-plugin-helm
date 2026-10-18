@@ -387,7 +387,9 @@ export function agentNoticeText(d: NoticeDirective & { type: AgentAction }, leve
             ? `model → ${ctx.modelName(d.modelTo)}${d.text ? `: ${d.text}` : ""}`
             : `priority set to ${String(d.value)}${d.text ? `: ${d.text}` : ""}`;
   if (level === "direct") {
-    const tail = d.type === "pause" ? " Stop after the current step and wait." : d.type === "tell" ? " Follow it unless it conflicts with a human directive or policy; the human's word wins (say so in your ack)." : "";
+    // a pause needs no ack (it is never reminded); everything else is acknowledged in one line
+    if (d.type === "pause") return `Direction from ${ctx.byName} (${ctx.byId}, ${d.id}): ${what}. Stop after the current step and wait; no ack needed.`;
+    const tail = d.type === "tell" ? " Follow it unless it conflicts with a human directive or policy; the human's word wins (say so in your ack)." : "";
     return `Direction from ${ctx.byName} (${ctx.byId}, ${d.id}): ${what}.${tail} Reply with helm_ack ${d.id} in one line.`;
   }
   return `${d.id} · ${ctx.byName} → ${ctx.targetName}: ${what} (${ctx.clock}).`;

@@ -1,6 +1,7 @@
 // Gate verdicts (§5.3, appendix B §6). Validation is where hallucinated findings
 // die: every finding's quote must be found at the judged commit.
 import { z } from "zod";
+import { REDACTED, redactSecrets } from "./slop/rules.ts";
 
 export const SLOP_RULES = ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9", "S10", "S11", "S12", "R"] as const;
 export const ZERO_TOLERANCE_RULES = ["S1", "S2", "S3", "S5", "S6"] as const;
@@ -64,11 +65,14 @@ export function shaMatches(a: string, b: string): boolean {
 
 const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 
-/** Whether quote appears within ±2 lines of `line` (1-based), whitespace-normalized. */
+/**
+ * Whether quote appears within ±2 lines of `line` (1-based), whitespace-normalized. A quote copied
+ * from a redacted S6 finding (`<redacted: N chars>`) is matched against the redacted lines.
+ */
 export function quoteNear(content: string, line: number, quote: string, slack = 2): boolean {
   const q = norm(quote);
   if (!q) return false;
-  const lines = content.split(/\r?\n/);
+  const lines = REDACTED.test(q) ? content.split(/\r?\n/).map(redactSecrets) : content.split(/\r?\n/);
   const from = Math.max(0, line - 1 - slack);
   const to = Math.min(lines.length - 1, line - 1 + slack);
   for (let i = from; i <= to; i++) if (norm(lines[i]).includes(q)) return true;
@@ -93,7 +97,7 @@ export async function validateVerdict(v: Verdict, env: VerdictEnvironment): Prom
   let readOnlyViolation = false;
 
   if (!shaMatches(v.commit, env.integrationHead))
-    problems.push(`commit ${v.commit} is not the current integration HEAD (${env.integrationHead.slice(0, 9)}). Judge the HEAD named in your brief.`);
+    problems.push(`commit ${v.commit} is not the current integration HEAD (${env.integrationHead}): the lead integrated newer work while you judged. Follow the "Re-check commit" message Helm sends you for it, confirm your findings still hold there, and submit for that commit.`);
 
   if (v.verdict === "pass" && v.checks.length === 0) problems.push("a pass needs at least one check.");
   for (const c of v.checks) {

@@ -36,8 +36,9 @@ and `helm_worktrees` say the numbers, and Helm tells you when the human changes 
    (`git branch -d`). With a limit of two, lanes stay detached on the work branch instead.
 
 Branches the human or another tool made (`handoff/…`, `spec/…`) are counted in the view but are not
-part of the limit, and you never touch them. Agent branches (`bb/…`, `helm/…`) are: delete each once
-it is merged into the work branch.
+part of the limit, and you never touch them. Agent branches (`bb/…`, `helm/…`, left by agents or by
+older Helm runs; Helm's own work branch is always `<app>-work`) are: delete each once it is merged
+into the work branch.
 
 And these **worktrees**, at most the run's worktree limit (default 10):
 

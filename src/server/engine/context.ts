@@ -12,7 +12,6 @@ export interface HelmSettings {
   appsRoot: string;
   weights: Record<string, number>;
   zeroTolerance: string[];
-  createRemote: boolean;
   /** Run-level standing policies seeded at run start (§6.7). */
   runPolicies: string[];
   autoAdvance: "ask" | "auto";
@@ -42,7 +41,6 @@ export const DEFAULT_SETTINGS: HelmSettings = {
   appsRoot: "~/Projects/helm",
   weights: SEED_WEIGHTS,
   zeroTolerance: ["S1", "S2", "S3", "S5", "S6"],
-  createRemote: false,
   runPolicies: ["Slop gates are zero-tolerance for secrets, placeholders and invented dependencies."],
   autoAdvance: "ask",
   approvePrompts: "supervisor",
@@ -85,3 +83,6 @@ export function expandHome(p: string, home: string | undefined): string {
   if (p.startsWith("~/") && home) return `${home}${p.slice(1)}`;
   return p;
 }
+
+/** Compact an agent's context once it passes this share of its window (§8.6). */
+export const COMPACT_AT = 0.7;

@@ -5,6 +5,8 @@ description: Native-quality UI for iOS, Android, web and desktop (direction, tok
 
 # Helm UI craft
 
+Parts of this skill (the direction, target, compare-and-fix and native-audit method) are adapted from Uizze's ui-taste and ios-design skills and Impeccable by Paul Bakaus (both Apache-2.0), changed for Helm. See Sources below and THIRD_PARTY_NOTICES.md.
+
 This skill covers what good interface work looks like and the loop that gets you there. `helm-specialist` covers how you work inside Helm (scope, commits, reports). The bar is a product a senior iOS or Android designer would ship under their own name: built from a system, true to its domain and its platform, complete in every state, and usable by everyone, on the smallest phone, with VoiceOver or TalkBack, at the largest text size, in dark mode.
 
 Two tests run through everything you make:

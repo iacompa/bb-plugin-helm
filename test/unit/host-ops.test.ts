@@ -97,7 +97,7 @@ const gitEnv = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", 
 const g = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, env: gitEnv, encoding: "utf8" }).trim();
 
 test("adoptRepo on a real repository (emoji, apostrophe and spaces in the path): a branch at HEAD, nothing else changes", async () => {
-  const dir = join(tmp(), "💾My Disk's SSD X1", "app builds", "tide");
+  const dir = join(tmp(), "💾Team's Disk", "app builds", "tide");
   mkdirSync(dir, { recursive: true });
   g(dir, "init", "-q", "-b", "main");
   writeFileSync(join(dir, "README.md"), "# Tide\n");

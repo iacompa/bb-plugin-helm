@@ -1,6 +1,8 @@
 # Helm — a BB plugin for building many apps at once
 
-Helm is one plugin that replaces `agent-graph`, `chief`, `command-center`, `crew` and `visual-workflows` (they already show as disabled). You describe what you want built; an **Orchestrator** proposes a plan; **Managers** (only when there are more than 4 apps) oversee **App Leads**, one per app; each lead runs a small squad (UI, core logic, one builder per platform, security) and two independent gates — a **Reviewer** and an **AI-slop Hunter** — that must pass before you sign an app off. You can click any agent on the graph, read its chat, see its model and what it is doing, and change it; **everyone above it in the chain is told**.
+> This folder is the original design brief Helm was built from, kept for reference. The plugin has moved on since; [README.md](../README.md) and [docs/](../docs/) describe what it does today.
+
+Helm is one plugin that replaces `agent-graph`, `chief`, `command-center`, `crew` and `visual-workflows`. You describe what you want built; an **Orchestrator** proposes a plan; **Managers** (only when there are more than 4 apps) oversee **App Leads**, one per app; each lead runs a small squad (UI, core logic, one builder per platform, security) and two independent gates — a **Reviewer** and an **AI-slop Hunter** — that must pass before you sign an app off. You can click any agent on the graph, read its chat, see its model and what it is doing, and change it; **everyone above it in the chain is told**.
 
 ## What is in this folder
 
@@ -20,7 +22,7 @@ Open `ui-prototype.html`. Everything in it is sample data; nothing is connected 
 2. In the panel open **Direct**, pick *Message* or *Model change*, choose who it applies to, and press **Send directive**. Watch the pulse travel up to the lead, manager and Orchestrator, and the receipts fill in.
 3. **Board** — apps by stage (with a lane per manager) or agent tasks by status. Try dragging a card somewhere it shouldn't go.
 4. **Ledger** — every change you made, with the exact text each agent received. **Needs you** — approvals, questions, failures, sign-offs.
-5. **Models** (top bar) and **New run** — the wizard asks which models to use every time. The four you told me about are pre-filled; the rest are left for you to choose.
+5. **Models** (top bar) and **New run** — the wizard asks which models to use every time. A few are pre-filled; the rest are left for you to choose.
 
 ## Give it to BB
 
@@ -40,7 +42,7 @@ bb project create --name "Helm plugin" --root ~/Projects/helm-plugin --json
 bb thread spawn --project <project-id> --title "Build Helm" --provider claude-code --model claude-sonnet-5-5 --reasoning-level high --prompt-file spec/PROMPT.md
 ```
 
-(That uses Sonnet 5.5 at high for the build, your stated preference for code. The UI phases are a good place to switch a thread to GPT-6.1 Sol at extra high, your preference for UI.)
+(Use whichever model and reasoning level you prefer for the build; the UI phases are a good place to switch the thread to the model you prefer for UI work.)
 
 ## How the build will go
 
@@ -50,10 +52,10 @@ While it develops, the builder is told to keep every real test run to **6 agents
 
 ## Not yet verified (be sceptical of these until Phase 0 reports)
 
-These are the platform behaviours the design leans on but that have not been exercised on your BB: what a parent receives when a child finishes (V2), approval prompts from hidden threads (V4), `ThreadChat` on hidden threads (V5), permission ceilings for grandchildren (V6), re-parenting live threads (V10), creating projects from a plugin (V16), detecting messages you type straight into an agent's thread (V18), cascade archive (V20), and canvas performance at 170+ nodes (V15). The full table with fallbacks is in `PROMPT.md` §2.3.
+These are the platform behaviours the design leans on but that had not been exercised on BB when this brief was written: what a parent receives when a child finishes (V2), approval prompts from hidden threads (V4), `ThreadChat` on hidden threads (V5), permission ceilings for grandchildren (V6), re-parenting live threads (V10), creating projects from a plugin (V16), detecting messages you type straight into an agent's thread (V18), cascade archive (V20), and canvas performance at 170+ nodes (V15). The full table with fallbacks is in `PROMPT.md` §2.3.
 
-Also: **Windows and Android builds cannot be verified on this machine** (only one Mac is connected). Those apps can reach *Ready*, but the sign-off card will say so and your sign-off is your acceptance of that.
+Also: **Windows and Android builds cannot be verified on a machine without their toolchains** (for example when only a Mac is connected). Those apps can reach *Ready*, but the sign-off card will say so and your sign-off is your acceptance of that.
 
-## Defaults I chose for you (change any of them in `PROMPT.md` §17.2)
+## Defaults in the brief (change any of them in `PROMPT.md` §17.2)
 
 One repo and BB project per app · only the Orchestrator is visible in BB's sidebar (everything else is reachable from Helm) · ask before each wave · every app gets the Full squad · two fix rounds before you are asked · agents run at `auto` permission · no git remotes are created.

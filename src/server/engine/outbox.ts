@@ -70,7 +70,7 @@ export class OutboxWorker {
     this.timer = this.timers.setTimeout(() => {
       this.timer = null;
       this.timerAt = Infinity;
-      void this.drain();
+      this.drain().catch((err) => this.hooks.log.warn(`outbox drain failed: ${err instanceof Error ? err.message : String(err)}`));
     }, delay);
   }
 
@@ -105,7 +105,7 @@ export class OutboxWorker {
           this.inflight.add(row.id);
           dispatched++;
           this.repo.markOutbox(row.id, { state: "inflight" });
-          void this.execute(row, nodeKey);
+          this.execute(row, nodeKey).catch((err) => this.hooks.log.warn(`outbox ${row.kind} ${row.id}: ${err instanceof Error ? err.message : String(err)}`));
         }
       } while (this.again);
     } finally {
@@ -147,7 +147,7 @@ export class OutboxWorker {
     } finally {
       this.inflight.delete(row.id);
       if (nodeKey) this.inflightNodes.delete(nodeKey);
-      void this.drain();
+      this.drain().catch((err) => this.hooks.log.warn(`outbox drain failed: ${err instanceof Error ? err.message : String(err)}`));
     }
   }
 

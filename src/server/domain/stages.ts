@@ -80,29 +80,44 @@ export interface TransitionFacts {
   kind?: ProjectKind;
 }
 
+const WAIT_FOR_REPORTS = "Helm messages you as each report arrives, so wait for those rather than asking again; steer a builder that is stuck with helm_direct.";
+
+/** Who moves an app out of a stage the lead cannot leave itself. */
+const ADVANCES_BY: Partial<Record<Stage, string>> = {
+  intake: "it leaves Intake when the Orchestrator's wave is approved",
+  review: "Helm moves it on the Reviewer's verdict and tells you",
+  slop: "Helm moves it on the Slop Hunter's verdict and tells you",
+  ready: "it waits for the human's sign-off or send-back",
+  done: "it is signed off",
+  cancelled: "it was cancelled",
+};
+
 /** Can the lead move from → to right now? Returns the reason when not. */
 export function leadTransition(from: Stage, to: Stage, facts: TransitionFacts): { ok: true } | { ok: false; reason: string } {
   const allowed = LEAD_TRANSITIONS[from] ?? [];
   if (!allowed.includes(to))
     return {
       ok: false,
-      reason: `helm_stage cannot move ${stageLabel(from)} → ${stageLabel(to)}. From ${stageLabel(from)} a lead may only request ${allowed.length ? allowed.map(stageLabel).join(" or ") : "nothing — this stage advances on gate verdicts or the human"}.`,
+      reason:
+        from === to ? `The app is already in ${stageLabel(from)}; nothing to request.`
+        : allowed.length ? `helm_stage cannot move ${stageLabel(from)} → ${stageLabel(to)}. From ${stageLabel(from)} you can request only ${allowed.map(stageLabel).join(" or ")}.`
+        : `helm_stage cannot move ${stageLabel(from)} → ${stageLabel(to)}: there is nothing for you to request in ${stageLabel(from)}; ${ADVANCES_BY[from] ?? "Helm moves it"}.`,
     };
   if (to === "build") {
     const missing = specFilesFor(facts.kind).filter((f) => !facts.committedFiles.has(f));
     if (missing.length) return { ok: false, reason: `Spec is not complete: ${missing.join(", ")} not committed on the integration branch.` };
   }
   if (to === "integrate" && from === "build" && !facts.buildersDone)
-    return { ok: false, reason: `Builders without a verified done report: ${facts.buildersPending.join(", ")}.` };
+    return { ok: false, reason: `Builders without a verified done report: ${facts.buildersPending.join(", ")}. ${WAIT_FOR_REPORTS}` };
   if (to === "integrate" && from === "fix" && !facts.buildersDone)
-    return { ok: false, reason: `Fixes not reported with evidence yet: ${facts.buildersPending.join(", ")}.` };
+    return { ok: false, reason: `Fixes not reported with evidence yet: ${facts.buildersPending.join(", ")}. ${WAIT_FOR_REPORTS}` };
   if (to === "review") {
     if (!facts.integrationHead) return { ok: false, reason: "No integration HEAD found." };
     if (facts.kind === "review") {
       if (!facts.committedFiles.has(REVIEW_FILE)) return { ok: false, reason: `${REVIEW_FILE} is not committed on the integration branch: compile the auditors' findings into it first.` };
       return { ok: true };
     }
-    if (facts.checksMissing.length) return { ok: false, reason: `Checks not recorded on ${facts.integrationHead.slice(0, 9)}: ${facts.checksMissing.join(", ")}. Run them through .helm/run-check.sh and call helm_record_check.` };
+    if (facts.checksMissing.length) return { ok: false, reason: `Checks not recorded on ${facts.integrationHead.slice(0, 9)}: ${facts.checksMissing.join(", ")}. Run them through the check wrapper your BRIEF names and call helm_record_check.` };
     if (!facts.checksGreen) return { ok: false, reason: `Checks failing on ${facts.integrationHead.slice(0, 9)}: ${facts.checksFailing.join(", ")}.` };
   }
   return { ok: true };

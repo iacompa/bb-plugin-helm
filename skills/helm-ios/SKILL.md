@@ -239,11 +239,17 @@ xcrun xcresulttool get test-results summary --path "$REPORT_DIR/tests.xcresult" 
 xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4
 xcrun simctl install "$UDID" apps/ios/build/DerivedData/Build/Products/Debug-iphonesimulator/App.app
 xcrun simctl launch "$UDID" com.example.app -ui-testing
-xcrun simctl io "$UDID" screenshot "$REPORT_DIR/screens/home-light.png"
+xcrun simctl io "$UDID" screenshot "reports/ios/home--default--iphone-18-pro--light.png"
 xcrun simctl ui "$UDID" appearance dark
+xcrun simctl io "$UDID" screenshot "reports/ios/home--default--iphone-18-pro--dark.png"
 xcrun simctl ui "$UDID" content_size accessibility-extra-extra-extra-large
-xcrun simctl io "$UDID" screenshot "$REPORT_DIR/screens/home-dark-ax5.png"
+xcrun simctl io "$UDID" screenshot "reports/ios/evidence/home-dark-ax5.png"
 ```
+
+Page captures follow the naming and device list in your BRIEF's "Screenshots on these phones"
+section (`reports/ios/<screen>--<state>--<device>--<theme>.png`, one simulator per listed
+model), so the human's Screens view shows them. Test-only captures (large text, RTL, a stuck
+state) go under `reports/ios/evidence/`, which Screens leaves out.
 
 Status bar overrides do not survive a simulator reboot, so reapply them. Reset appearance and content size afterwards. To reach deep screens deterministically, have a UI test navigate there and attach screenshots with `XCTAttachment`, then export them from the xcresult (`xcrun xcresulttool export attachments --path … --output-path …`). Alternatively, support a launch argument that opens a given route.
 
@@ -289,9 +295,9 @@ Status bar overrides do not survive a simulator reboot, so reapply them. Reset a
 
 ## 12. Evidence to commit
 
-Commit these under `reports/ios/` (in your write scope), e.g. `reports/ios/<task>/`:
+Commit these under `reports/ios/` (in your write scope): page captures at the top level as your BRIEF names them, everything else in `reports/ios/evidence/`:
 - **The test log** (`xcodebuild-test.log`, trimmed to the summary and failures if it is huge) and `test-summary.json` from xcresulttool. Commit the `.xcresult` only if it is small; otherwise record its path and the summary.
-- **Screenshots of every screen you built or changed:** light mode and dark mode, plus at least one at an accessibility Dynamic Type size. Add an RTL or pseudo-language capture if you touched layout. Use descriptive filenames (`settings-dark-ax5.png`).
+- **Screenshots of every screen you built or changed:** light mode and dark mode on each device your BRIEF lists, named as it says, plus at least one at an accessibility Dynamic Type size and an RTL or pseudo-language capture if you touched layout, under `reports/ios/evidence/` with descriptive names (`settings-dark-ax5.png`).
 - **The accessibility audit result** from the UI test run.
 - **A short `ENV.txt`**: Xcode version, SDK, simulator device and runtime, deployment target, and the exact commands you ran.
 - **A compliance note** if you added or changed permissions, entitlements, background modes, the privacy manifest, or data collection. Say what changed and why.

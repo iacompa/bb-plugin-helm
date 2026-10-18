@@ -816,10 +816,12 @@ export class Repo {
   }
 
   // ───────────── needs ─────────────
-  insertNeed(x: NeedInfo & { dedupeKey?: string | null }): boolean {
+  /** `resolvedSince`: also skip when a need with the same key was resolved at or after this time (a dismissed card stays dismissed). */
+  insertNeed(x: NeedInfo & { dedupeKey?: string | null; resolvedSince?: number | null }): boolean {
     if (x.dedupeKey) {
       const ex = this.get1("SELECT id FROM needs WHERE run_id = ? AND dedupe_key = ? AND state = 'open'", x.runId, x.dedupeKey);
       if (ex) return false;
+      if (x.resolvedSince != null && this.get1("SELECT id FROM needs WHERE run_id = ? AND dedupe_key = ? AND state = 'resolved' AND resolved_at >= ?", x.runId, x.dedupeKey, x.resolvedSince)) return false;
     }
     this.run(
       `INSERT INTO needs(id, run_id, kind, node_id, title, body, evidence, options_json, interaction_id, state, created_at, resolved_at, resolution_json, app_id, dedupe_key, data_json)

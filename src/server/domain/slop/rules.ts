@@ -273,13 +273,45 @@ const catchBodyIsEmpty = (match: string) => {
   return comments.every((c) => UNINFORMATIVE_COMMENT.test(c.trim()));
 };
 
-export const BLOCK_RULES: Array<{ id: string; rule: string; severity: Severity; regex: RegExp; languages: LangFamily[]; why: string; fix: string; excludeIf?: (match: string) => boolean }> = [
+/** How far past its `{` an empty body may reach; nothing longer is a plausible empty catch. */
+const EMPTY_BODY_MAX = 4096;
+
+/**
+ * Where a body that opens at `open` (a `{`) closes, when it holds only whitespace and comments
+ * within EMPTY_BODY_MAX characters; -1 otherwise. A linear scan: the regex this replaces
+ * backtracked to the end of the file from every `catch` (quadratic on crafted input).
+ */
+export function emptyBodyEnd(s: string, open: number, max = EMPTY_BODY_MAX): number {
+  const end = Math.min(s.length, open + max);
+  let i = open + 1;
+  while (i < end) {
+    const c = s.charCodeAt(i);
+    if (c === 125 /* } */) return i + 1;
+    if (c === 32 || c === 9 || c === 10 || c === 13 || c === 11 || c === 12) i++;
+    else if (c === 47 /* / */ && s[i + 1] === "/") {
+      const nl = s.slice(i, end).indexOf("\n");
+      if (nl < 0) return -1;
+      i += nl + 1;
+    } else if (c === 47 && s[i + 1] === "*") {
+      const close = s.slice(i + 2, end).indexOf("*/");
+      if (close < 0) return -1;
+      i += close + 4;
+    } else return -1;
+  }
+  return -1;
+}
+
+/**
+ * Multi-line rules: `regex` matches the header up to and including the body's `{`; the body must
+ * be empty (emptyBodyEnd), and `after`, when set, must match right after it.
+ */
+export const BLOCK_RULES: Array<{ id: string; rule: string; severity: Severity; regex: RegExp; after?: RegExp; languages: LangFamily[]; why: string; fix: string; excludeIf?: (match: string) => boolean }> = [
   {
     id: "S12-empty-catch",
     rule: "S12",
     severity: "major",
-    // a body of only whitespace and comments ("// ignore") is still empty
-    regex: /(?<![.\w])catch\s*(\([^)]*\))?\s*(let\s+\w+(\s+as\s+[\w.]+)?\s*)?\{(?:\s|\/\/[^\n]*|\/\*(?:[^*]|\*(?!\/))*\*\/)*\}/g,
+    // a body of only whitespace and comments ("// ignore") is still empty; every quantifier is bounded or unambiguous
+    regex: /(?<![.\w])catch\s*(?:\([^)]{0,300}\)\s*)?(?:let\s+\w+(?:\s+as\s+[\w.]+)?\s*)?\{/g,
     languages: ["js", "swift", "kotlin", "java", "csharp", "c"],
     why: "Empty catch block swallows the failure.",
     fix: "Handle the error, surface it, or rethrow.",
@@ -289,13 +321,33 @@ export const BLOCK_RULES: Array<{ id: string; rule: string; severity: Severity; 
     id: "S12-empty-promise-catch",
     rule: "S12",
     severity: "major",
-    regex: /\.catch\(\s*(?:\(\s*[\w:\s]*\)|\w+)\s*=>\s*\{(?:\s|\/\/[^\n]*|\/\*(?:[^*]|\*(?!\/))*\*\/)*\}\s*\)/g,
+    regex: /\.catch\(\s*(?:\([\w:\s]{0,200}\)|\w+)\s*=>\s*\{/g,
+    after: /\s*\)/y,
     languages: ["js"],
     why: "Promise rejection swallowed by an empty .catch handler.",
     fix: "Handle the error, surface it, or let it propagate.",
     excludeIf: (match) => !catchBodyIsEmpty(match),
   },
 ];
+
+/** Provider tokens S6-token recognises, for redaction (global). */
+const SECRET_TOKENS = /\bsk_live_[A-Za-z0-9]{8,}|\bsk-[A-Za-z0-9_-]{20,}|\bAKIA[0-9A-Z]{16}\b|\bghp_[A-Za-z0-9]{30,}|\bxox[abp]-[A-Za-z0-9-]{10,}|\bAIza[0-9A-Za-z_-]{35}\b/g;
+/** What a redacted value becomes; the verdict validator recognises it in a gate's quote. */
+export const REDACTED = /<redacted: \d+ chars>/;
+const REDACTED_AT = /^<redacted: \d+ chars>/;
+const mark = (v: string) => `<redacted: ${v.length} chars>`;
+
+/**
+ * A secret's line with its value hidden (S6 quotes are stored, sent to agents, shown and exported):
+ * provider tokens, quoted values of 8+ characters, and the value of a `NAME=value` / `name: value`
+ * line become `<redacted: N chars>`; the name and the shape stay. Idempotent.
+ */
+export function redactSecrets(line: string): string {
+  let out = line.replace(SECRET_TOKENS, mark);
+  out = out.replace(/(["'`])([^"'`\n]{8,})\1/g, (m, q: string, v: string) => (REDACTED_AT.test(v) && v.length === v.match(REDACTED_AT)![0].length ? m : `${q}${mark(v)}${q}`));
+  out = out.replace(/^(\s*(?:export\s+)?[A-Za-z_][\w.-]{0,80}\s*[=:]\s*)([^\s"'`#][^\s#]*)/, (m, head: string, v: string, at: number) => (REDACTED_AT.test(out.slice(at + head.length)) || v.length < 4 ? m : `${head}${mark(v)}`));
+  return out;
+}
 
 export const ASSERTION_TOKENS = /\b(assert\w*|expect\w*|XCTAssert\w*|#expect|#require|should\w*|verify\(|toBe|toEqual|assertThat|assertEquals|Assert\.)/;
 

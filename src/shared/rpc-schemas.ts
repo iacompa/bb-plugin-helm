@@ -2,6 +2,7 @@
 // Helm panel, which checks every request before sending it so a bad one fails with a
 // precise message instead of BB's generic "rpc input validation failed".
 import { z } from "zod";
+import { PROJECT_KINDS, PROJECT_NEEDS, type ProjectKind, type ProjectNeed } from "./types.ts";
 
 /** Longest brief or planning text Helm accepts (a long contract, plus room). */
 export const TEXT_MAX = 200_000;
@@ -29,7 +30,7 @@ const DirectiveInputZ = z.object({
 });
 
 const PortfolioZ = z.object({
-  apps: z.array(z.object({ name: z.string().min(1).max(60), tagline: z.string().max(160).default(""), platforms: z.array(z.string()).max(4), group: z.string().max(60).nullish(), shape: z.enum(["solo", "lean", "full"]).optional(), notes: z.string().max(1200).nullish(), test: z.boolean().optional(), priority: z.enum(["low", "normal", "high"]).optional(), path: z.string().trim().max(500).nullish(), reads: z.array(z.string().trim().min(1).max(500)).max(10).optional() })).max(60),
+  apps: z.array(z.object({ name: z.string().min(1).max(60), tagline: z.string().max(160).default(""), platforms: z.array(z.string()).max(5), platformsAssumed: z.boolean().optional(), kind: z.enum(PROJECT_KINDS as [ProjectKind, ...ProjectKind[]]).optional(), needs: z.array(z.enum(PROJECT_NEEDS as [ProjectNeed, ...ProjectNeed[]])).max(12).optional(), tools: z.array(z.string().max(60)).max(8).optional(), group: z.string().max(60).nullish(), shape: z.enum(["solo", "lean", "full"]).optional(), notes: z.string().max(1200).nullish(), test: z.boolean().optional(), priority: z.enum(["low", "normal", "high"]).optional(), path: z.string().trim().max(500).nullish(), reads: z.array(z.string().trim().min(1).max(500)).max(10).optional() })).max(60),
   groups: z.array(z.string()).max(20).default([]),
   assumptions: z.array(z.string()).max(30).default([]),
   questions: z.array(z.string()).max(3).default([]),

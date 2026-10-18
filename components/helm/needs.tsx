@@ -7,7 +7,7 @@ import { useHelm } from "./ctx.tsx";
 import type { DirectiveInfo, ModelRef, NeedInfo, NeedKind } from "./types.ts";
 import type { RunState } from "./store.ts";
 import { managerOfApp } from "./store.ts";
-import { agoOf, clockOf, errMsg, fmtUnits, plural, trailLabel } from "./format.ts";
+import { ZERO_TOLERANCE, agoOf, clockOf, errMsg, fmtUnits, plural, trailLabel } from "./format.ts";
 import { Fmt, Ic, Modal, ModalHead, askConfirm, askReason, cx } from "./ui.tsx";
 import { ModelPicker } from "./picker.tsx";
 
@@ -80,17 +80,24 @@ export function NeedsView() {
   const kinds = KIND_ORDER.filter((k) => data.needs.some((n) => n.kind === k));
   const list = filter === "open" ? open : filter === "all" ? open : open.filter((n) => n.kind === filter);
   const resolvedList = filter === "open" ? resolved : filter === "all" ? resolved : resolved.filter((n) => n.kind === filter);
+  // "All" is the open items and the resolved ones; "Open" keeps the resolved list folded
+  const resolvedOpen = showResolved || filter === "all";
 
   const resolve = async (need: NeedInfo, action: Action, extra: ResolveExtra = {}, okMsg?: string) => {
     setBusy(need.id);
     try {
-      const r = (await h.rpc.call("needs_resolve", { runId: h.runId!, needId: need.id, action, ...extra })) as { directive?: DirectiveInfo | null };
+      const r = (await h.rpc.call("needs_resolve", { runId: h.runId!, needId: need.id, action, ...extra })) as { directive?: DirectiveInfo | null; already?: string };
+      h.refetch();
+      if (r?.already) {
+        toast.info(r.already);
+        return true;
+      }
       if (r?.directive) h.firePulse(r.directive);
       toast.success(okMsg ?? "Done", { description: r?.directive ? `Recorded as ${r.directive.id}; the chain above was told.` : undefined });
-      h.refetch();
       return true;
     } catch (e) {
       toast.error(errMsg(e));
+      h.refetch();
       return false;
     } finally {
       setBusy(null);
@@ -125,10 +132,10 @@ export function NeedsView() {
         </div>
         {(filter === "all" || filter === "open" || resolvedList.length) && resolvedList.length ? (
           <div className="col" style={{ gap: 8 }}>
-            <button type="button" className="btn ghost sm" aria-expanded={showResolved} onClick={() => setShowResolved(!showResolved)} style={{ alignSelf: "flex-start" }}>
-              <Ic name={showResolved ? "ChevronDown" : "ChevronRight"} size="sm" /> Resolved ({resolvedList.length})
+            <button type="button" className="btn ghost sm" aria-expanded={resolvedOpen} onClick={() => (filter === "all" ? setFilter("open") : setShowResolved(!showResolved))} style={{ alignSelf: "flex-start" }}>
+              <Ic name={resolvedOpen ? "ChevronDown" : "ChevronRight"} size="sm" /> Resolved ({resolvedList.length})
             </button>
-            {showResolved ? resolvedList.slice(0, 200).map((n) => <ResolvedRow key={n.id} need={n} data={data} />) : null}
+            {resolvedOpen ? resolvedList.slice(0, 200).map((n) => <ResolvedRow key={n.id} need={n} data={data} />) : null}
           </div>
         ) : null}
       </div>
@@ -235,16 +242,15 @@ function NeedCard({
       break;
     }
     case "failed":
-      actions = (
+    case "slop":
+      // a failed agent is retried; findings still open at the fix-round cap (either gate) are sent back, waived or stopped
+      actions = need.kind === "failed" && !nd.findingIds ? (
         <>
           <B label="Retry" cls="primary" icon="RotateCcw" onClick={() => void resolve(need, "retry", {}, "Retrying")} />
           <B label="Change model and retry…" icon="Brain" onClick={onModel} />
           <B label="Stop" cls="danger" icon="Square" onClick={() => void stop(node?.label ?? "this agent")} />
         </>
-      );
-      break;
-    case "slop":
-      actions = (
+      ) : (
         <>
           <B
             label="Send back to Build with a note…"
@@ -449,7 +455,9 @@ function WaiveModal({ need, data, onClose, onWaive }: { need: NeedInfo; data: Ru
   const [rotated, setRotated] = useState(false);
   const [busy, setBusy] = useState(false);
   const secret = findings.some((f) => picked.has(f.id) && /secret|S6/i.test(f.rule));
-  const ok = picked.size > 0 && text.trim().length > 0 && (!secret || rotated);
+  const needsLong = findings.some((f) => picked.has(f.id) && ZERO_TOLERANCE.includes(f.rule));
+  const short = needsLong && text.trim().length < 20;
+  const ok = picked.size > 0 && text.trim().length > 0 && !short && (!secret || rotated);
   return (
     <Modal label="Waive named findings" cls="md" onClose={onClose}>
       <ModalHead title="Waive named findings" onClose={onClose} />
@@ -501,7 +509,7 @@ function WaiveModal({ need, data, onClose, onWaive }: { need: NeedInfo; data: Ru
         </div>
       </div>
       <div className="mfoot">
-        <span className="hint-t">{plural(picked.size, "finding")} selected</span>
+        <span className="hint-t">{short ? "Zero-tolerance findings need a reason of at least 20 characters" : `${plural(picked.size, "finding")} selected`}</span>
         <span className="grow" />
         <button type="button" className="btn" onClick={onClose}>
           Cancel

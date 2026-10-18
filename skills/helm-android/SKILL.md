@@ -258,10 +258,11 @@ adb shell settings put global sysui_demo_allowed 1
 adb shell am broadcast -a com.android.systemui.demo -e command enter
 adb shell am broadcast -a com.android.systemui.demo -e command clock -e hhmm 0941
 adb shell am start -W -n <applicationId>/.MainActivity
-adb exec-out screencap -p > "$REPORT_DIR/screens/home-light.png"
+adb exec-out screencap -p > "reports/and/home--default--pixel-9--light.png"
 adb shell cmd uimode night yes
+adb exec-out screencap -p > "reports/and/home--default--pixel-9--dark.png"
 adb shell settings put system font_scale 2.0
-adb exec-out screencap -p > "$REPORT_DIR/screens/home-dark-font200.png"
+adb exec-out screencap -p > "reports/and/evidence/home-dark-font200.png"
 adb shell settings put system font_scale 1.0; adb shell cmd uimode night no
 adb shell am broadcast -a com.android.systemui.demo -e command exit
 ```
@@ -305,12 +306,12 @@ To reach deep screens reliably, navigate in an instrumented test and capture fro
 
 ## 13. Evidence to commit
 
-Commit these under `reports/and/` (in your write scope), e.g. `reports/and/<task>/`:
+Commit these under `reports/and/` (in your write scope): page captures at the top level as your BRIEF names them (`reports/and/<screen>--<state>--<device>--<theme>.png`, one emulator per listed model), everything else in `reports/and/evidence/`, which Screens leaves out:
 - **Unit test results:** the JUnit XML summary or HTML index from `app/build/test-results` / `app/build/reports/tests`, and the console tail showing `BUILD SUCCESSFUL` and the test count.
 - **Instrumented test results** from `app/build/reports/androidTests/connected/` (or the managed-device equivalent), including the accessibility-check outcome.
 - **The lint summary**, showing no new errors and any warnings you accepted with a reason.
 - **Proof the release build passes:** `assembleRelease` or `bundleRelease` output, and a note that the minified build launched.
-- **Emulator screenshots** of each new or changed screen: light, dark, font scale 2.0, plus pseudolocale or RTL if you changed layout, plus one large-screen capture if layout adapts. Use descriptive filenames.
+- **Emulator screenshots** of each new or changed screen: light and dark on each device your BRIEF lists, named as it says; font scale 2.0, pseudolocale or RTL if you changed layout, and one large-screen capture if layout adapts go in `reports/and/evidence/` with descriptive filenames.
 - **`ENV.txt`:** AGP, Gradle, Kotlin, JDK, compile, target, and min SDK, the emulator image, and the exact commands you ran.
 - **A compliance note** whenever you add or change permissions, foreground service types, data collection, SDKs, or exported components, including Data safety implications.
 

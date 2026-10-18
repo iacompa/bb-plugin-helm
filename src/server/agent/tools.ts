@@ -25,6 +25,8 @@ import { validateDelta, type ProfileChange } from "../engine/delta.ts";
 import { appWorktrees, consolidate, worktreesText } from "../engine/worktrees.ts";
 import { normalizeNeed, normalizeTool } from "../domain/profile.ts";
 import { planTopology } from "../domain/topology.ts";
+import { inFlightCap } from "../domain/scheduler.ts";
+import { isInFlight } from "../domain/stages.ts";
 
 const Evidence = z.object({ kind: z.enum(["commit", "file", "check", "report"]), ref: z.string().min(1).max(300), branch: z.string().max(200).optional() });
 const StageZ = z.enum(["intake", "spec", "build", "integrate", "review", "slop", "fix", "ready", "done"]);
@@ -76,7 +78,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "helm_direct",
     description:
-      "Steer anyone below you (your reports and their teams, never gates): tell (a binding instruction), pause, resume, or priority low|normal|high. The target must helm_ack; everyone between you and it, and above you, gets one FYI line; you get its ack as FYI. urgent (default true) interrupts its current turn, false waits for it. The human's directives win: you cannot resume what the human paused or override a priority the human set. Batch instructions: at most 3 per agent and 12 in total per 10 minutes.",
+      "Steer anyone below you (your reports and their teams, never gates): tell (a binding instruction; it also wakes a builder that already reported done, while its app is in flight), pause, resume, or priority low|normal|high. The target must helm_ack; everyone between you and it, and above you, gets one FYI line; you get its ack as FYI. urgent (default true) interrupts its current turn, false waits for it. The human's directives win: you cannot resume what the human paused or override a priority the human set. Batch instructions: at most 3 per agent and 12 in total per 10 minutes.",
     parameters: z.object({ to: z.string().min(1).max(80), action: z.enum(["tell", "pause", "resume", "priority"]), text: z.string().max(1500).optional(), priority: z.enum(["low", "normal", "high"]).optional(), urgent: z.boolean().optional() }).strict(),
     presentation: { label: { pending: "Steering a report", completed: "Steered a report" }, icon: { glyph: "Sent" } },
   },
@@ -110,7 +112,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: "helm_create_agent",
     description:
-      "The Planner designs a new agent for this run, one that has never existed, when it would help: e.g. a GitHub Sync agent that pushes signed-off work, a Storage Guard that checks everything lives on the external SSD, a HIPAA reviewer, a workflow debugger. Give it a short memorable `name` (unique in the run; the human can rename it), a job `title`, a `mission` (what it does, when, what done looks like, what it must never do), and who it reports to (`reportsTo`: orch, a manager id, or an app lead id; under a lead it works in that app's repository). Optional: `writes` (relative globs it may edit; default its own reports/agents folder), `reads` (absolute read-only folders), `model` (provider/model:reasoning from helm_models; default the Core builder's), `skills` (up to 4 craft skills, e.g. helm-security, helm-compliance, helm-automation), `wakeOn` (stage, ready, signoff, failed: Helm wakes it on those events in its scope instead of it polling). Autonomy on: it is created and starts now. Otherwise the human approves it.",
+      "The Planner designs a new agent for this run, one that has never existed, when it would help: e.g. a Release Notes agent that writes notes for signed-off work, a Storage Guard that checks everything lives on the external SSD, a HIPAA reviewer, a workflow debugger. Never one for git housekeeping, merging or pushing: the run's Git agent does that. Give it a short memorable `name` (unique in the run; the human can rename it), a job `title`, a `mission` (what it does, when, what done looks like, what it must never do), and who it reports to (`reportsTo`: orch, a manager id, or an app lead id; under a lead it works in that app's repository). Optional: `writes` (relative globs it may edit; default its own reports/agents folder), `reads` (absolute read-only folders), `model` (provider/model:reasoning from helm_models; default the Core builder's), `skills` (up to 4 craft skills, e.g. helm-security, helm-compliance, helm-automation), `wakeOn` (stage, ready, signoff, failed: Helm wakes it on those events in its scope instead of it polling). Autonomy on: it is created and starts now. Otherwise the human approves it.",
     parameters: z
       .object({
         name: z.string().min(1).max(40),
@@ -131,7 +133,7 @@ export const TOOL_DEFS: ToolDef[] = [
   { name: "helm_worktrees", description: "The Git agent's view of every app's worktrees, from git itself: the human's checkout, the shared work worktree, lanes and any extra ones (limit: the worktrees-per-project setting), each with branch, commit, uncommitted changes and the agents working there, plus leftover agent branches. Narrow it with `app`. `sizes: true` also measures the space each worktree and each repository's git storage takes and each disk's free space (can take a minute on big folders). `github: true` also reads each app's remote (branch names and commits only, nothing downloaded): what is on GitHub, what is not, what is newer there.", parameters: z.object({ app: z.string().min(1).max(80).optional(), sizes: z.boolean().optional(), github: z.boolean().optional() }).strict(), presentation: { label: { pending: "Listing worktrees", completed: "Listed worktrees" }, icon: { glyph: "GitBranch" } } },
   {
     name: "helm_consolidate",
-    description: "Bring an app to two worktrees: once every extra agent worktree's work is committed and on the integration branch, Helm stops those agents, removes their worktrees, creates the shared work worktree on the integration branch and starts the agents again there with a hand-over. Refuses, changing nothing, with what to fix first while anything could be lost.",
+    description: "Move an app that uses one worktree per agent onto its shared work worktree: once every extra agent worktree's work is committed and on the integration branch, Helm stops those agents, removes their worktrees, creates the shared work worktree on the integration branch and starts the agents again there with a hand-over. Refuses, changing nothing, with what to fix first while anything could be lost.",
     parameters: z.object({ app: z.string().min(1).max(80), reason: z.string().max(300).optional() }).strict(),
     presentation: { label: { pending: "Consolidating worktrees", completed: "Consolidated worktrees" }, icon: { glyph: "GitBranch" } },
   },
@@ -503,7 +505,10 @@ function proposePlan(e: Engine, node: NodeInfo, p: Record<string, unknown>): str
   }
   const v = validateDelta(e, node.runId, { add, drop: delta.drop, shapes: delta.shapes, profiles });
   if (!v.ok) return `Rejected: ${v.error}`;
-  const need = e.repo.tx(() => e.raiseNeed(node.runId, { kind: "plan", nodeId: node.id, appId: null, title: `Plan change: ${v.summary}`, body: `${delta.rationale ?? ""}\nAdds up to ${v.agents} agents (spawned lazily).`.trim(), evidence: "", options: ["Approve plan change", "Deny"], dedupeKey: `delta:${v.summary}`, data: { delta: { add, drop: delta.drop ?? [], shapes: delta.shapes ?? {}, profiles } } }));
+  // folders on the human's disk are the human's call: shown on the card and never approved on their behalf
+  const folders = add.flatMap((a) => [...(a.path ? [`${a.name} works in ${a.path}`] : []), ...((a.reads ?? []).length ? [`${a.name} reads ${(a.reads ?? []).join(", ")}`] : [])]);
+  const need = e.repo.tx(() => e.raiseNeed(node.runId, { kind: "plan", nodeId: node.id, appId: null, title: `Plan change: ${v.summary}`, body: `${delta.rationale ?? ""}\nAdds up to ${v.agents} agents (spawned lazily).${folders.length ? `\nFolders on your disk: ${folders.join("; ")}.` : ""}`.trim(), evidence: "", options: ["Approve plan change", "Deny"], dedupeKey: `delta:${v.summary}`, data: { delta: { add, drop: delta.drop ?? [], shapes: delta.shapes ?? {}, profiles } } }));
+  if (need && folders.length) return `Valid. It names folders on the human's disk, so ${need.id} waits for the human even with autonomy on; you will be told the outcome.`;
   if (need && e.autonomous(e.run(node.runId))) {
     void autoApprove(e, node.runId, need.id, `Plan change: ${v.summary}`).catch((err: unknown) => e.log.error(`auto-approve ${need.id}: ${err instanceof Error ? err.message : String(err)}`));
     return `Valid. Autonomy is on, so ${need.id} is approved and applied now (on the record).`;
@@ -516,12 +521,18 @@ function proposeWave(e: Engine, node: NodeInfo, appIds: string[], rationale: str
   const bad = appIds.filter((id) => apps.find((a) => a.id === id)?.stage !== "intake");
   if (bad.length) return `Rejected: not in Intake: ${bad.join(", ")}.`;
   const run = e.run(node.runId);
+  if (run.status !== "running") return `Rejected: the run is ${run.status}; waves start once it is running.`;
   if ((run.autoAdvance === "auto" || e.autonomous(run)) && !run.spawnsPaused) {
+    // admitted on the human's behalf only up to the in-flight cap; the rest wait in Intake for a later wave
+    const free = Math.max(0, inFlightCap(run.concurrency) - apps.filter((a) => isInFlight(a.stage)).length);
+    const now = appIds.slice(0, free);
+    if (!now.length) return `No room: ${inFlightCap(run.concurrency)} apps are already in flight. Helm proposes the next wave when one finishes.`;
     e.repo.tx(() => {
-      for (const id of appIds) e.admitAppTx(node.runId, id, `wave proposed by the Orchestrator: ${rationale.slice(0, 120)}`);
+      for (const id of now) e.admitAppTx(node.runId, id, `wave proposed by the Orchestrator: ${rationale.slice(0, 120)}`);
     });
-    void e.pump(node.runId);
-    return `Admitted ${appIds.join(", ")} (${e.autonomous(run) ? "autonomy" : "auto-advance"} is on).`;
+    e.fire(e.pump(node.runId), `pump ${node.runId}`);
+    const later = appIds.slice(free);
+    return `Admitted ${now.join(", ")} (${e.autonomous(run) ? "autonomy" : "auto-advance"} is on).${later.length ? ` ${later.join(", ")} wait in Intake: the in-flight cap is ${inFlightCap(run.concurrency)}.` : ""}`;
   }
   const need = e.repo.tx(() => e.raiseNeed(node.runId, { kind: "plan", nodeId: node.id, appId: null, title: `Start the next wave: ${appIds.map((id) => apps.find((a) => a.id === id)?.name ?? id).join(", ")}`, body: rationale, evidence: "", options: ["Approve wave", "Not yet"], dedupeKey: `wave:${appIds.join(",")}`, data: { appIds } }));
   return need ? `Raised ${need.id}; the human decides.` : "Already proposed.";
@@ -537,7 +548,7 @@ function setPriority(e: Engine, node: NodeInfo, p: Record<string, unknown>): str
       e.repo.updateApp(node.runId, app.id, { priority: pr });
       e.repo.event(node.runId, node.id, "priority", `${app.name} → ${pr}: ${String(p.reason).slice(0, 120)}`);
     });
-    void e.pump(node.runId);
+    e.fire(e.pump(node.runId), `pump ${node.runId}`);
     return `${app.name} priority is ${pr}.`;
   }
   if (p.nodeId) {

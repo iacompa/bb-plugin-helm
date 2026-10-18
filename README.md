@@ -31,6 +31,25 @@ bb helm doctor
 
 After editing the source: `bb plugin build && bb plugin reload helm`.
 
+## Your first run
+
+1. `bb helm doctor`: git, your providers' models, and the platform tools Helm found.
+2. Write a short brief, for example `brief.md`:
+
+   ```
+   # Tools
+   - Pebble — habit counter with streaks · iOS · ~/code/pebble
+   ```
+3. `bb helm plan --brief-file brief.md --preset "Cheap dev run" --shape lean` prints the team, the forecast and anything that blocks a start.
+4. `bb helm start <runId> --dry-run` writes the plan files only; `bb helm start <runId> --yes` starts it.
+5. `bb helm needs` while it runs, `bb helm signoff pebble` when it is Ready, `bb helm end --yes` to stop early.
+
+Or do all of it in the panel: **Helm → New run**.
+
+## Costs
+
+Every agent is its own thread on your providers. Even this one-app run starts the Orchestrator, the Planner, the Git agent, a squad and two gates, and a 20-app plan can be 170 agents. By default up to 24 agents run at once and **autonomy is high**: the Orchestrator admits later waves and approves plan changes itself. Helm estimates cost in **relative units** (1 u is about 133k tokens on a weight-1.0 model such as Sonnet; cheaper models count less) and stops spawning at the run's **budget cap** (default 2,500 u), then asks you. Set the cap, the concurrency and the autonomy when you approve a run, or later with `bb helm limits`.
+
 ## Use it
 
 In BB, open **Helm** in the sidebar and choose **New run**. In step 1, choose **Plan with an agent** to plan in a conversation right there. Or type `/helm-planner` in any BB thread. Either way, the planner:
@@ -38,7 +57,7 @@ In BB, open **Helm** in the sidebar and choose **New run**. In step 1, choose **
 - goes role by role (Orchestrator, Managers, Leads, UI, Code, platform, Security, Test, Reviewer, Slop Hunter, Research, Docs), listing the models **your** setup has and recommending one for each;
 - writes the brief and runs `bb helm plan`.
 
-Nothing spawns until you start the plan. When the planner has made it, press **Open plan to start it**. A plan that has not started shows a **Start run** bar at the top: it checks your models and folders first, says what will happen (wave 1 starts right away; Helm asks before later waves), and shows exactly what to fix if it can't start yet. **Details** in that bar offers a dry run and **Discard plan**.
+No run agent spawns until you start the plan. When the planner has made it, press **Open plan to start it**. A plan that has not started shows a **Start run** bar at the top: it checks your models and folders first, says what will happen (wave 1 starts right away; later waves follow on the Orchestrator's decision with autonomy high, or on yours with autonomy ask), and shows exactly what to fix if it can't start yet. **Details** in that bar offers a dry run and **Discard plan**.
 
 **Helm remembers where you were.** The New run wizard keeps its draft: brief, portfolio, models, and the planning conversation. Your view, selection and inspector tab are kept too. Leave the panel, reload, or open Helm in another window, and you come back to the same place. **Close** keeps the draft (New run reopens it). **Discard** clears it, and starting a run clears it.
 
@@ -58,31 +77,34 @@ Click the Planner in the graph (or run `bb helm ask "…"`) to ask about the run
 Or use the terminal:
 
 ```
-bb helm plan --brief-file brief.md --preset "Cheap dev run"   # nothing spawns; prints the shape, forecast, problems
+bb helm plan --brief-file brief.md --preset "Cheap dev run"   # no run agent spawns (free text: one short planner thread reads it); prints the shape, forecast, problems
 bb helm start <runId> --dry-run                               # writes the Studio and briefs, spawns nothing
 bb helm start <runId> --yes
 bb helm status
-bb helm needs                     # approvals, questions, failures, sign-offs
+bb helm nodes                     # every agent's id, status and model
+bb helm needs                     # approvals, questions, failures, sign-offs, with the command for each choice
+bb helm needs N-12                # one item in full, with its evidence
+bb helm resolve N-12 retry        # act on an item: retry, stop, change-model, raise-cap, waive, sendback…
 bb helm tell <agent> --message-file note.md
 bb helm model <agent> --model claude-sonnet-5-5 --provider claude-code --reasoning medium
 bb helm slots --replace codex --with claude-code/claude-sonnet-5-5:high   # a provider ran out: move every role off it now
 # or just ask in a thread: the Orchestrator, a Manager or a Lead changes the models of the agents below it
 bb helm ask "Add a HIPAA reviewer for the clinic app"   # talk to the Planner
 bb helm agents                    # the Planner, the Orchestrator, the Git agent and every custom agent
-bb helm git                       # open the Git agent's thread (tell it where to push)
-bb helm worktrees                 # every app's worktrees: the checkout plus one work worktree
-bb helm worktrees --consolidate <app> --yes   # bring an older app back to two
+bb helm git                       # start the Git agent if the run has none, and print its thread (tell it where to push)
+bb helm worktrees                 # every app's worktrees: your checkout, the shared work worktree and any lanes
+bb helm worktrees --consolidate <app> --yes   # move an older app's per-agent worktrees onto the shared one
 bb helm rename planner "Nova"     # any agent; names are unique in a run
 bb helm retire <custom-agent> --yes
 bb helm stop <agent>              # bottom-up, subtree by default
-bb helm signoff <app>
+bb helm signoff <app>             # by default the Git agent then merges <app>-work into main and pushes both
 bb helm ledger                    # every change with its receipts
 bb helm complete --yes            # after every app is signed off
 bb helm end --run <id> --yes      # end a run now, or discard a draft plan
 bb helm limits --concurrency 24   # agents running at once in this run; also --budget N, --autonomy high|ask
 ```
 
-A structured brief is read deterministically: `# Group` headings, then `- Name — tagline · iOS Android macOS Windows Web` lines.
+A structured brief is read deterministically: `# Group` headings, then `- Name — tagline · iOS Android macOS Windows Web` lines (the dash may be `-`, `--`, `–` or `—` with spaces around it, and `|` works in place of `·`).
 
 **Not just apps.** Helm decides what each project is from its line and staffs it to match:
 
@@ -106,7 +128,7 @@ It also decides each project's **needs** (database, accounts, payments, security
 - A missing or empty folder becomes a new repository.
 - `· reads /path/a, ~/path/b` lists folders the app's agents may read but never change.
 - `--root <folder>` moves this run's folder (its new repositories and Helm's `_studio` notes), for example onto another disk. The default is `~/Projects/helm/<run>`.
-- `bb helm plan` prints what will happen to every folder, and refuses unsafe ones: system folders, a folder inside another repository, a non-git folder with files. Free text is read by one short hidden planner thread on the model you choose (`--planner-model`, default: the `code` slot at medium). `bb helm <command> --help` covers every option. Every command accepts `--json`.
+- `bb helm plan` prints what will happen to every folder, and refuses unsafe ones: system folders, a folder inside another repository, a non-git folder with files. Free text is read by one short hidden planner thread on the model you choose (`--planner-model`, default: the `code` slot at medium); it works in a small `_planner` scratch repository under the apps root (the BB project "Helm · planner"), never in your apps. `bb helm <command> --help` covers every option. Every command accepts `--json`.
 
 **Several sessions at once.** Every run you open gets a tab under the top bar. Each tab shows whether the run is live and how many items need you, and runs keep going while you look at another tab. **+ New session** opens a fresh start page without touching your runs. From there you can write a brief, plan with an agent, or reopen any earlier run. Closing a tab only hides it; to end a run use the run menu or `bb helm end`.
 
@@ -120,22 +142,35 @@ Supervisors steer too. The Orchestrator, Managers and Leads can instruct, pause,
 - your own directives always win: supervisors cannot resume what you paused, override a priority you set, or steer the review gates.
 
 FYI lines reach agents with their next Helm tool result rather than as separate messages, so being kept informed costs no extra turns.
+## Words Helm uses
+
+- **Run**: one portfolio being built, with its own agents, limits and budget. **Plan**: a run that has not started.
+- **Wave**: the apps admitted together; later apps wait for capacity under the run's concurrency limit.
+- **Shape**: how big an app's squad is. **Solo**: the lead builds it alone. **Lean**: a few builders. **Full**: the kind's whole squad.
+- **Slot**: a role's model (`orchestrator`, `ui`, `code`, `review` …). The **Model Studio** is where you pick them; a **preset** fills them all.
+- **Gate**: an app's Reviewer or Slop Hunter. Both must pass the same commit before the app is **Ready** for your sign-off.
+- **Directive** (`D-…`): a change you or a supervisor make to an agent. Each agent it reaches leaves a **receipt** (queued, delivered, acknowledged) in the **Ledger**.
+- **Needs you** (`N-…`): what is waiting on you: approvals, questions, failures, budget and sign-off.
+- **Studio**: Helm's notes folder for a run (`<run folder>/_studio`): the agents' briefs and `PORTFOLIO.md`.
+- **Observatory**: the graph button that shows BB threads outside the run, read-only.
+- **Unit** (u): Helm's cost estimate. 1 u is about 133k tokens on a weight-1.0 model such as Sonnet.
+
 ## Settings
 
-Settings live under `bb plugin config helm`:
+Settings live under `bb plugin config helm` (and BB → Settings → Helm, where each one is described):
 - apps root (default `~/Projects/helm`);
 - concurrency and total-agent caps;
 - spans, fix rounds and stall minutes;
-- budget cap, in relative units;
-- wave approval (`ask` / `auto`);
-- permission mode per tier;
+- budget cap, in relative units (1 u ≈ 133k tokens on a weight-1.0 model);
+- autonomy (`high`: the Orchestrator decides; `ask`: questions, waves and plan changes come to you);
+- wave approval (`ask` / `auto`), which applies only when autonomy is `ask`;
+- permission mode per tier, and who approves agents' permission prompts (their supervisor, or you);
 - personal names for the Planner, the Orchestrator and the Git agent (none by default: they are called by their roles);
-- what the Git agent does when you sign a project off (merge and push, push, or report only), and the most worktrees a project may have (default 10);
+- what the Git agent does when you sign a project off (merge and push, push, or report only), and the most branches (default 2) and worktrees (default 10) a project may have;
 - the default Planner, Orchestrator and Git agent models and their reasoning: dropdowns that list the models of the providers you have connected, so nothing is typed (also in the panel: **Models → Default models**, or `bb helm defaults`). A newly connected provider appears after Helm reloads;
 - showing leads in the sidebar;
-- zero-tolerance slop categories;
-- git remotes (off);
-- pricing weights.
+- zero-tolerance slop categories (default S1 placeholders, S2 fake data, S3 invented dependencies, S5 debug leftovers, S6 secrets);
+- pricing weights, keyed by model id (`{"claude-haiku-5-5": 0.25}`).
 
 ## Development
 
@@ -148,16 +183,16 @@ bb plugin build
 Skills are loaded live from `skills/` when the plugin is installed from a path. A save reaches running agents at once, and invalid frontmatter breaks them (DECISIONS 26). `npm test` checks every skill's frontmatter.
 
 Cost rule for development:
-- Never start a real run with more than 6 agents.
+- Never start a real run bigger than one lean single-platform app (7 agents, counting the Planner and the Git agent).
 - Use the cheapest model (`claude-haiku-5-5` at `low`) for every real test.
 - Big scenarios run only against the simulator (`src/server/bb/sim.ts`).
 
 ## Privacy and scope
 
-- The plugin server talks to BB only through `bb.sdk`. It makes no network calls of its own, sends no telemetry, and never stores credentials.
+- The plugin server talks to BB only through `bb.sdk`. It sends no telemetry and never stores credentials. The only network contact Helm makes itself is a read-only `git ls-remote` to your apps' own remotes when you open the GitHub tab (or run `bb helm worktrees --github`), using the login git already has.
 - Git and file work runs in Helm's host entry (`host.ts`), with no shell.
 - Helm manages only the threads it spawns. Everything else is read-only (the Observatory).
-- Repositories and branches are never deleted. In an existing repository, Helm adds only its own branch and its work worktree. The only worktrees Helm removes are its own agents' BB worktrees when you consolidate an app, and only after checking they hold no uncommitted or unmerged work.
+- Repositories and your own branches are never deleted. In an existing repository, Helm adds only its work branch and its work worktree. The Git agent deletes only Helm's own merged agent and lane branches (`git branch -d`, never `-D`) and removes idle lanes it made. Consolidating an app removes its agents' older per-agent worktrees, only after checking they hold no uncommitted or unmerged work.
 
 ## When something goes wrong
 

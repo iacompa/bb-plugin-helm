@@ -10,13 +10,13 @@ import { createDirective, remindUnacked } from "./direct.ts";
 import { spendFromTokens } from "../domain/models.ts";
 import { isQuestion } from "../domain/directives.ts";
 import { nodeWorktree } from "./gates.ts";
-import { expirePrompts, getPrompt, rerouteOpenPrompts, routePrompt } from "./prompts.ts";
+import { dropPrompt, expirePrompts, getPrompt, pendingPrompts, rerouteOpenPrompts, routePrompt } from "./prompts.ts";
 import { sweep } from "./watch.ts";
 import { auditWorktrees } from "./worktrees.ts";
+import { COMPACT_AT } from "./context.ts";
 import { worktreesViewFor } from "../worktree-view.ts";
 
 const TERMINAL = new Set(["done", "failed"]);
-const COMPACT_AT = 0.7;
 
 export function installEventHandler(e: Engine, opts: { selfPluginIds?: string[]; onPlannerEvent?: (ev: HelmEvent) => Promise<boolean> } = {}): void {
   e.eventHandler = (ev) => handleEvent(e, ev, opts);
@@ -46,7 +46,8 @@ export async function handleEvent(e: Engine, ev: HelmEvent, opts: { selfPluginId
       }
       e.repo.updateNode(node.runId, node.id, { lastActivityAt: now, nudgedAt: null });
       if (["waiting", "queued", "idle", "done"].includes(node.status) && run.status !== "cancelled") e.setStatus(node.runId, node.id, "running", { warning: node.status === "done" ? null : node.warning });
-      if (!node.branch) void e.refreshEnv(node.runId, node.id);
+      await settleAnsweredInBb(e, node);
+      if (!node.branch) e.fire(e.refreshEnv(node.runId, node.id), `refresh workspace of ${node.id}`);
       if (e.repo.unflushedInbox(node.runId, node.id).length) e.scheduleFlush(node.runId, node.id);
       return;
     }
@@ -123,6 +124,31 @@ function receipts(e: Engine, ev: Extract<HelmEvent, { type: "message.dispatched"
   });
 }
 
+/**
+ * A thread that runs again after a permission prompt may have been answered in BB itself: close Helm's
+ * cards and routed prompts for interactions BB no longer lists, and put the agent back to work.
+ */
+async function settleAnsweredInBb(e: Engine, node: NodeInfo): Promise<void> {
+  const routed = pendingPrompts(e, node.runId).filter((p) => p.nodeId === node.id);
+  if (node.status !== "needs" && !routed.length) return;
+  const live = await e.port.listInteractions(node.threadId!).catch(() => null);
+  if (!live) return;
+  const ids = new Set(live.map((i) => i.id));
+  const gone = e.repo.openNeedsFor(node.runId, node.id).filter((n) => n.interactionId && !ids.has(n.interactionId));
+  e.repo.tx(() => {
+    for (const p of routed) if (!ids.has(p.interaction.id)) dropPrompt(e, node.runId, p.interaction.id);
+    for (const n of gone) {
+      e.repo.resolveNeed(node.runId, n.id, { action: "answered in BB" });
+      e.emit(node.runId, "need.resolved", { id: n.id, action: "answered in BB" });
+    }
+    const cur = e.repo.getNode(node.runId, node.id);
+    if (gone.length && cur?.status === "needs" && !e.repo.openNeedsFor(node.runId, node.id).length) {
+      e.repo.updateNode(node.runId, node.id, { prevStatus: null });
+      e.setStatus(node.runId, node.id, "running");
+    }
+  });
+}
+
 async function onIdle(e: Engine, node: NodeInfo, lastText: string | null): Promise<void> {
   const run = e.run(node.runId);
   let used: { usedTokens: number; window: number } | null = null;
@@ -159,8 +185,8 @@ async function onIdle(e: Engine, node: NodeInfo, lastText: string | null): Promi
     if (e.repo.getMeta(`compact:${node.runId}:${node.id}`) !== String(bucket)) {
       e.repo.tx(() => {
         e.repo.setMeta(`compact:${node.runId}:${node.id}`, String(bucket));
-        e.repo.enqueue({ id: e.oid(), runId: node.runId, kind: "compact", nodeId: node.id, payload: {}, idemKey: key });
-        e.sendFromHelm(node.runId, node.id, `Your context is past ${Math.round(COMPACT_AT * 100)}% of its window. It is being compacted now; afterwards re-read your BRIEF${node.role === "orch" ? " and PORTFOLIO.md" : ""} and call helm_context before continuing.`, { key: `${key}:msg` });
+        // the agent is told only once the compaction really happened (handleCompact)
+        e.repo.enqueue({ id: e.oid(), runId: node.runId, kind: "compact", nodeId: node.id, payload: { key }, idemKey: key });
       });
     }
   }
@@ -223,8 +249,12 @@ async function onDispatch(e: Engine, node: NodeInfo, ev: Extract<HelmEvent, { ty
 function stopPending(e: Engine, node: NodeInfo): boolean {
   const rows = e.repo.db.prepare("SELECT payload_json FROM outbox WHERE run_id = ? AND kind = 'stop' AND state IN ('pending','inflight')").all(node.runId) as Array<{ payload_json: string }>;
   return rows.some((r) => {
-    const p = JSON.parse(r.payload_json) as { nodeIds?: string[] };
-    return !!p.nodeIds?.includes(node.id);
+    try {
+      const p = JSON.parse(r.payload_json) as { nodeIds?: string[]; threadIds?: string[] };
+      return !!p.nodeIds?.includes(node.id) || (!!node.threadId && !!p.threadIds?.includes(node.threadId));
+    } catch {
+      return false;
+    }
   });
 }
 
@@ -240,7 +270,7 @@ function isHelmText(e: Engine, node: NodeInfo, text: string): boolean {
       // ignore malformed payloads
     }
   }
-  return /^(FYI from Helm|Reminder: please call helm_ack|Report from |Re-check commit |Fix round |CONTRACT\.md is now|# BRIEF\.md|status check:|Your context is past)/.test(text);
+  return /^(FYI from Helm|Reminder: please call helm_ack|Report from |Re-check commit |Fix round |CONTRACT\.md is now|# BRIEF\.md|status check:|Your context (?:is|was) past)/.test(text);
 }
 
 // ───────────────────────────── watchdog (DB only) ─────────────────────────────
@@ -253,14 +283,18 @@ export async function watchdog(e: Engine): Promise<{ nudged: string[]; stalled: 
     const stallMs = run.limits.stallMinutes * 60_000;
     // a run with a Watcher model hands suspects to it instead of nudging blindly
     if (run.slots.watcher) {
+      let swept = false;
       try {
         nudged.push(...(await sweep(e, run)));
+        swept = true;
       } catch (err) {
-        e.log.warn(`watcher sweep for ${run.id} failed: ${err instanceof Error ? err.message : String(err)}`);
+        e.log.warn(`watcher sweep for ${run.id} failed, using the plain stall checks this pass: ${err instanceof Error ? err.message : String(err)}`);
       }
-      if (expirePrompts(e, run.id, (n, i, note) => raiseInteractionNeed(e, n, i, note))) e.emit(run.id, "run.updated", { id: run.id });
-      e.proposeNextWave(run.id);
-      continue;
+      if (swept) {
+        if (expirePrompts(e, run.id, (n, i, note) => raiseInteractionNeed(e, n, i, note))) e.emit(run.id, "run.updated", { id: run.id });
+        e.proposeNextWave(run.id);
+        continue;
+      }
     }
     for (const n of e.repo.nodesByStatus(run.id, ["running"])) {
       if (!n.threadId) continue;
@@ -275,7 +309,7 @@ export async function watchdog(e: Engine): Promise<{ nudged: string[]; stalled: 
         });
         nudged.push(n.id);
       } else if (now - flags.nudgedAt >= stallMs) {
-        const raised = e.raiseNeed(run.id, { kind: "stalled", nodeId: n.id, appId: n.appId, title: `${e.label(n)} has been silent for ${Math.round((now - last) / 60_000)} min`, body: "It was nudged once and has not answered.", evidence: `last activity ${new Date(last).toISOString()}`, options: ["Nudge again", "Retry", "Stop"], dedupeKey: `stalled:${n.id}:${flags.nudgedAt}` });
+        const raised = e.raiseNeed(run.id, { kind: "stalled", nodeId: n.id, appId: n.appId, title: `${e.label(n)} has been silent for ${Math.round((now - last) / 60_000)} min`, body: "It was nudged once and has not answered.", evidence: `last activity ${new Date(last).toISOString()}`, options: ["Nudge again", "Retry", "Stop"], dedupeKey: `stalled:${n.id}:${flags.nudgedAt}`, snoozeMs: Number.MAX_SAFE_INTEGER });
         if (raised) stalled.push(n.id);
       }
     }

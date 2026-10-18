@@ -60,9 +60,14 @@ export class Planner {
     this.unsub = this.e.port.onEvent((ev) => this.onEvent(ev));
   }
 
+  /** Pending "archive the finished planner thread" timers, cleared on dispose. */
+  private timers = new Set<() => void>();
+
   dispose(): void {
     this.unsub?.();
     this.unsub = null;
+    for (const cancel of this.timers) cancel();
+    this.timers.clear();
     for (const [id, set] of this.waiters) for (const w of set) w(this.get(id)!);
     this.waiters.clear();
   }
@@ -234,11 +239,13 @@ export class Planner {
   private archiveSoon(s: PlannerSession): void {
     const threadId = s.threadId;
     if (!threadId) return;
-    this.e.port.setTimeout(() => {
+    const cancel = this.e.port.setTimeout(() => {
+      this.timers.delete(cancel);
       void (async () => {
         await this.e.port.stopThread(threadId).catch(() => {});
         await this.e.port.archiveThread(threadId).catch((err) => this.e.log.warn(`planner ${s.id}: archive failed: ${err instanceof Error ? err.message : String(err)}`));
       })();
     }, 3000);
+    this.timers.add(cancel);
   }
 }

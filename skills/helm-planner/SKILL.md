@@ -30,29 +30,33 @@ checks below, and don't explain Helm's internals unless they ask.
 These are authoritative. **Never read Helm's source code or database** to work out how it
 behaves. If something isn't covered here or in `bb helm <command> --help`, say you are not sure.
 
-- **Nothing happens at plan time.** `bb helm plan` records a draft (status `planning`). No folder,
-  branch, file or thread is created.
+- **Nothing happens at plan time.** `bb helm plan` with a structured brief records a draft (status
+  `planning`). No folder, branch, file or thread is created. (A free-text brief would start one short hidden
+  planner thread to read it; you always write a structured brief, so this does not arise.)
 - **Starting** (`bb helm start`, or **Start run** in the panel) creates Helm's notes folder, the
   **Studio**, at `<run folder>/_studio`, queues the Orchestrator (and Managers) and admits **wave 1**.
   With autonomy high (the default) later waves go ahead on the record; with `ask` they wait for the user.
-- **The run folder** is `--root <folder>` when given, otherwise `<apps root>/<run-slug>` (the apps root
-  defaults to `~/Projects/helm`). Projects without their own folder get a new repository there.
+- **The run folder** is `<root>/<run-slug>-<id6>`, where `<root>` is `--root <folder>` when given,
+  otherwise the apps root (default `~/Projects/helm`). Projects without their own folder get a new
+  repository there.
   **Always tell the user where the run folder will be, and offer `--root`.**
 - **Existing repositories are adopted safely.** When that project's wave is admitted, Helm creates one
-  branch, `helm/<run-slug>-<id6>/<project-id>`, at the repository's current HEAD. It adds **no commits and
-  no files**, never touches the user's checkout, working tree, index, stash or other branches, and never
-  merges. The user merges a signed-off branch themselves.
+  work branch, `<project-id>-work`, at the repository's current HEAD (or continues it if it exists). It adds
+  **no commits and no files**, and never touches the user's checkout, working tree, index, stash or other
+  branches. Work reaches `main` only through the run's **Git agent**: when the user signs a project off it
+  merges the work branch into `main` and pushes both by default (the setting "When you sign a project off,
+  the Git agent" can make it push only the work branch, or only report). Tell the user this.
 - **Each project works in one shared worktree**: besides the user's checkout, one shared work worktree
   beside the repository, `<repository folder>/.helm-work/<repository>`, on that branch and on the same
   disk, plus only the lanes the Git agent adds for parallel work (within the run's worktree limit, default
   10, and branch limit, default 2; the human sets both per run in the Worktrees view). Every agent of the project works there, so they see **committed work only**.
   Keep `appsRoot` on a disk with room; the run's **Git agent** keeps the rule, watches disk space
-  and pushes signed-off work.
+  and merges and pushes signed-off work as the setting says.
   If the user has uncommitted work the agents should build on, they must commit it before that wave is
   admitted. `bb helm plan` prints the uncommitted changes per folder.
 - **Read-only folders** (`reads`) are enforced by the agents' instructions, not file permissions.
 - **Ending a run**: `bb helm end --run <id> --yes` stops and archives every agent the run spawned, or
-  discards a draft. `bb helm runs` lists runs. Repositories, `helm/…` branches and the ledger stay.
+  discards a draft. `bb helm runs` lists runs. Repositories, work branches and the ledger stay.
 - **Autonomy** defaults to high: the Orchestrator decides agents' questions, waves and plan changes, and
   the user is asked only about credentials, spending real money, private data or access (plus sign-off
   and failures). Change it with `bb helm limits --run <id> --autonomy ask|high`.
@@ -119,9 +123,12 @@ Orchestrator ─┬─ Manager (only with more than 4 projects; about 4 each)
                                                └─ gates: Reviewer + Slop Hunter (always)
 ```
 
-- **Orchestrator**: the one visible thread. It plans waves, supervises everything, can change a project's
-  kind, needs or tools mid-run (the squad follows), and talks to the user. With **one project** it is also
-  that project's lead.
+- **Orchestrator**: visible in BB's sidebar (with the Planner and the Git agent; leads only if the user turns
+  that setting on). It plans waves, supervises everything, can change a project's kind, needs or tools
+  mid-run (the squad follows), and talks to the user. With **one project** it is also that project's lead.
+- **Planner** and **Git agent**: every run has both, beside the Orchestrator. The Planner answers questions
+  and changes the plan when asked; the Git agent keeps branches and worktrees in order and merges and pushes
+  signed-off work. Their models are the `planner` and `git` roles; left empty, they use the user's default Planner or Git agent model, else the Orchestrator's.
 - **Managers**: added automatically with more than 4 projects. You choose only their model.
 - **Lead**: one per project. Writes the spec (for a review: the review plan), runs its squad, integrates,
   and fixes what the gates find. It may release specialists the spec makes pointless, and add **Test**,
@@ -142,9 +149,10 @@ Orchestrator ─┬─ Manager (only with more than 4 projects; about 4 each)
 - **Model swaps** mid-run: `bb helm model <node> --model … --provider … --reasoning …`, or whole roles with
   `bb helm slots`.
 
-Agents per project = 1 lead + squad + 2 gates (with one project the Orchestrator is the lead). Example: one
-lean single-platform app = Orchestrator + UI + Core + Reviewer + Slop Hunter = **5 agents**. A full website
-with a database and payments = lead + UI + Core + Data + Web + Security + 2 gates = **8 agents**.
+Agents per project = 1 lead + squad + 2 gates (with one project the Orchestrator is the lead). Every run
+also has a **Planner** and a **Git agent**. Example: one lean single-platform app = Orchestrator + Planner +
+Git agent + UI + Core + Reviewer + Slop Hunter = **7 agents**. A full website with a database and payments
+adds lead + UI + Core + Data + Web + Security + 2 gates = **8 agents** for that project.
 
 ## Step 1: What to build (one message; skip what they already said)
 
@@ -306,7 +314,8 @@ Each `·` segment is one of:
   repository or a new folder). `reads <folder>, <folder>` lists read-only folders.
 
 Rules:
-- One project per `- Name — tagline · …` line, with an em dash `—` and middle dots `·`.
+- One project per `- Name — tagline · …` line. Write an em dash `—` and middle dots `·` (Helm also accepts
+  ` - `, ` -- ` or ` – ` for the dash and `|` for the dot).
 - **Write what you and the user agreed explicitly** (kind, needs, tools), even when Helm would detect it:
   explicit values win and nothing is left to keyword luck. Named needs replace detected ones.
 - `# Group` headings group projects (they also hint the kind: `# Websites`, `# Games`).
@@ -328,14 +337,14 @@ EOF
 ```bash
 bb helm plan --brief-file "$f" --name '<Run name>' --shape <solo|lean|full> \
   --slot orchestrator=<provider>/<model>:<level> --slot review=<provider>/<model>:<level> … \
-  [--root '<folder>'] [--auto] [--concurrency N]
+  [--root '<folder>'] [--concurrency N]
 ```
 
 Report to the user:
 - the **projects**: each one's kind, needs, tools, platforms and squad, exactly as `plan` printed them,
   and any decision Helm made that you did not agree with the user (fix it on the line and re-plan);
-- the **org**: Managers or not, total agents;
-- the **folders**: which projects adopt an existing repository (and on which `helm/…` branch), which get a
+- the **org**: Managers or not, total agents (plus the Planner and the Git agent);
+- the **folders**: which projects adopt an existing repository (on its `<project-id>-work` branch), which get a
   new folder, the read-only folders, **the run folder**, and every folder whose **uncommitted changes
   agents won't see**;
 - **tools** the plan needs that `doctor` did not find;
@@ -391,7 +400,7 @@ leaves the clinic's chosen region. No ads in the game. Add a Test agent to the c
 
 Then `bb helm plan --brief-file "$f" --name 'Clinic, game, audit' --shape full --slot …` for every role in
 use (orchestrator, lead, ui, code, platform, security, test, review, slop), and the report: each project's
-profile and squad as printed, the adopted repository's `helm/…` branch, the run folder, missing tools, the
+profile and squad as printed, the adopted repository's work branch, the run folder, missing tools, the
 forecast and the run id. Note that `--shape full` made the game full too; offer to set it back to lean in the
 Portfolio step.
 

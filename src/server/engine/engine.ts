@@ -24,7 +24,7 @@ import type {
 } from "../../shared/types.ts";
 import { LIMIT_DEFAULTS, PERMISSION_LABEL } from "../../shared/types.ts";
 import { OutboxWorker, type HandlerResult } from "./outbox.ts";
-import { DEFAULT_SETTINGS, expandHome, newRunId, silentLogger, type HelmSettings, type Logger } from "./context.ts";
+import { COMPACT_AT, DEFAULT_SETTINGS, expandHome, newRunId, silentLogger, type HelmSettings, type Logger } from "./context.ts";
 import { cleanDevices, devicesForPlatforms, COMPUTER_SIZES, WEB_PHONE_SIZE } from "../../shared/devices.ts";
 import { parseBrief, withProfiles } from "../domain/brief.ts";
 import { ORCH_ID, planTopology, slugify, type TopologyPlan } from "../domain/topology.ts";
@@ -113,7 +113,7 @@ export function gitRulesText(appBranch: string | null, cap = 10, branches = 2): 
 }
 
 /** How UI and phone builders capture each page on the human's phones, for the Screens view. */
-export function phoneCaptureText(devices: string[]): string {
+export function phoneCaptureText(devices: string[], folder = "ui"): string {
   const list = devices.length ? devices : ["iPhone 18 Pro", "iPhone 18 Pro Max", "iPhone Air"];
   const slug = (d: string) => d.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   const ios = list.find((d) => /^(iphone|ipad)/i.test(d));
@@ -122,19 +122,19 @@ export function phoneCaptureText(devices: string[]): string {
     `Capture every page of the app on each of these devices (the human picked them in Screens): ${list.join(", ")}. The human looks at them in the Screens view, one device at a time or side by side.`,
     ios ? `iOS: \`xcrun simctl list devicetypes\` names the installed models. Make one simulator per model once (\`xcrun simctl create helm-${slug(ios)} "${ios}"\`), reuse it, boot it only to capture (\`xcrun simctl io helm-${slug(ios)} screenshot …\`) and shut it down afterwards.` : "",
     android ? `Android: one emulator per model (\`avdmanager list device\` names the hardware profiles; ${android} has its own or use the closest size), made once and reused, started only to capture (\`adb exec-out screencap -p\`) and stopped afterwards.` : "",
-    "A model that is not installed: use the closest one installed and say which in reports/ui/INDEX.md.",
-    `Name each file \`reports/ui/<screen>--<state>--<device>--<theme>.png\`, the device as a slug (\`home--default--${slug(list[0])}--light.png\`), so Screens knows the device. Upright captures only. The screen map's \`image\` is the first device's light capture.`,
+    `A model that is not installed: use the closest one installed and say which in reports/${folder}/INDEX.md.`,
+    `Name each file \`reports/${folder}/<screen>--<state>--<device>--<theme>.png\`, the device as a slug (\`home--default--${slug(list[0])}--light.png\`), so Screens knows the device. Upright captures only. The screen map's \`image\` is the first device's light capture.`,
   ]
     .filter(Boolean)
     .join(" ");
 }
 
 /** Computer and web apps: the window sizes their pages are captured at (chosen by Helm; nothing to pick). */
-export function computerCaptureText(platforms: string[]): string {
+export function computerCaptureText(platforms: string[], folder = "ui"): string {
   const sizes = [...COMPUTER_SIZES, ...(platforms.includes("web") ? [WEB_PHONE_SIZE] : [])];
   return [
     `Capture every page at these window sizes: ${sizes.map((s) => `${s.name.toLowerCase()} ${s.w}x${s.h}`).join(", ")}${platforms.includes("web") ? " (the phone width is a browser window, not a phone app)" : ""}.`,
-    `Name each file \`reports/ui/<screen>--<state>--<size>--<theme>.png\` with the size as \`${COMPUTER_SIZES[0].w}x${COMPUTER_SIZES[0].h}\`, so Screens shows each page at its size. The screen map's \`image\` is the ${COMPUTER_SIZES[0].name.toLowerCase()} light capture.`,
+    `Name each file \`reports/${folder}/<screen>--<state>--<size>--<theme>.png\` with the size as \`${COMPUTER_SIZES[0].w}x${COMPUTER_SIZES[0].h}\`, so Screens shows each page at its size. The screen map's \`image\` is the ${COMPUTER_SIZES[0].name.toLowerCase()} light capture.`,
   ].join(" ");
 }
 
@@ -274,15 +274,39 @@ export class Engine {
   async init(reconcile: (runId: string) => Promise<unknown>): Promise<void> {
     const n = this.outbox.recover();
     if (n) this.log.info(`outbox: ${n} in-flight rows returned to pending after restart`);
-    this.unsubscribe = this.port.onEvent(async (e) => {
-      try {
-        await this.eventHandler?.(e);
-      } catch (err) {
-        this.log.error(`event ${e.type} failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
-      }
+    // one thread's events are handled in order: an idle handler that awaits BB must not overwrite the
+    // active event that arrived meanwhile (a working agent shown as waiting escapes the concurrency cap)
+    const chains = new Map<string, Promise<void>>();
+    this.unsubscribe = this.port.onEvent((e) => {
+      const next = (chains.get(e.threadId) ?? Promise.resolve()).then(async () => {
+        try {
+          await this.eventHandler?.(e);
+        } catch (err) {
+          this.log.error(`event ${e.type} failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
+        }
+      });
+      chains.set(e.threadId, next);
+      void next.then(() => {
+        if (chains.get(e.threadId) === next) chains.delete(e.threadId);
+      });
+      return next;
     });
-    for (const run of this.repo.activeRuns()) await reconcile(run.id);
-    this.outbox.kick();
+    try {
+      for (const run of this.repo.activeRuns()) {
+        try {
+          await reconcile(run.id);
+        } catch (err) {
+          this.log.error(`reconcile ${run.id} failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    } finally {
+      this.outbox.kick();
+    }
+  }
+
+  /** Run something in the background: a failure is logged, never an unhandled rejection that could stop the server. */
+  fire(p: Promise<unknown>, what: string): void {
+    p.catch((err) => this.log.warn(`${what} failed: ${err instanceof Error ? err.message : String(err)}`));
   }
 
   dispose(): void {
@@ -443,7 +467,7 @@ export class Engine {
     const named = apps.filter((a) => a.targetPath || a.reads.length);
     const hostId = this.repo.runHost(runId) ?? (await this.port.primaryHostId());
     const home = await this.homeOf(hostId);
-    if (run.appsRoot && !run.appsRoot.startsWith(this.settings.appsRoot)) {
+    if (run.appsRoot) {
       const p = targetPathProblem(run.appsRoot, home);
       if (p) problems.push(`Run folder: ${p}`);
     }
@@ -684,8 +708,9 @@ export class Engine {
       });
       for (const a of plan.apps)
         this.repo.insertApp({ runId, id: a.id, name: a.name, tagline: a.tagline, platforms: a.platforms, platformsAssumed: a.platformsAssumed, shape: a.shape, managerNodeId: a.managerId, order: a.order, test: a.test, priority: a.priority, notes: a.notes, targetPath: a.path, reads: a.reads, kind: a.kind, needs: a.needs, tools: a.tools });
-      const kindOf = new Map(plan.apps.map((a) => [a.id, a.kind]));
-      for (const n of plan.nodes)
+      const appById = new Map(plan.apps.map((a) => [a.id, a]));
+      for (const n of plan.nodes) {
+        const own = n.appId ? appById.get(n.appId) : n.alsoLead ? plan.apps[0] : undefined;
         this.repo.insertNode({
           runId,
           id: n.id,
@@ -697,10 +722,11 @@ export class Engine {
           slot: n.slot,
           alsoLead: n.alsoLead,
           model: null,
-          scopeGlobs: scopeFor(n.role, n.platform, (n.appId && kindOf.get(n.appId)) || "app"),
+          scopeGlobs: scopeFor(n.role, n.platform, own?.kind ?? "app", { alsoLead: n.alsoLead, solo: own?.shape === "solo" && (n.alsoLead || n.role === "lead") }),
           branch: null,
           briefMd: null,
         });
+      }
     });
     this.plans.set(runId, plan);
     return { runId, plan };
@@ -752,7 +778,7 @@ export class Engine {
     });
     // the run's Planner (Amer): beside the Orchestrator, idle until someone writes to it
     await ensurePlanner(this, runId, { catalog: cat });
-    // the Git agent: beside them, keeps every app to two worktrees and sends work where the human says
+    // the Git agent: beside them, keeps every app within its worktree and branch limits and sends work where the human says
     await ensureGitAgent(this, runId);
     const fresh = this.run(runId);
     const studio = this.studioPath(fresh);
@@ -829,7 +855,7 @@ export class Engine {
       this.repo.tx(() => {
         for (const a of wave) this.admitAppTx(runId, a.id, this.autonomous(run) ? "next wave (autonomy is on)" : "auto-advance");
       });
-      void this.pump(runId);
+      this.fire(this.pump(runId), `pump ${runId}`);
       return;
     }
     const names = wave.map((a) => apps.find((x) => x.id === a.id)?.name ?? a.id);
@@ -843,6 +869,8 @@ export class Engine {
       evidence: "",
       options: ["Approve wave", "Not yet"],
       dedupeKey: `wave:${wave.map((a) => a.id).join(",")}`,
+      // "Not yet" holds the same proposal back for two hours instead of five minutes
+      snoozeMs: 2 * 3600_000,
       data: { appIds: wave.map((a) => a.id) },
     });
   }
@@ -1061,13 +1089,15 @@ export class Engine {
       if (run.autoAdvance === "ask" && !this.autonomous(run)) lines.push("## Waves\nWhen apps wait in Intake and capacity frees up, Helm asks the human to approve the next wave. Use `helm_propose_wave` if you want to suggest a different set.");
     }
     if (this.autonomous(run)) lines.push(`## Autonomy\n${autonomyText(n.role === "orch")}`);
-    if (app && app.kind !== "review" && (n.role === "ui" || (this.isLeadNode(n) && app.shape === "solo"))) {
+    if (app && app.kind !== "review" && app.kind !== "game" && (n.role === "ui" || (this.isLeadNode(n) && app.shape === "solo"))) {
       const native = [app.platforms.includes("ios") ? ["iOS", "reference/ios.md"] : null, app.platforms.includes("and") ? ["Android", "reference/android.md"] : null].filter((x): x is string[] => !!x);
       if (native.length)
         lines.push(`## Native design (${native.map((x) => x[0]).join(" and ")})\n${native.length > 1 ? "This app gets two native designs that share one identity, never one design forced onto both." : `This app is a native ${native[0][0]} app.`} Before you design, read helm-ui's ${native.map((x) => `\`${x[1]}\``).join(" and ")} (in the skill's folder, or \`bb skill show <id> --path ${native[0][1]}\`). Write the direction in \`reports/ui/DIRECTION.md\` first, and before you report done run helm-ui's \`reference/native-audit.md\` and write \`reports/ui/AUDIT.md\`.`);
     }
-    if (app && (n.role === "ui" || (n.role === "platform" && (n.platform === "ios" || n.platform === "and"))) && app.platforms.some((p) => p === "ios" || p === "and")) lines.push(`## Screenshots on these phones (set by the human)\n${phoneCaptureText(devicesForPlatforms(this.screenDevices(), app.platforms))}`);
-    else if (app && (n.role === "ui" || (n.role === "platform" && (n.platform === "mac" || n.platform === "win" || n.platform === "web"))) && app.platforms.some((p) => p === "mac" || p === "win" || p === "web")) lines.push(`## Screenshots at these window sizes\n${computerCaptureText(app.platforms)}`);
+    // captures go in the builder's own reports folder (its write scope); Screens reads every reports/<folder>/
+    const capFolder = n.role === "platform" && n.platform ? n.platform : "ui";
+    if (app && (n.role === "ui" || (n.role === "platform" && (n.platform === "ios" || n.platform === "and"))) && app.platforms.some((p) => p === "ios" || p === "and")) lines.push(`## Screenshots on these phones (set by the human)\n${phoneCaptureText(devicesForPlatforms(this.screenDevices(), app.platforms), capFolder)}`);
+    else if (app && (n.role === "ui" || (n.role === "platform" && (n.platform === "mac" || n.platform === "win" || n.platform === "web"))) && app.platforms.some((p) => p === "mac" || p === "win" || p === "web")) lines.push(`## Screenshots at these window sizes\n${computerCaptureText(app.platforms, capFolder)}`);
     if (n.tier !== "git") {
       const lim = this.gitLimits(run.id);
       lines.push(`## Git rules (strict, set by the human)\n${gitRulesText(app ? this.repo.appExtra(run.id, app.id).integrationBranch : null, lim.worktrees, lim.branches)}`);
@@ -1128,6 +1158,8 @@ export class Engine {
       integrationCommit: extra.integrationCommit ?? null,
       scannerFindings: extra.scannerFindings ?? null,
       handover: extra.handover ?? null,
+      // a solo app's lead (or the Orchestrator leading a one-app run) builds it all, so it writes everywhere
+      solo: !!app && app.shape === "solo" && this.isLeadNode(n),
     };
     const nb = this.repo.getNode(run.id, n.id)!;
     return briefFor({ id: nb.id, role: nb.role, platform: nb.platform, briefVersion: nb.briefVersion, scopeGlobs: nb.scopeGlobs, alsoLead: nb.alsoLead }, ctx);
@@ -1163,7 +1195,7 @@ export class Engine {
 
   // ───────────────────────────── needs ─────────────────────────────
 
-  raiseNeed(runId: string, x: { kind: NeedKind; nodeId: string | null; appId: string | null; title: string; body: string; evidence: string; options: string[]; interactionId?: string | null; dedupeKey?: string | null; data?: unknown; setNodeNeeds?: boolean }): NeedInfo | null {
+  raiseNeed(runId: string, x: { kind: NeedKind; nodeId: string | null; appId: string | null; title: string; body: string; evidence: string; options: string[]; interactionId?: string | null; dedupeKey?: string | null; data?: unknown; setNodeNeeds?: boolean; snoozeMs?: number }): NeedInfo | null {
     const id = `N-${this.repo.nextSeq(runId, "need")}`;
     const need: NeedInfo = {
       id,
@@ -1182,7 +1214,7 @@ export class Engine {
       resolution: null,
       data: x.data ?? null,
     };
-    const inserted = this.repo.insertNeed({ ...need, dedupeKey: x.dedupeKey ?? null });
+    const inserted = this.repo.insertNeed({ ...need, dedupeKey: x.dedupeKey ?? null, resolvedSince: x.snoozeMs != null ? this.now() - x.snoozeMs : null });
     if (!inserted) return null;
     if (x.nodeId && x.setNodeNeeds) {
       const n = this.repo.getNode(runId, x.nodeId);
@@ -1318,7 +1350,11 @@ export class Engine {
           this.repo.updateNode(run.id, n.id, { warning: null });
         }
       } catch (err) {
-        return { defer: DEFER_SHORT, reason: `work worktree: ${err instanceof Error ? err.message.slice(0, 200) : String(err)}` };
+        const msg = err instanceof Error ? err.message.slice(0, 300) : String(err);
+        // waiting for BB to remove a consolidation's old worktrees is expected; anything else (the branch
+        // checked out elsewhere, a folder in the way, a missing disk) retries with backoff, then raises a card
+        if (moving) return { defer: DEFER_SHORT, reason: `work worktree: ${msg}` };
+        throw new Error(`Could not prepare ${appOf.name}'s shared work worktree beside ${appOf.repoPath}: ${msg}`);
       }
     }
     let env = this.envFor(run, n, hostId);
@@ -1398,7 +1434,18 @@ export class Engine {
       adopted = false;
     }
     const threadId = ref.threadId;
+    let stoppedLate = false;
     this.repo.tx(() => {
+      // stopped, paused or cancelled while the thread was being made: keep the thread on record and stop it
+      const cur = this.repo.getNode(run.id, n.id);
+      const runNow = this.repo.getRun(run.id);
+      if (!cur || cur.status !== "queued" || !runNow || runNow.status === "cancelled" || runNow.status === "done") {
+        stoppedLate = true;
+        if (cur) this.repo.updateNode(run.id, n.id, { threadId, environmentId: ref!.environmentId, model, providerId: model.providerId, spawnedAt: this.now(), ...(cur.status === "paused" ? { prevStatus: "waiting" } : cur.status === "planned" || cur.status === "queued" ? { status: "idle", endedAt: this.now() } : {}) });
+        this.repo.enqueue({ id: this.oid(), runId: run.id, kind: "stop", nodeId: null, payload: { threadIds: [threadId] }, idemKey: `late-stop:${run.id}:${n.id}:${threadId}` });
+        this.repo.event(run.id, n.id, "spawned", `spawned, then stopped: it became ${cur?.status ?? "removed"}${runNow && runNow.status !== "running" ? ` (run ${runNow.status})` : ""} while its thread was being made`, threadId);
+        return;
+      }
       this.repo.deleteMeta(`reuse:${run.id}:${n.id}`);
       this.repo.deleteMeta(`moved:${run.id}:${n.id}`);
       if (n.role === "planner") this.repo.deleteMeta(`planner-q:${run.id}`);
@@ -1409,8 +1456,12 @@ export class Engine {
       if (parent) this.repo.comms(run.id, { from: parent.id, to: n.id, kind: "spawn", summary: `${this.label(parent)} → ${this.label(n)}: spawned` });
     });
     this.emit(run.id, "node.updated", this.repo.getNode(run.id, n.id));
+    if (stoppedLate) {
+      this.outbox.kick();
+      return { done: true, result: { threadId, stoppedLate: true } };
+    }
     this.emit(run.id, "edge.added", { from: n.parentId, to: n.id });
-    void this.refreshEnv(run.id, n.id);
+    this.fire(this.refreshEnv(run.id, n.id), `refresh workspace of ${n.id}`);
     return { done: true, result: { threadId, adopted } };
   }
 
@@ -1458,10 +1509,15 @@ export class Engine {
     if (!run || !n) return { done: true, result: { skipped: "gone" } };
     const kind = String(row.payload.kind ?? "notice");
     if (!n.threadId) {
-      // planned/queued nodes get stored directives in their spawn prompt (§6.3)
-      if (["planned", "queued"].includes(n.status)) return { done: true, result: { skipped: "no thread yet — goes into the spawn prompt" } };
-      if (n.status === "needs" || n.status === "failed") return { done: true, result: { skipped: `no thread (${n.status})` } };
-      return { defer: DEFER_SHORT, reason: "thread not created yet" };
+      // directives reach a node with no thread through its spawn prompt (§6.3); any other message is kept
+      // as an FYI line, which its first Helm tool result and helm_context show. Waiting here would block
+      // every later row for the node (a planned member marked done at sign-off never gets a thread).
+      const text = String(row.payload.text ?? "");
+      if (kind !== "flush" && !(row.payload.recipients as unknown[] | undefined)?.length && text) {
+        this.repo.pushInbox(run.id, n.id, text.length > 790 ? `${text.slice(0, 790)}…` : text);
+        return { done: true, result: { skipped: `no thread (${n.status}) — kept as an FYI line` } };
+      }
+      return { done: true, result: { skipped: `no thread (${n.status})${["planned", "queued", "paused"].includes(n.status) ? " — directives go into the spawn prompt" : ""}` } };
     }
     if (n.status === "paused" && !row.payload.bypassPause) return { defer: 60_000, reason: "node is paused" };
     if (kind === "flush") {
@@ -1568,7 +1624,27 @@ export class Engine {
   private async handleCompact(row: OutboxRow): Promise<HandlerResult> {
     const n = this.repo.getNode(row.runId, String(row.nodeId));
     if (!n?.threadId) return { done: true };
-    await this.port.compactThread(n.threadId);
+    // BB compacts only an idle (or errored) thread. One that woke up again (a message reached it
+    // first) is left alone: forgetting the bucket lets its next idle try again, instead of five
+    // failed attempts and a warning while it works.
+    const busy = () => {
+      this.repo.setMeta(`compact:${row.runId}:${n.id}`, "");
+      return { done: true as const, result: { skipped: "busy; compacts at its next idle" } };
+    };
+    const st = await this.port.threadState(n.threadId);
+    if (!st) return { done: true, result: { skipped: "no thread" } };
+    if (st.status !== "idle" && st.status !== "error") return busy();
+    try {
+      await this.port.compactThread(n.threadId);
+    } catch (err) {
+      if (/409|only be compacted while/i.test(String(err))) return busy();
+      throw err;
+    }
+    const key = String(row.payload.key ?? `compact:${row.runId}:${n.id}:${row.id}`);
+    this.repo.tx(() =>
+      this.sendFromHelm(row.runId, n.id, `Your context was past ${Math.round(COMPACT_AT * 100)}% of its window, so Helm compacted it. Re-read your BRIEF${n.role === "orch" ? " and PORTFOLIO.md" : ""} and call helm_context before continuing.`, { key: `${key}:msg` }),
+    );
+    this.outbox.kick();
     return { done: true };
   }
 
@@ -1584,7 +1660,9 @@ export class Engine {
   }
 
   private async handleFile(row: OutboxRow): Promise<HandlerResult> {
-    await this.port.host(this.repo.runHost(row.runId)).writeFile({ path: String(row.payload.path), content: String(row.payload.content) });
+    // every file Helm writes this way is a brief in the Studio, where agents also work: pin it there
+    const run = this.repo.getRun(row.runId);
+    await this.port.host(this.repo.runHost(row.runId)).writeFile({ path: String(row.payload.path), content: String(row.payload.content), ...(run?.appsRoot ? { root: this.studioPath(run) } : {}) });
     return { done: true };
   }
 

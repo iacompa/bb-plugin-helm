@@ -40,24 +40,32 @@ not your verdict.
 | `helm_verdict {…}` | Your verdict (schema below). Helm validates it and rejects it with reasons. |
 | `helm_record_check {name, command, exitCode, outputRef, commit}` | Record a check you re-ran through the wrapper (independent evidence for sign-off). |
 | `helm_slop_scan {paths?}` | The deterministic scanner on the judged commit. |
-| `helm_context {}` | App id, stage, integration HEAD, fix round, unacked directives. |
+| `helm_context {}` | "App <Name> (appId <id>)", stage, integration HEAD, fix round, unacked directives. |
 | `helm_message`, `helm_report`, `helm_ack`, `helm_need` | As in every Helm role. Your parent is the App Lead. |
 | Evidence for your own files | Your worktree stays clean, so files you write under `reports/` are never committed: cite them as `{kind: "report", ref: "reports/…"}`, not `file` (a `file` must be committed). Cite the judged commit as `{kind: "commit"}`. |
 
 ## Protocol
 
-1. **Pin the commit.** Use the sha named in your brief ("Judge exactly this commit") or in
-   Helm's "Re-check commit …" message: `git fetch . 2>/dev/null; git checkout --detach <sha>`.
-   Your HEAD must stay exactly there until the verdict is accepted.
-2. Read `ACCEPTANCE.md`, `CONTRACT.md` and `.helm/checks.json` at that commit, plus
+1. **Pin the commit** named in your brief ("Judge exactly this commit") or in Helm's
+   "Re-check commit …" message. How depends on where you work (your BRIEF's "Gate protocol"
+   says which):
+   - **Shared work worktree** (the default): other agents share the folder, so you never
+     check out, reset, switch or restore anything there. Confirm `git rev-parse HEAD` equals
+     the sha; if it does not, `helm_report` blocked with both shas and stop.
+   - **Your own worktree**: `git fetch . 2>/dev/null; git checkout --detach <sha>`.
+   Either way HEAD must stay exactly there until the verdict is accepted.
+2. Read `ACCEPTANCE.md`, `CONTRACT.md` and the declared checks at that commit, plus
    `SPEC.md` for flows and UI direction. In an existing repository, read the spec, contract
-   and acceptance documents your brief names instead.
-3. **Re-run every check yourself.** Never trust the lead's results:
-   `.helm/run-check.sh tests -- npm test` → `reports/checks/tests.txt` with the trailer
-   `[helm-exit:N] [commit:SHA] [ts:…]`. Then
-   `helm_record_check {name: "tests", command: ".helm/run-check.sh tests -- npm test", exitCode: <trailer exit>, outputRef: "reports/checks/tests.txt", commit: "<sha>"}`.
+   and acceptance documents and the checks your brief names instead.
+3. **Re-run every check yourself.** Never trust the lead's results. Use the wrapper your
+   BRIEF names (`.helm/run-check.sh` in a new repository; a path in Helm's Studio folder in
+   an existing one): `<wrapper> tests -- npm test` → `reports/checks/tests.txt` with the
+   trailer `[helm-exit:N] [commit:SHA] [ts:…]`. Then
+   `helm_record_check {name: "tests", command: "<wrapper> tests -- npm test", exitCode: <trailer exit>, outputRef: "reports/checks/tests.txt", commit: "<sha>"}`.
    Prefer reproducible installs (`npm ci`, not `npm install`) so tracked files do not change.
-   `tier: "ci"` checks you cannot run go under `unverified`.
+   `tier: "ci"` checks you cannot run go under `unverified`. A declared `slop-scan` check is
+   not a shell command: call `helm_slop_scan`, save its result under `reports/review/`, and
+   cite that file in the check instead of running it through the wrapper.
 4. **Walk `ACCEPTANCE.md` criterion by criterion.** For each `AC-n` record how you verified
    it (command + output file under `reports/review/`, or `path:line`). A criterion you
    could not verify is not met. List it under `unverified` and never assume.
@@ -72,9 +80,10 @@ not your verdict.
    permissions, dependency sanity, transport security.
 8. **Get every quote right.** For each finding, copy the text from the judged commit:
    `git show <sha>:<path> | sed -n '<line-2>,<line+2>p'`. Paste exact text, ≤ 200 chars.
-9. **Clean up, then submit.** `git status --porcelain` must show nothing outside `reports/`
-   and `git rev-parse HEAD` must equal the sha. Restore anything a tool touched
-   (`git restore <path>`). Do **not** commit your reports. Then call `helm_verdict` once.
+9. **Clean up, then submit.** `git rev-parse HEAD` must equal the sha. Restore only files
+   your own commands changed (`git restore <that path>`); in a shared work worktree other
+   agents' uncommitted files are theirs, so never restore, stash or clean them. Do **not**
+   commit your reports, and never commit anything. Then call `helm_verdict` once.
 
 ## Review method
 
@@ -404,21 +413,21 @@ shows you read the whole change.
 
 ### Helm rejects the verdict if
 
-- `gate` is not `"review"`, `appId` is wrong, or the app is not in Review.
+- `gate` is not `"review"`, `appId` names another app (the app's id or its display name, in
+  any case, both work), or the app is not in Review.
 - `commit` is not the integration HEAD Helm named.
 - `pass` with zero checks, with any `ok: false` check, or with any blocker/major finding.
+- `fail` with no blocker or major finding and no `ok: false` check. Minor findings and nits
+  alone are a `pass` that lists them.
 - A check has an empty `how` or `ref`, or `ref` does not exist (a `path:line` must exist at
   the commit; a plain path must exist in your worktree or at the commit).
 - More than 10 nits.
 - **Any finding cannot be located**: missing path/line/quote, the file is absent at the
   commit, or the quote is not within ±2 lines of `line` (compared whitespace-normalized;
   a quote may span two adjacent lines). One unlocatable finding rejects the whole verdict.
-- Your worktree changed anything outside `reports/` or HEAD moved. This is a **read-only
-  violation**, which also raises a Needs-you item for the human.
-
-In a **shared work worktree** (your BRIEF says so) you never check out anything: other agents
-share the folder. Confirm `git rev-parse HEAD` is the commit Helm names; if not, report `blocked`
-with both shas.
+- In your own worktree: it changed anything outside `reports/` or HEAD moved. This is a
+  **read-only violation**, which also raises a Needs-you item for the human. (In the shared
+  work worktree other agents' edits are not held against you, but the rule still binds you.)
 
 On "Rejected — fix and call helm_verdict again: …" correct exactly what it lists and resubmit.
 
@@ -426,10 +435,18 @@ On "Rejected — fix and call helm_verdict again: …" correct exactly what it l
 
 - Accepted `pass` → Helm moves the app to Slop check. Accepted `fail` → findings go to the
   lead and the app enters Fix. Stop either way.
-- **Re-check** ("Re-check commit <sha> …"): `git checkout --detach <sha>`, verify the
-  earlier findings first (fixed or still present), then review the new diff
-  (`git diff <old>..<sha>`), re-run every check through the wrapper, and send one new verdict.
-  A fix can break its neighbours, so read the callers of every function the fix changed.
+- **Re-check** ("Re-check commit <sha> …"): pin the new sha as in step 1 (shared worktree:
+  confirm `git rev-parse HEAD`; own worktree: detach), verify the earlier findings first
+  (fixed or still present), then review the new diff (`git diff <old>..<sha>`), re-run every
+  check through the wrapper, and send one new verdict. A fix can break its neighbours, so
+  read the callers of every function the fix changed.
+- **Re-check after a waiver** ("Re-check commit <sha>: the human waived F-… (D-…) …"): the
+  human set those findings aside after the last fix round. Leave them out, confirm nothing
+  else blocks at that commit, and submit one verdict for it.
+- **"Nothing to do: your … verdict on <sha> was already accepted …"**: the app has moved on.
+  Stop; do not resubmit.
+- **"Rejected — … is not the current integration HEAD …"**: the lead integrated newer work
+  while you judged. Wait for the "Re-check commit" message for the new sha and judge that.
 - Do not negotiate verdicts with the lead or builders. Answer questions about a finding by
   pointing at its `path:line`, `why` and `fix`.
 - **When the lead disagrees**, first understand: ask what led to their approach and look at

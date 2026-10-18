@@ -5,7 +5,7 @@ Helm is one BB plugin with three runtimes:
 | Runtime | Entry | Runs in | Talks to |
 |---|---|---|---|
 | Plugin server | `server.ts` | BB's plugin host (one process) | BB through `bb.sdk` only. No network calls of its own, no telemetry, no shell |
-| Host entry | `host.ts` → `src/host/ops.ts` | each BB host daemon | the machine's git and filesystem, over the typed `HOST_CONTRACT` (`src/shared/host-contract.ts`) |
+| Host entry | `host.ts` → `src/host/ops.ts` | each BB host daemon | the machine's git and filesystem, over the typed `HOST_CONTRACT` (`src/shared/host-contract.ts`). Its only network contact is a read-only `git ls-remote` to an app's own remote, for the GitHub view (`src/host/remote.ts`) |
 | App | `app.tsx` → `components/helm/` | the BB window | the server over the RPC contract (`src/shared/protocol.ts`) and realtime channels |
 
 ```
@@ -75,7 +75,7 @@ Helm's database is the source of truth for **structure**: who reports to whom, s
 
 ## Threads and the chain of command
 
-- The Orchestrator is the only visible Helm thread (D3). Every other node is spawned **hidden** with `lifecycleOwnerThreadId` set to its parent's thread and **no `parentThreadId`**. A native parent link wakes the parent for a full turn on every child completion (V2, DECISIONS 2).
+- The Orchestrator, the Planner and the Git agent are the visible Helm threads (App Leads too when "Show App Leads in the BB sidebar" is on). Every other node is spawned **hidden** with `lifecycleOwnerThreadId` set to its parent's thread and **no `parentThreadId`**. A native parent link wakes the parent for a full turn on every child completion (V2, DECISIONS 2).
 - Children talk upward through `helm_report`. Helm verifies the evidence and forwards one compact line on done, blocked or failed. Progress lines and digest-level notices go to the node's FYI inbox and never wake an idle agent (DECISIONS 3).
 - Authority is the `nodes` row for the calling thread id, checked again on every tool call. `agents.configure` only picks a tool list (V12).
 
@@ -86,10 +86,17 @@ Helm's database is the source of truth for **structure**: who reports to whom, s
 - `targetPathProblem` refuses system folders, disk roots and the home folder.
 
 At start, the `project` outbox handler does one of two things:
-- **adopts** an existing repository with `adoptRepo`: a create-only `helm/<run>/<app>` ref at HEAD, nothing else (DECISIONS 23);
+- **adopts** an existing repository with `adoptRepo`: a create-only `<app>-work` branch at HEAD (or the existing one), nothing else (DECISIONS 23; runs from before keep their `helm/<run>/<app>` branch as the work branch);
 - or creates a repository with `ensureRepo` as before.
 
-It then finds or creates the BB project for that folder. An adopted app's lead branches from the Helm ref. Its briefs and the evidence wrapper come from the Studio, and the lead may map the repository's own documents and checks with `helm_existing_docs` (DECISIONS 24).
+It then finds or creates the BB project for that folder. Before an app's first spawn, `ensureWorkTree` adds one shared **work worktree** beside the repository, `<repository folder>/.helm-work/<repository>`, on the work branch; every agent of the app works there (DECISIONS 49). Its briefs and the evidence wrapper come from the Studio, and the lead may map the repository's own documents and checks with `helm_existing_docs` (DECISIONS 24). Work reaches `main` only through the Git agent (below).
+
+## The free-standing agents
+
+Every run also has agents outside the chain of command (`engine/custom.ts`):
+- the **Planner** answers the human's questions and makes plan changes, model changes and **custom agents** on request (`bb helm ask`). Custom agents report to a supervisor the Planner names and are woken by events (`wakeOn`), never by timers;
+- the **Git agent** keeps every app to its branch and worktree limits, watches disk space, and merges and pushes signed-off work as the "When you sign a project off" setting says;
+- an optional **Watcher** (the `watcher` slot) gets the watchdog's stall suspects and nudges, restarts or escalates them (`engine/watch.ts`).
 
 ## Directives
 
@@ -119,7 +126,7 @@ Each app runs through intake → spec → build → integrate → review → slo
   - realtime coalescing;
   - the PORTFOLIO.md debounce;
   - deadlines (planner wait);
-  - the 5-minute watchdog, which reads only Helm's own `nodes` table (DECISIONS 14).
+  - the 5-minute watchdog. It finds stalls from Helm's own `nodes` table (DECISIONS 14), and at most every 30 minutes it reads each app's worktrees and branches through the host entry (local git only) so the Git agent hears when an app is over its limits or a disk runs low. It never reads remotes; the GitHub view does that only when the human opens it.
 
 ## Tests
 

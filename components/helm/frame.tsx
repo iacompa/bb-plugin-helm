@@ -326,7 +326,7 @@ function TopBar() {
           <Ic name="PanelRight" />
         </button>
       ) : null}
-      <button type="button" className="btn primary" onClick={() => h.setWizardOpen(true)} data-testid="new-run">
+      <button type="button" className="btn primary" onClick={() => h.setWizardOpen(true)} title="New run" aria-label="New run" data-testid="new-run">
         <Ic name="Plus" size="sm" /> <span className="btn-lbl">New run</span>
       </button>
     </header>
@@ -364,7 +364,8 @@ function RunPopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => v
     setBusy(true);
     try {
       // a refusal (models, folders) is shown by useStartRun and in the start bar
-      if (!(await startRun(run.id, run.dryRun))) onClose();
+      // after a dry run, Start is the real start
+      if (!(await startRun(run.id, false))) onClose();
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -373,20 +374,26 @@ function RunPopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => v
   };
   const finish = async (status: "done" | "cancelled") => {
     if (!run) return;
-    const ok = await askConfirm({
-      title: status === "done" ? "Mark this run done?" : "End this run?",
-      body: status === "done" ? "The run is closed as done. Agents that are still working are stopped." : "Every agent still working is stopped and nothing new is spawned. The ledger and evidence stay.",
-      ok: status === "done" ? "Mark done" : "End run",
-      danger: status !== "done",
-    });
+    const plan = run.status === "planning";
+    const ok = await askConfirm(
+      plan
+        ? { title: "Discard this plan?", body: "Nothing was spawned. The plan is closed as cancelled and its tab is closed.", ok: "Discard", danger: true }
+        : {
+            title: status === "done" ? "Mark this run done?" : "End this run?",
+            body: status === "done" ? "The run is closed as done. Agents that are still working are stopped." : "Every agent still working is stopped and nothing new is spawned. The ledger and evidence stay.",
+            ok: status === "done" ? "Mark done" : "End run",
+            danger: status !== "done",
+          },
+    );
     if (!ok) return;
     setBusy(true);
     try {
       await h.rpc.call("run_finish", { runId: run.id, status });
-      toast.success(status === "done" ? "Run marked done" : "Run ended");
+      toast.success(plan ? "Plan discarded" : status === "done" ? "Run marked done" : "Run ended");
       h.refetch();
       h.refreshRuns();
       onClose();
+      if (plan) h.closeTab(run.id);
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -573,7 +580,7 @@ function LimitsEditor() {
           <button type="button" className="btn sm primary" disabled={busy} onClick={() => void apply()} data-testid="apply-limits">
             {busy ? "Applying…" : "Apply now"}
           </button>
-          <button type="button" className="btn sm ghost" disabled={busy} onClick={() => { setConc(run.concurrency); setCap(Math.round(run.budgetCap)); }}>
+          <button type="button" className="btn sm ghost" disabled={busy} onClick={() => { setConc(run.concurrency); setCap(Math.round(run.budgetCap)); setAuto(runAutonomy); }}>
             Reset
           </button>
         </div>
@@ -618,7 +625,9 @@ function PermPopover({ anchor, onClose }: { anchor: HTMLElement; onClose: () => 
     if (!draft) return;
     setBusy(true);
     try {
-      const r = (await h.rpc.call("settings_setPermissions", draft)) as Perms;
+      // exactly the five roles the setting has (the schema refuses any other key)
+      const modes = Object.fromEntries(PERM_ROLES.filter(([k]) => draft.modes[k]).map(([k]) => [k, draft.modes[k]])) as Record<"orchestrator" | "manager" | "lead" | "specialist" | "gate", PermMode>;
+      const r = (await h.rpc.call("settings_setPermissions", { modes, approvePrompts: draft.approvePrompts })) as Perms;
       setSaved(r);
       setDraft(r);
       toast.success("Permissions saved", { description: "New agents start with these modes. Running agents keep the mode they started with." });

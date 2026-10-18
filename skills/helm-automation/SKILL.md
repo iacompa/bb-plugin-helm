@@ -9,6 +9,8 @@ An excellent automation does the same correct thing whether it runs once, twice,
 
 Automations act on the outside world with nobody watching. Every rule below exists because an unattended job did something at 3 a.m. that no one could undo. Optimise for safety of effects first, then recoverability, then speed.
 
+**Where evidence goes.** `reports/automation/…` below means a `automation/` folder inside your own reports folder, the one in your BRIEF's write scope (`reports/core/automation/` for the Core builder; a solo lead may use `reports/automation/`). Never write outside your scope to follow a path in this skill.
+
 ---
 
 ## 1. Pin down the trigger and the contract first

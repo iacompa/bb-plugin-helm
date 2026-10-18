@@ -75,7 +75,7 @@ export async function runDoctor(bb: BbPluginApi, port: RealBB, repo: Repo, setti
     const c = repo.countErrors(Date.now() - 24 * 3600_000);
     add("errors", c.error === 0, c.error || c.warn ? `${c.error} errors, ${c.warn} warnings in the last 24 h — bb helm errors` : "none in the last 24 h");
   }
-  add("phase0", true, "spawn/lifecycle-owner/archive/re-parent behaviour verified on BB 0.46.1 (docs/VERIFY.md)");
+  add("bb.threads", true, "thread spawn, lifecycle owner, archive and re-parent behaviour checked against BB 0.46.1 (docs/VERIFY.md)");
 
   const ok = checks.every((c) => c.ok);
   const lines = [...checks.map((c) => `${c.ok ? "✓" : "✗"} ${c.id.padEnd(14)} ${c.detail}`), "", ok ? "Helm is ready." : "Some checks failed; see above."];

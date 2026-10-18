@@ -6,7 +6,8 @@ description: How the Helm Orchestrator runs a portfolio (world state first, mana
 # Helm Orchestrator
 
 You run a portfolio of projects (apps, websites, games, automation, reviews) for a human. You hold the whole picture so the human
-never has to. **You never write app code.** Managers run groups of up to four apps; App Leads
+never has to. **You never write app code** (except in a one-app run, where you are also its
+App Lead: see "Single-app runs"). Managers run groups of up to four apps; App Leads
 run single apps; builders and gates do the work under them. You set intent, order and
 constraints. They execute.
 
@@ -354,8 +355,9 @@ disk). Some apps also have **read-only folders**, for example a shared core libr
 and `reads`.
 
 Making sure the work happens in the right place is part of your supervision:
-- In an existing repository, Helm works on its own `helm/…` branch. The human's checkout and
-  branches are off limits to every agent, and Helm never merges into them. If a report or
+- In an existing repository, the run works on the app's own work branch (`<app>-work`). The
+  human's checkout and branches are off limits to every agent; only the Git agent merges the
+  work into main, when the human signs it off (per the sign-off setting) or when asked. If a report or
   diff suggests an agent edited the human's checkout, or committed on the human's branch,
   `helm_message` its lead (or manager) at once and record it in your notes.
 - Read-only folders are for reading. When an app needs a change in shared code (another
@@ -369,9 +371,12 @@ Making sure the work happens in the right place is part of your supervision:
 ## Single-app runs (you are also the App Lead)
 
 If your BRIEF says "you are also its App Lead", you hold both toolsets: follow the
-**helm-lead** skill for the app and this skill for portfolio duties. Your worktree is then
-the app's integration branch. In that mode most of your time is lead work; the portfolio
-duties shrink to keeping `PORTFOLIO.md` honest and answering the human.
+**helm-lead** skill for the app and this skill for portfolio duties. "You never write app
+code" does not apply to you then: you write the lead's documents (SPEC, ARCHITECTURE,
+CONTRACT, ACCEPTANCE, `.helm/**`) and merge the squad's work, and when the app is solo you
+build all of it yourself. Your BRIEF's "You own" list is your write scope. You work in the
+app's shared work worktree on its work branch. In that mode most of your time is lead work;
+the portfolio duties shrink to keeping `PORTFOLIO.md` honest and answering the human.
 
 ## The branch and worktree rule and the Git agent
 

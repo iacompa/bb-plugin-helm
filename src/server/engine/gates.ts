@@ -13,10 +13,18 @@ import { validateVerdict, blocksReady, type Verdict, shaMatches } from "../domai
 import { admissibleSpecialists, nodeIdFor, squadFor, type SquadMember } from "../domain/topology.ts";
 import { roleLabel } from "../domain/roles.ts";
 import { bottomUp } from "../domain/directives.ts";
+import { redactSecrets } from "../domain/slop/rules.ts";
 
 const PLACEHOLDER_CMD = /set the (build|lint|test) command|^echo\s+['"]?set the/i;
 
 // ───────────────────────────── helpers ─────────────────────────────
+
+/** A file an agent names inside its worktree; null for absolute paths or paths that climb out with "..". */
+function inTree(wt: string, ref: string): string | null {
+  const r = ref.trim().replace(/^\.\//, "");
+  if (!r || r.startsWith("/") || /^[A-Za-z]:/.test(r) || r.split(/[\\/]/).includes("..")) return null;
+  return `${wt}/${r}`;
+}
 
 export async function nodeWorktree(e: Engine, n: NodeInfo): Promise<string | null> {
   const envId = e.repo.nodeEnvironment(n.runId, n.id);
@@ -115,7 +123,8 @@ export async function verifyEvidence(e: Engine, n: NodeInfo, evidence: EvidenceR
       else verified.push({ kind: "check", ref });
     } else if (ev.kind === "report") {
       const wt = await nodeWorktree(e, n);
-      const c = wt ? (await host.readFile({ path: `${wt}/${ref.replace(/^\.\//, "")}` })).content : null;
+      const at = wt ? inTree(wt, ref) : null;
+      const c = at ? (await host.readFile({ path: at, root: wt! })).content : null;
       if (c === null) problems.push(`report ${ref} not found in your worktree`);
       else verified.push({ kind: "report", ref });
     }
@@ -291,7 +300,8 @@ async function admitSquadMembers(e: Engine, runId: string, app: AppInfo, wanted:
 /** A builder finished: start deferred squad members the lead already asked for (C7). */
 async function admitDeferred(e: Engine, n: NodeInfo): Promise<void> {
   const app = appOf(e, n);
-  if (!app) return;
+  // members start only while there is building to do, never in Integrate or under review
+  if (!app || (app.stage !== "build" && app.stage !== "fix")) return;
   const pending = squadNodes(e, n.runId, app).filter((x) => x.status === "planned" && e.repo.getMeta(`squad:${n.runId}:${x.id}`) === "requested");
   if (pending.length) await admitSquadMembers(e, n.runId, app, pending);
 }
@@ -301,13 +311,15 @@ export function publishContract(e: Engine, lead: NodeInfo, version: number, summ
   if (!app) return "No app for this lead.";
   const extra = e.repo.appExtra(lead.runId, app.id);
   if (version <= extra.contractVersion) return `CONTRACT is already v${extra.contractVersion}; publish v${extra.contractVersion + 1} or later.`;
+  const shared = !!e.workTree(lead.runId, app.id);
+  const get = shared ? "You share the work worktree, so you already have it: re-read CONTRACT.md" : `Merge ${extra.integrationBranch ?? "the integration branch"} into your branch locally (no fetch or pull from a remote), re-read CONTRACT.md`;
   e.repo.tx(() => {
     e.repo.updateApp(lead.runId, app.id, { contractVersion: version });
     e.repo.event(lead.runId, lead.id, "contract", `CONTRACT v${version}: ${summary.slice(0, 200)}`);
     for (const b of squadNodes(e, lead.runId, app).filter((x) => x.threadId && !["done", "idle", "failed"].includes(x.status)))
-      e.sendFromHelm(lead.runId, b.id, `CONTRACT.md is now v${version} (${summary.slice(0, 300)}). Pull the integration branch and adapt; reply with helm_report if this changes your plan.`, { key: `contract:${lead.runId}:${app.id}:${version}:${b.id}`, senderNodeId: lead.id, kind: "message", commsKind: "contract" });
+      e.sendFromHelm(lead.runId, b.id, `CONTRACT.md is now v${version} (${summary.slice(0, 300)}). ${get} and adapt; reply with helm_report if this changes your plan.`, { key: `contract:${lead.runId}:${app.id}:${version}:${b.id}`, senderNodeId: lead.id, kind: "message", commsKind: "contract" });
   });
-  void admitDeferred(e, lead);
+  e.fire(admitDeferred(e, lead), `admit deferred members of ${lead.id}`);
   return `CONTRACT v${version} published; ${squadNodes(e, lead.runId, app).filter((x) => x.threadId).length} builders notified.`;
 }
 
@@ -388,7 +400,12 @@ export async function stageRequest(e: Engine, lead: NodeInfo, to: Stage, evidenc
   let pending: string[] = [];
   // a builder the lead released, or one the human stopped, is not waited for
   const outOfPlay = (b: NodeInfo) => b.status === "idle" || e.repo.getMeta(`squad:${lead.runId}:${b.id}`) === "released";
-  if (to === "integrate" && app.stage === "build") pending = builders.filter((b) => !outOfPlay(b) && !e.repo.lastVerifiedDone(lead.runId, b.id)).map((b) => e.label(b));
+  if (to === "integrate" && app.stage === "build") {
+    pending = builders.filter((b) => !outOfPlay(b) && !e.repo.lastVerifiedDone(lead.runId, b.id)).map((b) => e.label(b));
+    // members the lead asked for that are still waiting for capacity count too (release them if SPEC no longer needs them)
+    for (const b of squadNodes(e, lead.runId, app).filter((x) => x.status === "planned" && !x.threadId && e.repo.getMeta(`squad:${lead.runId}:${x.id}`) === "requested"))
+      pending.push(`${e.label(b)} (not started yet; release it with helm_spawn_squad if SPEC no longer needs it)`);
+  }
   if (to === "integrate" && app.stage === "fix") {
     const open = e.repo.findings(lead.runId, app.id).filter((f) => f.status === "open" && f.round === app.fixRound && (f.severity === "blocker" || f.severity === "major"));
     for (const f of open) {
@@ -437,7 +454,8 @@ export async function recordCheck(e: Engine, n: NodeInfo, input: { name: string;
   if (!app) return "No app for this node.";
   if (!input.command.trim()) return "Rejected: a check needs the command that ran.";
   const wt = await nodeWorktree(e, n);
-  const out = wt ? (await e.host(n.runId).readFile({ path: `${wt}/${input.outputRef.replace(/^\.\//, "")}` })).content : null;
+  const outAt = wt ? inTree(wt, input.outputRef) : null;
+  const out = outAt ? (await e.host(n.runId).readFile({ path: outAt, root: wt! })).content : null;
   const head = await integrationHead(e, app);
   const v = verifyCheckClaim({ exitCode: input.exitCode, commit: input.commit }, out, head);
   if (!v.ok) return `Rejected: ${v.reason}.`;
@@ -472,7 +490,9 @@ export async function slopScan(e: Engine, n: NodeInfo, paths: string[] | undefin
  * Open zero-tolerance scan findings block Ready like any other (§5.3).
  */
 export function syncScanFindings(e: Engine, runId: string, appId: string, head: string, found: ScanOutput["findings"]): void {
-  const key = (f: { rule: string; path: string; quote: string }) => `${f.rule}|${f.path}|${f.quote.trim()}`;
+  // secrets are stored redacted; older rows may hold the raw value, so both sides compare redacted (waivers survive)
+  const quoteOf = (f: { rule: string; quote: string }) => (f.rule.startsWith("S6") ? redactSecrets(f.quote.trim()) : f.quote.trim());
+  const key = (f: { rule: string; path: string; quote: string }) => `${f.rule}|${f.path}|${quoteOf(f)}`;
   const existing = e.repo.findings(runId, appId).filter((f) => f.gate === "scan");
   const now = new Set(found.map(key));
   for (const f of existing) if (f.status === "open" && !now.has(key(f))) e.repo.updateFinding(runId, f.id, { status: "fixed" });
@@ -480,7 +500,7 @@ export function syncScanFindings(e: Engine, runId: string, appId: string, head: 
   for (const f of found) {
     if (known.has(key(f))) continue;
     known.add(key(f));
-    e.repo.insertFinding({ id: `F-${e.repo.nextSeq(runId, "finding")}`, runId, appId, gate: "scan", rule: f.rule, severity: f.severity, path: f.path, line: f.line, quote: f.quote.slice(0, 200), why: f.why, fix: f.fix, commitSha: head, status: "open", round: 0, ownerNodeId: null, waiverDirectiveId: null, createdAt: e.now() });
+    e.repo.insertFinding({ id: `F-${e.repo.nextSeq(runId, "finding")}`, runId, appId, gate: "scan", rule: f.rule, severity: f.severity, path: f.path, line: f.line, quote: quoteOf(f).slice(0, 200), why: f.why, fix: f.fix, commitSha: head, status: "open", round: 0, ownerNodeId: null, waiverDirectiveId: null, createdAt: e.now() });
   }
 }
 
@@ -495,6 +515,13 @@ export async function enterGate(e: Engine, runId: string, appId: string, gate: "
   if (!head) return;
   let scanner: string | null = null;
   let scanFindings: ScanOutput["findings"] | null = null;
+  // in the shared work worktree, what is already uncommitted belongs to the squad, not to the gate
+  const work = e.workTree(runId, appId);
+  if (work) {
+    const st = await e.host(runId).status({ path: work }).catch(() => null);
+    // a status git could not read leaves the squad's files unknown: the verdict then skips the dirty check
+    e.repo.setMeta(`gate-dirty:${runId}:${g.id}`, st && !st.error && !st.dirtyCount ? JSON.stringify(st.dirty) : "unknown");
+  }
   if (gate === "slop" && app.repoPath) {
     const res = await e.host(runId).scan({ repo: app.repoPath, ref: head, history: true });
     scanFindings = res.findings;
@@ -517,25 +544,61 @@ export async function enterGate(e: Engine, runId: string, appId: string, gate: "
   await e.pump(runId);
 }
 
+/** Gates whose verdict is being checked: a retry after a timeout must not be accepted twice (two fix rounds). */
+const JUDGING = new Set<string>();
+
 export async function verdict(e: Engine, gate: NodeInfo, v: Verdict): Promise<string> {
+  const key = `${gate.runId}:${gate.id}`;
+  if (JUDGING.has(key)) return "Your previous helm_verdict is still being checked; wait for its result instead of sending another.";
+  JUDGING.add(key);
+  try {
+    return await judge(e, gate, v);
+  } finally {
+    JUDGING.delete(key);
+  }
+}
+
+async function judge(e: Engine, gate: NodeInfo, v: Verdict): Promise<string> {
   const app = appOf(e, gate);
   if (!app?.repoPath) return "Rejected: no app repository.";
   const gateKind = gate.role === "review" ? "review" : "slop";
   if (v.gate !== gateKind) return `Rejected: you are the ${gateKind} gate; set gate to "${gateKind}".`;
-  if (v.appId !== app.id) return `Rejected: appId must be "${app.id}".`;
-  if (app.stage !== gateKind) return `Rejected: ${app.name} is in ${stageLabel(app.stage)}, not ${stageLabel(gateKind)}.`;
+  // a gate judges one app, so its id or display name (any case) both name it
+  const said = v.appId.trim().toLowerCase();
+  if (said !== app.id.toLowerCase() && said !== app.name.toLowerCase()) return `Rejected: appId must be "${app.id}" (${app.name}, the app you judge), not "${v.appId.slice(0, 60)}".`;
+  if (app.stage !== gateKind) {
+    const last = e.repo.verdicts(gate.runId, app.id).find((x) => x.gate === gateKind && x.accepted);
+    return last
+      ? `Nothing to do: your ${last.verdict} verdict on ${last.commit.slice(0, 9)} was already accepted and ${app.name} has moved on to ${stageLabel(app.stage)}. Helm messages you if there is a new commit to judge.`
+      : `Rejected: ${app.name} is in ${stageLabel(app.stage)}, not ${stageLabel(gateKind)}. Helm messages you when there is a commit to judge.`;
+  }
   const head = e.repo.appExtra(gate.runId, app.id).integrationHead;
   if (!head) return "Rejected: no integration HEAD recorded.";
+  // a fail starts a fix round; minor and nit findings alone ride along with a pass
+  if (v.verdict === "fail" && !v.findings.some((f) => f.severity === "blocker" || f.severity === "major") && !v.checks.some((c) => !c.ok))
+    return "Rejected: a fail needs at least one blocker or major finding, or a failing check. With only minor and nit findings, submit a pass that lists them.";
   const host = e.host(gate.runId);
   const wt = await nodeWorktree(e, gate);
-  const st = wt ? await host.status({ path: wt }) : null;
+  const st0 = wt ? await host.status({ path: wt }) : null;
+  // in the shared work worktree, files already uncommitted when the gate was engaged belong to the squad,
+  // and HEAD is the lead's to move (a stale commit is caught by the integration-HEAD check)
+  const shared = e.workTree(gate.runId, app.id);
+  const inShared = !!wt && !!shared && wt.replace(/\/+$/, "") === shared.replace(/\/+$/, "");
+  let before: string[] | null = [];
+  try {
+    before = JSON.parse(e.repo.getMeta(`gate-dirty:${gate.runId}:${gate.id}`) ?? "[]") as string[];
+  } catch {
+    before = null;
+  }
+  const st = st0?.error ? null : st0 && inShared ? (before ? { ...st0, head: null, dirty: st0.dirty.filter((p) => !before!.includes(p)) } : null) : st0;
   const res = await validateVerdict(v, {
     integrationHead: head,
     readAt: async (commit, path) => (await host.fileAt({ repo: app.repoPath!, ref: commit, path, maxBytes: 4_000_000 })).content,
     refExists: async (ref) => {
       const m = ref.match(/^(.+?):(\d+)$/);
       if (m) return (await host.fileAt({ repo: app.repoPath!, ref: head, path: m[1] })).content !== null;
-      if (wt && (await host.readFile({ path: `${wt}/${ref.replace(/^\.\//, "")}` })).content !== null) return true;
+      const at = wt ? inTree(wt, ref) : null;
+      if (at && (await host.readFile({ path: at, root: wt! })).content !== null) return true;
       return (await host.fileAt({ repo: app.repoPath!, ref: head, path: ref })).content !== null;
     },
     worktree: st ? { clean: st.clean, head: st.head, dirtyPaths: st.dirty } : undefined,
@@ -570,7 +633,7 @@ export async function verdict(e: Engine, gate: NodeInfo, v: Verdict): Promise<st
   e.repo.tx(() => {
     for (const f of v.findings.filter((x) => located.has(x.id))) {
       const fid = `F-${e.repo.nextSeq(gate.runId, "finding")}`;
-      const fi: FindingInfo = { id: fid, runId: gate.runId, appId: app.id, gate: gateKind, rule: f.rule, severity: f.severity, path: f.path, line: f.line, quote: f.quote, why: f.why, fix: f.fix, commitSha: head, status: "open", round: round + 1, ownerNodeId: null, waiverDirectiveId: null, createdAt: e.now() };
+      const fi: FindingInfo = { id: fid, runId: gate.runId, appId: app.id, gate: gateKind, rule: f.rule, severity: f.severity, path: f.path, line: f.line, quote: f.rule.startsWith("S6") ? redactSecrets(f.quote) : f.quote, why: f.why, fix: f.fix, commitSha: head, status: "open", round: round + 1, ownerNodeId: null, waiverDirectiveId: null, createdAt: e.now() };
       e.repo.insertFinding(fi);
     }
     e.repo.updateNode(gate.runId, gate.id, { status: "waiting" });
@@ -630,7 +693,17 @@ async function tryReady(e: Engine, runId: string, appId: string, verdictId: stri
   });
   if (!r.ok) {
     const lead = e.leadOf(runId, appId);
-    if (lead) e.repo.event(runId, lead.id, "ready.blocked", r.reason);
+    if (lead) {
+      // tell the lead once per commit and reason: an event alone left apps stuck with nobody aware
+      const next = zt
+        ? " Fix them on the integration branch (helm_slop_scan lists them); a secret found only in git history clears only when the human waives it as rotated, so raise a helm_need for that."
+        : r.reason.startsWith("Deterministic checks") ? " Re-run the checks on this commit through the wrapper and record them with helm_record_check." : "";
+      e.repo.tx(() => {
+        e.repo.event(runId, lead.id, "ready.blocked", r.reason);
+        e.sendFromHelm(runId, lead.id, `${app.name} cannot move to Ready on ${head?.slice(0, 9) ?? "this commit"}: ${r.reason}${next}`, { key: `ready-blocked:${runId}:${appId}:${head}:${r.reason}` });
+      });
+      e.outbox.kick();
+    }
     return;
   }
   const ciPlatforms = app.kind === "review" ? [] : app.platforms.filter((p) => p === "win" || p === "and");

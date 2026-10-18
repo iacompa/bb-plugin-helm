@@ -821,9 +821,11 @@ export function GraphView({ active }: { active: boolean }) {
                     <Ic name="Brain" size="sm" /> Model
                   </button>
                   {abarTarget.status === "planned" ? (
-                    <button type="button" onClick={() => select(abarTarget.id, { tab: "direct", dtype: "spawn" })}>
-                      <Ic name="Play" size="sm" /> Spawn now
-                    </button>
+                    data.run.status === "running" ? (
+                      <button type="button" onClick={() => select(abarTarget.id, { tab: "direct", dtype: "spawn" })}>
+                        <Ic name="Play" size="sm" /> Spawn now
+                      </button>
+                    ) : null
                   ) : ["done", "idle", "failed"].includes(abarTarget.status) ? null : (
                     <button type="button" data-testid="bar-pause" onClick={() => select(abarTarget.id, { tab: "direct", dtype: abarTarget.status === "paused" ? "resume" : "pause" })}>
                       <Ic name={abarTarget.status === "paused" ? "Play" : "Pause"} size="sm" /> {abarTarget.status === "paused" ? "Resume" : "Pause"}
