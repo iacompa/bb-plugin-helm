@@ -358,7 +358,7 @@ export class FakeGit {
         const r = this.repos.get(repo);
         const theirs = this.remotes.get(repo);
         const base = { repo, remotes: theirs ? ["origin"] : [], remote: theirs ? "origin" : null, url: theirs ? "https://github.com/example/app.git" : null, web: theirs ? "https://github.com/example/app" : null, defaultBranch: theirs ? "main" : null, error: r ? null : `the repository folder is missing: ${repo}` };
-        if (!r) return { ...base, branches: [] };
+        if (!r) return { ...base, branches: [], unpushed: null };
         const names = [...new Set([...r.refs.keys(), ...(theirs?.keys() ?? [])])];
         const branches = names.map((name) => {
           const l = r.refs.get(name) ?? null;
@@ -366,7 +366,7 @@ export class FakeGit {
           const state = l && t ? (l === t ? "synced" : r.commits.has(t) ? "ahead" : "newer") : l ? "local" : "remote";
           return { name, local: l, remote: t, state: state as "synced" | "ahead" | "newer" | "local" | "remote", ahead: state === "synced" ? 0 : state === "ahead" || state === "local" ? 1 : null, behind: state === "synced" || state === "ahead" ? 0 : null, at: null };
         });
-        return { ...base, branches };
+        return { ...base, branches, unpushed: branches.filter((b) => b.state === "ahead" || b.state === "local").length };
       },
       reveal: async ({ path }: { path: string }) => {
         this.revealed.push(path);

@@ -40,7 +40,7 @@ export interface GhApp {
   counts: {
     /** The same commit here and on the remote. */
     synced: number;
-    /** Branches with commits the remote does not have, and how many commits. */
+    /** Branches with commits the remote does not have, and how many commits in all (each counted once). */
     toPush: number;
     commitsToPush: number;
     /** Branches only here whose commits are all on the remote already (nothing would be lost). */
@@ -157,7 +157,8 @@ export class GithubView {
           counts: {
             synced: branches.filter((b) => b.state === "synced").length,
             toPush: pushable.length,
-            commitsToPush: pushable.reduce((n, b) => n + (b.ahead ?? 0), 0),
+            // each commit once (branches share commits); per-branch counts are in the branch table
+            commitsToPush: full?.unpushed ?? pushable.reduce((n, b) => n + (b.ahead ?? 0), 0),
             safeHere: branches.filter((b) => b.state === "local" && b.ahead === 0).length,
             onlyRemote: branches.filter((b) => b.state === "remote").length,
             newer: branches.filter((b) => b.state === "behind" || b.state === "newer" || b.state === "diverged").length,

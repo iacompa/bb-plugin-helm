@@ -62,6 +62,7 @@ test("remoteStatus: same, ahead, newer, only here and only on the remote, withou
   assert.equal(by.spec.state, "local");
   assert.equal(by.spec.ahead, 0, "its commit is on the remote already");
   assert.equal(by.feature.state, "remote");
+  assert.equal(r.unpushed, 2, "two and three, each counted once though work and bb/agent share two");
   // nothing was downloaded
   assert.throws(() => git(a, "cat-file", "-e", `${by.main.remote}^{commit}`));
   // no remote at all

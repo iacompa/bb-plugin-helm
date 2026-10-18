@@ -38,6 +38,8 @@ export interface RemoteStatus {
   web: string | null;
   defaultBranch: string | null;
   branches: RemoteBranch[];
+  /** Commits on this computer's branches that no remote branch has, each counted once (null: unknown). */
+  unpushed: number | null;
   error: string | null;
 }
 
@@ -89,7 +91,7 @@ export function createRemoteOps() {
   return {
     /** What the repository's remote has compared with this computer (branch names and commits only; nothing is downloaded). */
     async remoteStatus({ repo, remote: want }: { repo: string; remote?: string }): Promise<RemoteStatus> {
-      const out: RemoteStatus = { repo, remotes: [], remote: null, url: null, web: null, defaultBranch: null, branches: [], error: null };
+      const out: RemoteStatus = { repo, remotes: [], remote: null, url: null, web: null, defaultBranch: null, branches: [], unpushed: null, error: null };
       const dir = resolve(repo);
       if (!existsSync(dir)) return { ...out, error: `the repository folder is missing: ${repo}` };
       const rs = await git(dir, ["remote"]);
@@ -106,6 +108,7 @@ export function createRemoteOps() {
       if (!remote) {
         out.branches = [...local].map(([name, l]) => ({ name, local: l.sha, remote: null, state: "local" as const, ahead: null, behind: null, at: l.at }));
         await countUnpushed(dir, out.branches, []);
+        out.unpushed = await countAll(dir, out.branches, []);
         return out;
       }
       out.remote = remote;
@@ -163,9 +166,19 @@ export function createRemoteOps() {
         out.branches.push(b);
       }
       await countUnpushed(dir, out.branches, [...known]);
+      out.unpushed = await countAll(dir, out.branches, [...known]);
       return out;
     },
   };
+}
+
+/** Every local branch's commits that are on none of the remote's branches, each counted once. */
+async function countAll(dir: string, branches: RemoteBranch[], onRemote: string[]): Promise<number | null> {
+  const heads = [...new Set(branches.map((b) => b.local).filter((x): x is string => !!x))].slice(0, 300);
+  if (!heads.length) return 0;
+  const c = await git(dir, ["rev-list", "--count", ...heads, ...onRemote.slice(0, 300).map((s) => `^${s}`)]);
+  const n = Number(c.stdout.trim());
+  return c.code === 0 && Number.isFinite(n) ? n : null;
 }
 
 /** A branch only here: how many of its commits are on none of the remote's branches. */

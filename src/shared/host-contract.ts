@@ -89,6 +89,7 @@ export const HOST_CONTRACT = defineRpcContract({
       web: z.string().nullable(),
       defaultBranch: z.string().nullable(),
       branches: z.array(z.object({ name: z.string(), local: z.string().nullable(), remote: z.string().nullable(), state: z.enum(["synced", "ahead", "behind", "diverged", "newer", "local", "remote"]), ahead: z.number().nullable(), behind: z.number().nullable(), at: z.number().nullable() })),
+      unpushed: z.number().nullable(),
       error: z.string().nullable(),
     }),
   },
