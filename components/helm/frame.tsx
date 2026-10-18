@@ -3,7 +3,7 @@
 // first-run states and global shortcuts.
 import { Component, Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ErrorInfo, type ReactNode } from "react";
 import { toast } from "sonner";
-import { useRealtimeConnectionState } from "@get-bb/plugin-sdk/app";
+import { useBbNavigate, useRealtimeConnectionState } from "@get-bb/plugin-sdk/app";
 import { HelmProvider, popEscape, useHelm } from "./ctx.tsx";
 import type { View } from "./types.ts";
 import { PROVIDER_LABEL, STAGES, STAGE_IDX, agoOf, clockOf, errMsg, fmtUnits, forecastNodes, plural, providerVar } from "./format.ts";
@@ -214,6 +214,18 @@ function TopBar() {
   const conn = useRealtimeConnectionState();
   const [pop, setPop] = useState<{ kind: "run" | "cap" | "perm"; el: HTMLElement } | null>(null);
   const toggle = (kind: "run" | "cap", el: HTMLElement) => setPop((p) => (p && p.kind === kind ? null : { kind, el }));
+  const nav = useBbNavigate();
+  const openSims = async () => {
+    try {
+      const r = (await h.rpc.call("sim_open", { runId: data?.run?.id ?? null })) as { url: string; threadId: string | null; message: string };
+      if (r.threadId) {
+        nav.toThread(r.threadId, { split: true });
+        toast.success("Simulators opened", { description: "In the Orchestrator thread's browser tab." });
+      } else if (r.url && !nav.openUrl(r.url)) window.open(r.url, "_blank", "noopener");
+    } catch (err) {
+      toast.error("Could not open the simulators", { description: errMsg(err) });
+    }
+  };
   const run = data?.run ?? null;
   const nodes = useMemo(() => (data ? data.nodeOrder.map((id) => data.nodes[id]) : []), [data, h.rev]); // eslint-disable-line react-hooks/exhaustive-deps
   const open = data ? openNeeds(data).length : 0;
@@ -305,6 +317,10 @@ function TopBar() {
           </span>
         </>
       ) : null}
+      <button type="button" className="btn" onClick={() => void openSims()} title="Simulators: watch and drive the apps in BB's browser (iOS, Android, macOS; Windows screenshots)" aria-label="Simulators" data-testid="simulators">
+        <Ic name="Smartphone" size="sm" />
+        <span className="btn-lbl"> Simulators</span>
+      </button>
       <button type="button" className="btn" onClick={(e) => setPop(pop?.kind === "perm" ? null : { kind: "perm", el: e.currentTarget })} title="Permissions: what agents may do, and who approves their prompts" aria-label="Permissions" aria-expanded={pop?.kind === "perm"} data-testid="permissions">
         <Ic name="SecurityCheck" size="sm" />
         <span className="btn-lbl"> Permissions</span>

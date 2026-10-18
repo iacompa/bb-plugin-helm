@@ -354,6 +354,21 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             return out(i.options.json, { run: r }, line(r));
           }),
       }),
+      sim: cliCommand({
+        summary: "Open the simulator view (iOS, Android, macOS; Windows screenshots) in BB's in-app browser, or print its URL",
+        options: { run: RUN, app: { type: "string", description: "App id to show first" }, json: JSON_OPT },
+        run: (i) =>
+          guard(async () => {
+            let run: { id: string } | null = null;
+            try {
+              run = runOf(i.options.run);
+            } catch (err) {
+              if (i.options.run) throw err;
+            }
+            const r = await svc.openSimulators(run?.id ?? null, i.options.app ?? null);
+            return out(i.options.json, r, `${r.message}\n${r.url}`);
+          }),
+      }),
       refresh: cliCommand({
         summary: "Bring a running run up to the installed Helm version: rewrite briefs and restart live agents so they load the new skills, tools and prompts",
         options: { run: RUN, yes: { type: "boolean", description: "Confirm" }, json: JSON_OPT },

@@ -10,7 +10,7 @@ type Sdk = BbPluginApi["sdk"];
 type Handler = (e: HelmEvent) => void | Promise<void>;
 
 /** Host RPC budgets: git work is quick, a full scan of a big repo is not. */
-const HOST_TIMEOUT_MS: Partial<Record<keyof HostOps, number>> = { ensureRepo: 120_000, adoptRepo: 120_000, inspectPath: 90_000, scan: 300_000, probe: 60_000 };
+const HOST_TIMEOUT_MS: Partial<Record<keyof HostOps, number>> = { ensureRepo: 120_000, adoptRepo: 120_000, inspectPath: 90_000, scan: 300_000, probe: 60_000, simList: 45_000, simBoot: 90_000, simShutdown: 60_000, simBuilds: 60_000, simInstall: 300_000 };
 
 function textOf(blocks: ReadonlyArray<{ type: string; text?: string }> | null | undefined): string {
   return (blocks ?? [])

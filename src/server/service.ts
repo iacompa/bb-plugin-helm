@@ -166,6 +166,9 @@ export class HelmService {
     return this.permissions();
   }
 
+  /** Opens the simulator view in BB's in-app browser (set by the plugin factory). */
+  openSimulators: (runId?: string | null, appId?: string | null) => Promise<{ url: string; threadId: string | null; message: string }> = async () => ({ url: "", threadId: null, message: "The simulator view is not available here." });
+
   /** Restart a running run's live agents so they load the installed Helm version (skills, tools, prompt). */
   refresh(runId: string) {
     return refreshRun(this.engine, runId);

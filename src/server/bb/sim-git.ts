@@ -294,6 +294,15 @@ export class FakeGit {
         const want = paths?.length ? new Set(paths) : null;
         return { commit: sha, findings: want ? res.findings.filter((f) => want.has(f.path) || f.rule === "S6") : res.findings, filesScanned: res.filesScanned, shippedFiles: res.shippedFiles, exempted: res.exempted, unverified: res.unverified };
       },
+      // no simulators in the simulation
+      simList: async () => ({ host: "darwin", ios: [], and: [], tools: { simctl: false, adb: false, emulator: false, idb: false, screencapture: false } }),
+      simBoot: async () => ({ ok: false, message: "no simulators in the simulation" }),
+      simShutdown: async () => ({ ok: false, message: "no simulators in the simulation" }),
+      simFrame: async () => ({ data: null, mime: "", error: "not-booted" }),
+      simInput: async () => ({ ok: false, message: "no simulators in the simulation" }),
+      simBuilds: async () => ({ builds: [] }),
+      simInstall: async () => ({ ok: false, message: "no simulators in the simulation", match: null }),
+      simImage: async () => ({ data: null, mime: "" }),
       probe: async () => ({ platform: "darwin", home, git: "git version 2.50.0 (sim)", xcode: "Xcode 27.0 (sim)", swift: "Swift 6.3 (sim)", gradle: null, androidSdk: false, dotnet: null }),
     };
   }

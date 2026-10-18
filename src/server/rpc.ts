@@ -31,6 +31,7 @@ export function registerRpc(bb: BbPluginApi, svc: HelmService): void {
     run_setSlots: ({ runId, slots }) => svc.setSlots(runId, slots as SlotMap),
     run_readiness: ({ runId }) => svc.readiness(runId),
     settings_permissions: () => svc.permissions(),
+    sim_open: (i: { runId?: string | null; appId?: string | null }) => svc.openSimulators(i.runId, i.appId),
     settings_setPermissions: (input) => svc.setPermissions(input as never),
     run_setLimits: ({ runId, concurrency, budgetCap, autonomy }) => svc.setLimits(runId, { concurrency, budgetCap, autonomy }),
     run_start: ({ runId, dryRun }) => svc.start(runId, { dryRun }),

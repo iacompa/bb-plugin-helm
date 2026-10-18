@@ -23,5 +23,13 @@ export default experimental_defineHostEntry({
     log: (input) => ops.log(input),
     scan: (input) => ops.scan(input),
     probe: (input) => ops.probe(input),
+    simList: (input) => ops.simList(input),
+    simBoot: (input) => ops.simBoot(input),
+    simShutdown: (input) => ops.simShutdown(input),
+    simFrame: (input) => ops.simFrame(input),
+    simInput: (input) => ops.simInput(input),
+    simBuilds: (input) => ops.simBuilds(input),
+    simInstall: (input) => ops.simInstall(input),
+    simImage: (input) => ops.simImage(input),
   },
 });

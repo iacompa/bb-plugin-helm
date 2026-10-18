@@ -24,6 +24,7 @@ import { bindSettings } from "./src/server/settings.ts";
 import { PLANNER_CHANNEL, RUNS_CHANNEL } from "./src/shared/protocol.ts";
 import type { NodeInfo } from "./src/shared/types.ts";
 import { journaledHandlers, type RpcHandler } from "./src/server/journal.ts";
+import { openSimTab, registerSimView } from "./src/server/sim/routes.ts";
 
 /** Events that change what PORTFOLIO.md's machine block shows. */
 const PORTFOLIO_EVENTS = new Set(["stage.changed", "need.created", "need.resolved", "directive.created", "plan.changed", "spawns.paused"]);
@@ -66,6 +67,8 @@ export default async function plugin(bb: BbPluginApi) {
   installEventHandler(engine, { selfPluginIds: [bb.pluginId] });
   svc = new HelmService(engine);
   svc.writeSettings = settings.write;
+  registerSimView(bb, engine);
+  svc.openSimulators = (runId, appId) => openSimTab(bb, engine, runId, appId);
   const planner = new Planner(engine, (s) => bb.realtime.publish(PLANNER_CHANNEL, { id: s.id, status: s.status }));
   planner.install();
   svc.planner = planner;
