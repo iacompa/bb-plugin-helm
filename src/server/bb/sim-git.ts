@@ -218,7 +218,7 @@ export class FakeGit {
       },
       worktrees: async ({ repo }) => {
         const list = [...this.wts.values()].filter((w) => w.root === repo).sort((a, b) => Number(b.path === repo) - Number(a.path === repo));
-        return { worktrees: list.map((w) => ({ path: w.path, branch: w.detached ? null : w.branch, head: this.head(w), main: w.path === repo, dirty: this.statusOf(w).filter((p) => !p.startsWith("reports/")).length, missing: false })) };
+        return { worktrees: list.map((w) => ({ path: w.path, branch: w.detached ? null : w.branch, head: this.head(w), main: w.path === repo, dirty: this.statusOf(w).filter((p) => !p.startsWith("reports/")).length, missing: false })), branches: [...(this.repos.get(repo)?.refs.keys() ?? [])] };
       },
       ensureRepo: async ({ path, files, message }) => {
         let created = false;

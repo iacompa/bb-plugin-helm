@@ -34,8 +34,15 @@ export interface AppWorktrees {
   worktrees: WorktreeRow[];
   /** How many worktrees beyond the allowed two. */
   extra: number;
+  /** Branches besides main and the work branch that Helm's agents made (bb/…, helm/…): the Git agent removes them once merged. */
+  extraBranches: string[];
+  /** Other branches (the human's or another tool's): reported, never touched. */
+  otherBranches: string[];
   error: string | null;
 }
+
+/** Branches Helm's agents make (BB worktree branches, older Helm branches). */
+const AGENT_BRANCH = /^(bb|helm)\//;
 
 /** Which agents work in which folder (from their BB environments). */
 async function agentsByPath(e: Engine, nodes: NodeInfo[]): Promise<Map<string, string[]>> {
@@ -58,7 +65,7 @@ export async function appWorktrees(e: Engine, runId: string, opts: { appId?: str
   for (const app of apps) {
     const work = e.workTree(runId, app.id);
     const branch = e.repo.appExtra(runId, app.id).integrationBranch;
-    const row: AppWorktrees = { appId: app.id, name: app.name, repo: app.repoPath, work, branch, worktrees: [], extra: 0, error: null };
+    const row: AppWorktrees = { appId: app.id, name: app.name, repo: app.repoPath, work, branch, worktrees: [], extra: 0, extraBranches: [], otherBranches: [], error: null };
     out.push(row);
     if (!app.repoPath) continue;
     try {
@@ -66,6 +73,10 @@ export async function appWorktrees(e: Engine, runId: string, opts: { appId?: str
       const who = opts.status === false ? new Map<string, string[]>() : await agentsByPath(e, nodes.filter((n) => n.appId === app.id || (n.alsoLead && apps[0]?.id === app.id)));
       row.worktrees = res.worktrees.map((w) => ({ path: w.path, branch: w.branch, head: w.head, dirty: w.dirty, missing: w.missing, role: w.main ? "checkout" : w.path === work ? "work" : "extra", agents: who.get(w.path) ?? [] }));
       row.extra = Math.max(0, row.worktrees.length - MAX_WORKTREES);
+      const keep = new Set([branch, app.userBranch ?? "main", "main", "master"].filter(Boolean));
+      const rest = (res.branches ?? []).filter((b) => !keep.has(b));
+      row.extraBranches = rest.filter((b) => AGENT_BRANCH.test(b));
+      row.otherBranches = rest.filter((b) => !AGENT_BRANCH.test(b));
     } catch (err) {
       row.error = err instanceof Error ? err.message.slice(0, 200) : String(err);
     }
@@ -77,11 +88,17 @@ export async function appWorktrees(e: Engine, runId: string, opts: { appId?: str
 export function worktreesText(list: AppWorktrees[]): string {
   if (!list.length) return "No apps with repositories yet.";
   const over = list.filter((a) => a.extra > 0);
-  const lines = [over.length ? `${over.length} app(s) have more than ${MAX_WORKTREES} worktrees: ${over.map((a) => `${a.name} (${a.worktrees.length})`).join(", ")}.` : `Every app has at most ${MAX_WORKTREES} worktrees.`];
+  const branchy = list.filter((a) => a.extraBranches.length);
+  const lines = [
+    over.length ? `${over.length} app(s) have more than ${MAX_WORKTREES} worktrees: ${over.map((a) => `${a.name} (${a.worktrees.length})`).join(", ")}.` : `Every app has at most ${MAX_WORKTREES} worktrees.`,
+    branchy.length ? `${branchy.length} app(s) have agent branches besides main and the work branch: ${branchy.map((a) => `${a.name} (${a.extraBranches.length})`).join(", ")}.` : "No agent branches besides main and the work branches.",
+  ];
   for (const a of list) {
-    lines.push(`\n${a.name} (${a.appId}): ${a.repo ?? "no repository yet"} · integration branch ${a.branch ?? "not yet"}${a.work ? "" : a.repo ? " · no shared work worktree yet (one worktree per agent until consolidated)" : ""}`);
+    lines.push(`\n${a.name} (${a.appId}): ${a.repo ?? "no repository yet"} · work branch ${a.branch ?? "not yet"}${a.work ? "" : a.repo ? " · no shared work worktree yet (one worktree per agent until consolidated)" : ""}`);
     if (a.error) lines.push(`  could not list worktrees: ${a.error}`);
     for (const w of a.worktrees) lines.push(`  - ${w.role.padEnd(8)} ${w.path} · ${w.branch ?? "detached"} @ ${w.head?.slice(0, 9) ?? "?"}${w.missing ? " · MISSING on disk (git worktree prune)" : w.dirty ? ` · ${w.dirty} uncommitted` : " · clean"}${w.agents.length ? ` · agents: ${w.agents.join(", ")}` : ""}`);
+    if (a.extraBranches.length) lines.push(`  agent branches to remove once merged into the work branch (git branch -d, never -D): ${a.extraBranches.slice(0, 30).join(", ")}${a.extraBranches.length > 30 ? " …" : ""}`);
+    if (a.otherBranches.length) lines.push(`  other branches (the human's; leave them): ${a.otherBranches.slice(0, 20).join(", ")}${a.otherBranches.length > 20 ? " …" : ""}`);
   }
   return lines.join("\n");
 }
@@ -97,11 +114,12 @@ export async function auditWorktrees(e: Engine, runId: string): Promise<string[]
   if (e.now() - last < AUDIT_EVERY_MS) return [];
   e.repo.setMeta(`wt-audit-at:${runId}`, String(e.now()));
   const list = await appWorktrees(e, runId, { status: false });
-  const over = list.filter((a) => a.extra > 0);
-  const sig = over.map((a) => `${a.appId}:${a.worktrees.length}`).join(",");
+  const over = list.filter((a) => a.extra > 0 || a.extraBranches.length > 0);
+  const sig = over.map((a) => `${a.appId}:${a.worktrees.length}:${a.extraBranches.length}`).join(",");
   if (!over.length || e.repo.getMeta(`wt-alert:${runId}`) === sig) return over.map((a) => a.appId);
   e.repo.setMeta(`wt-alert:${runId}`, sig);
-  e.sendFromHelm(runId, GIT_ID, `Helm worktree check: ${over.map((a) => `${a.name} has ${a.worktrees.length} worktrees`).join("; ")} (the rule is ${MAX_WORKTREES}: the checkout and one shared work worktree). Call helm_worktrees, then bring each app back to two (helm_consolidate once the extra worktrees' work is committed and on the integration branch). Tell the human what you did.`, { key: `wt-alert:${runId}:${sig}` });
+  const what = (a: AppWorktrees) => [a.extra > 0 ? `${a.name} has ${a.worktrees.length} worktrees` : null, a.extraBranches.length ? `${a.name} has ${a.extraBranches.length} agent branch(es) besides main and ${a.branch ?? "its work branch"}` : null].filter(Boolean).join("; ");
+  e.sendFromHelm(runId, GIT_ID, `Helm worktree check: ${over.map(what).join("; ")} (the rule: two worktrees, the checkout and one shared work worktree; two branches, main and the work branch). Call helm_worktrees, then bring each app back to two: helm_consolidate once the extra worktrees' work is committed and on the work branch, and \`git branch -d\` for agent branches already merged into it. Your instructions on git are binding on every agent. Tell the human what you did.`, { key: `wt-alert:${runId}:${sig}` });
   return over.map((a) => a.appId);
 }
 

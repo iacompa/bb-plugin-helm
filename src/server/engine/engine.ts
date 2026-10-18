@@ -84,6 +84,18 @@ const STUDIO_DIR = "_studio";
 /** Beside each repository: the folder that holds its one shared work worktree. */
 export const WORK_DIR = ".helm-work";
 
+/** An app's work branch: with main, one of its only two branches. */
+export const workBranchName = (appId: string) => `${appId}-work`;
+
+/** The human's strict git policy, in every agent's brief (the Git agent enforces it). */
+export function gitRulesText(appBranch: string | null): string {
+  return [
+    `Every app has exactly two branches, its main branch and its work branch${appBranch ? ` (here \`${appBranch}\`)` : " (`<app>-work`)"}, and two worktrees, the human's checkout and one shared work worktree. All work happens on the work branch, in the work worktree.`,
+    "Never create a branch, a worktree or a clone, and never switch branches. Never merge into main and never push: only the Git agent does, when the human signs the work off or the Orchestrator or the app's lead asks it to.",
+    "The Git agent's instructions on branches, worktrees, merges and pushes are binding on you: they outrank earlier instructions on git. Do what it asks, or reply to it with exactly what would be lost.",
+  ].join(" ");
+}
+
 /** How to work in a worktree several agents share. */
 export const SHARED_WORKTREE_RULES =
   "Several agents work in this folder at once. Commit only your own files: `git add -- <paths in your scope>` then `git commit -m …`. Never run `git add -A`, `git add .`, `git commit -a`, `git stash`, `git reset --hard`, `git checkout -- .`, `git restore .`, `git clean`, a rebase, or switch branches: they would take or destroy other agents' work. Never create another worktree or clone. If git says `index.lock` exists, wait a few seconds and retry.";
@@ -289,10 +301,13 @@ export class Engine {
     return app.targetPath ? expandTilde(app.targetPath, home) : `${run.appsRoot}/${app.id}`;
   }
 
-  /** The branch Helm creates in an adopted repository; unique per run and app. */
-  helmBranchFor(run: RunInfo, app: AppInfo): string {
-    // the run id suffix keeps two runs with the same name from sharing a branch
-    return `helm/${slugify(run.name).slice(0, 24).replace(/-+$/, "") || "run"}-${run.id.slice(-6).toLowerCase()}/${app.id}`;
+  /**
+   * The app's work branch, `<app>-work`: with main, one of the app's only two branches. Every agent
+   * works on it; it reaches main only when the human approves (sign-off) or the Orchestrator or the
+   * app's lead asks the Git agent. A later run on the same repository continues the same branch.
+   */
+  helmBranchFor(_run: RunInfo, app: AppInfo): string {
+    return workBranchName(app.id);
   }
 
   /**
@@ -397,7 +412,7 @@ export class Engine {
       else if (info.gitRoot && !info.head) problems.push(`${app.name}: the repository at ${raw} has no commits yet. Commit something first, or name an empty folder.`);
       else if (info.gitRoot)
         notes.push(
-          `${app.name}: existing repository ${raw}${info.branch ? ` (on ${info.branch})` : ""}. When its wave is admitted Helm makes the branch ${this.helmBranchFor(run, app)} at your last commit; agents work in their own worktrees and never change your checkout or your branches.${info.dirty ? ` ${info.dirty} uncommitted change${info.dirty === 1 ? " is" : "s are"} NOT visible to agents: commit first if they should build on ${info.dirty === 1 ? "it" : "them"}.` : ""}`,
+          `${app.name}: existing repository ${raw}${info.branch ? ` (on ${info.branch})` : ""}. When its wave is admitted Helm makes its work branch ${this.helmBranchFor(run, app)} at your last commit (or continues it if it exists) and one work worktree beside the repository; agents never change your checkout, and only the Git agent merges into main, when you sign off.${info.dirty ? ` ${info.dirty} uncommitted change${info.dirty === 1 ? " is" : "s are"} NOT visible to agents: commit first if they should build on ${info.dirty === 1 ? "it" : "them"}.` : ""}`,
         );
       else if (info.exists && !info.empty)
         problems.push(`${app.name}: ${raw} has files but is not a git repository. Run git init and commit there yourself (check what gets committed first), or name an empty or new folder.`);
@@ -978,6 +993,7 @@ export class Engine {
       if (run.autoAdvance === "ask" && !this.autonomous(run)) lines.push("## Waves\nWhen apps wait in Intake and capacity frees up, Helm asks the human to approve the next wave. Use `helm_propose_wave` if you want to suggest a different set.");
     }
     if (this.autonomous(run)) lines.push(`## Autonomy\n${autonomyText(n.role === "orch")}`);
+    if (n.tier !== "git") lines.push(`## Git rules (strict, set by the human)\n${gitRulesText(app ? this.repo.appExtra(run.id, app.id).integrationBranch : null)}`);
     const remit = n.tier === "orchestrator" ? "the run" : n.tier === "manager" ? `your group (${this.repo.listApps(run.id).filter((a) => a.managerNodeId === n.id).map((a) => a.name).slice(0, 8).join(", ") || "its apps"})` : app?.name ?? "your app";
     const authority = authorityText(this.isLeadNode(n) && n.tier !== "orchestrator" ? "lead" : n.tier, remit);
     if (authority) lines.push(`## Your authority\n${authority}`);

@@ -383,13 +383,18 @@ function message(e: Engine, from: NodeInfo, to: string, text: string, kind: stri
       note = ` It went as FYI, not as a question: you already asked ${UPWARD_ASKS_PER_HOUR} questions this hour. Decide what is inside ${scopeName(e, from)} yourself and keep going; put what truly needs ${e.label(target)} into one message later, with your recommendation.`;
     } else note = ` (${asked + 1} of ${UPWARD_ASKS_PER_HOUR} questions this hour. Decide what is inside ${scopeName(e, from)} yourself.)`;
   }
-  const line = `Message from ${e.label(from)} (${from.id}, ${kind}): ${text}`;
+  // the human made the Git agent's word on git final: every agent follows it
+  const line =
+    from.tier === "git"
+      ? `Git rule from ${e.label(from)} (${from.id}, ${kind}), binding by the human's policy on branches, worktrees, merges and pushes: ${text}\nDo what it asks about git now; it outranks earlier instructions on git. If doing it would discard someone's uncommitted work, reply to it (helm_message to "git") with exactly what is in the way instead.`
+      : `Message from ${e.label(from)} (${from.id}, ${kind}): ${text}`;
   e.repo.tx(() => {
     e.repo.comms(from.runId, { from: from.id, to: target.id, kind, summary: text.slice(0, 300) });
-    if (kind === "info") e.fyi(from.runId, target.id, line.slice(0, 800));
+    // a Git rule is never a mere FYI: it reaches the agent now
+    if (kind === "info" && from.tier !== "git") e.fyi(from.runId, target.id, line.slice(0, 800));
     else e.sendFromHelm(from.runId, target.id, line, { senderNodeId: from.id, kind: "message", commsKind: kind, key: `msg:${from.runId}:${from.id}:${target.id}:${e.now()}` });
   });
-  return (kind === "info" ? `Delivered to ${e.label(target)} as FYI (it reads it on its next turn).` : `Sent to ${e.label(target)}.`) + note;
+  return (kind === "info" && from.tier !== "git" ? `Delivered to ${e.label(target)} as FYI (it reads it on its next turn).` : `Sent to ${e.label(target)}.`) + note;
 }
 
 const ABOUT_LABEL: Record<string, string> = { credentials: "Credentials", spending: "Spending", privacy: "Private data", access: "Access", owner: "Owner's call" };

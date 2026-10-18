@@ -133,8 +133,8 @@ export function briefFor(node: Pick<NodeInfo, "id" | "role" | "platform" | "brie
     if (!loc?.adopted) L.push("- Run checks through `.helm/run-check.sh <name> -- <command…>` so Helm can verify the result.");
     if (loc?.adopted && ctx.repoPath) {
       L.push(
-        `- This is an **existing repository** the human already works in. Their own checkout is \`${ctx.repoPath}\`${loc.userBranch ? ` on \`${loc.userBranch}\`` : ""}: never edit, commit, check out, reset, stash or clean anything there. Work only in your own worktree.`,
-        `- This run's work starts from the Helm branch${loc.helmBranch ? ` \`${loc.helmBranch}\`` : ""}. Helm never merges into the human's branches; they merge the signed-off result themselves.`,
+        `- This is an **existing repository** the human already works in. Their own checkout is \`${ctx.repoPath}\`${loc.userBranch ? ` on \`${loc.userBranch}\`` : ""}: never edit, commit, check out, reset, stash or clean anything there. Work only in the app's work worktree.`,
+        `- The work is on the app's work branch${loc.helmBranch ? ` \`${loc.helmBranch}\`` : ""}. Only the Git agent merges it into the human's main branch, when the human signs it off or the Orchestrator or the app's lead asks it to.`,
       );
       L.push("- Helm added **no files and no commits** to this repository. Its check wrapper and your BRIEF live in Helm's Studio folder (paths below).");
       if (node.role === "lead" || node.alsoLead)

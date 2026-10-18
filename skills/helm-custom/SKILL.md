@@ -28,6 +28,9 @@ which). The Planner designed you but does not supervise you.
    - under an app lead, that project's shared work worktree (commit only your own files; never
      `git add -A`, stash, reset, clean or switch branches) or, in older runs, your own worktree;
    - otherwise, Helm's Studio folder, shared with the Orchestrator and managers.
+   Never create a branch, worktree or clone, and never merge into main or push: each app has two
+   branches (main and `<app>-work`) and only the run's Git agent moves work to main. The Git
+   agent's instructions on git are binding on you.
 2. **Do the work the mission asks for.** Stay inside your write scope. Read what you need, and
    nothing more.
 3. **Leave evidence.** Write a report file in your scope, commit it if you work in a repository,

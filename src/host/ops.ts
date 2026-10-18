@@ -330,7 +330,8 @@ export function createHostOps(): HostOps {
         const s = missing || status === false ? null : await git(w.path, ["status", "--porcelain", "--untracked-files=no"], 60_000);
         out.push({ ...w, main: i === 0, missing, dirty: s && s.code === 0 ? s.stdout.split("\n").filter(Boolean).length : 0 });
       }
-      return { worktrees: out };
+      const refs = await git(resolve(repo), ["for-each-ref", "--count=300", "--format=%(refname:short)", "refs/heads"]);
+      return { worktrees: out, branches: refs.code === 0 ? refs.stdout.split("\n").filter(Boolean) : [] };
     },
 
     async revParse({ repo, ref }) {

@@ -649,7 +649,13 @@ async function tryReady(e: Engine, runId: string, appId: string, verdictId: stri
           ? `The report: ${REVIEW_FILE} at ${head?.slice(0, 9)} (source untouched; the auditors' evidence is under reports/).`
           : `Checks green on ${head?.slice(0, 9)}: ${[...new Set(checks.filter((c) => c.commitSha && head && shaMatches(c.commitSha, head) && c.exitCode === 0).map((c) => c.name))].join(", ")}`,
         ...notes,
-        `Result: ${extraBranch(e, runId, appId)} in ${app.repoPath ?? "the app repository"}.${app.adopted ? ` Helm never merges into your branches; merge it into ${app.userBranch ?? "your branch"} yourself when you are happy.` : ""}`,
+        `Result: ${extraBranch(e, runId, appId)} in ${app.repoPath ?? "the app repository"}. ${
+          e.settings.gitOnSignoff === "merge-push"
+            ? `Signing off is your approval: the Git agent merges it into ${app.userBranch ?? "main"} and pushes both.`
+            : e.settings.gitOnSignoff === "push"
+              ? `Signing off has the Git agent push the work branch; ${app.userBranch ?? "main"} is left for you to merge.`
+              : `Signing off sends nothing; merge it into ${app.userBranch ?? "main"} yourself when you are happy.`
+        }`,
       ].join("\n"),
       evidence: unverified.length ? `Unverified: ${unverified.join("; ")}` : "",
       options: ["Sign off", "Send back"],

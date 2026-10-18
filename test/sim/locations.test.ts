@@ -21,7 +21,7 @@ test("an existing repository is adopted on a Helm branch; the human's checkout, 
   const { runId } = h.engine.createRun({ name: "Tide work", brief: "finish tide", portfolio: pf(app("Tide", { path: repo, reads: ["/disk/work/core"] }), app("Gamma")), slots: CHEAP });
   const loc = await h.engine.locationReport(runId);
   assert.deepEqual(loc.problems, []);
-  assert.ok(loc.notes.some((n) => n.includes("existing repository /disk/work/tide") && n.includes("1 uncommitted change is NOT visible to agents: commit first") && n.includes("helm/")), loc.notes.join("\n"));
+  assert.ok(loc.notes.some((n) => n.includes("existing repository /disk/work/tide") && n.includes("1 uncommitted change is NOT visible to agents: commit first") && n.includes("work branch tide-work") && n.includes("only the Git agent merges into main")), loc.notes.join("\n"));
   assert.ok(loc.notes.some((n) => n.includes("Tide reads /disk/work/core")), loc.notes.join("\n"));
 
   const r = await h.engine.startRun(runId);
@@ -33,8 +33,7 @@ test("an existing repository is adopted on a Helm branch; the human's checkout, 
   assert.equal(tide.adopted, true);
   assert.equal(tide.repoPath, repo);
   assert.equal(tide.userBranch, "main");
-  assert.match(tide.helmBranch!, /^helm\/tide-work-[a-z0-9]{6}\/tide$/);
-  assert.ok(tide.helmBranch!.includes(runId.slice(-6).toLowerCase()), "the branch carries the run id suffix");
+  assert.equal(tide.helmBranch, "tide-work", "one work branch named after the app");
   // the human's side is exactly as it was
   const r0 = git.repos.get(repo)!;
   assert.equal(r0.refs.get("main"), humanHead, "the human's branch did not move");
@@ -64,9 +63,9 @@ test("an existing repository is adopted on a Helm branch; the human's checkout, 
   assert.match(brief, /helm_existing_docs/);
   assert.match(brief, /bin\/run-check\.sh/);
   assert.match(brief, /Read-only reference folders.*\/disk\/work\/core/);
-  // the sign-off item says Helm never merges
+  // the sign-off item says what signing off does: the Git agent merges into main and pushes
   const so = h.repo.listNeeds(runId, "open").find((n) => n.kind === "signoff" && n.appId === "tide")!;
-  assert.match(so.body, /Helm never merges into your branches/);
+  assert.match(so.body, /Result: branch tide-work .*Signing off is your approval: the Git agent merges it into main and pushes both/);
   // the other app got a new repository under the run folder, as before
   const gamma = h.repo.getApp(runId, "gamma")!;
   assert.equal(gamma.adopted, false);

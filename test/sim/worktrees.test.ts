@@ -56,7 +56,7 @@ test("a new app has exactly two worktrees, and every agent of it works in the sh
   assert.ok(!sentTo(h, runId, GIT_ID, /Helm worktree check/));
 });
 
-test("the Git agent stands beside the Orchestrator, checks the worktrees on start, and is told to push on sign-off", async () => {
+test("the Git agent stands beside the Orchestrator, checks the worktrees on start, and merges into main and pushes on sign-off", async () => {
   const { h, runId } = await run();
   const git = h.repo.getNode(runId, GIT_ID)!;
   assert.equal(git.tier, "git");
@@ -66,9 +66,56 @@ test("the Git agent stands beside the Orchestrator, checks the worktrees on star
   assert.ok(h.agents.log.some((l) => /^git: Every app has at most 2 worktrees/.test(l)), h.agents.log.filter((l) => l.startsWith("git")).join("\n"));
 
   const so = h.repo.listNeeds(runId, "open").find((n) => n.kind === "signoff" && n.appId === "alpha")!;
+  assert.match(so.body, /Result: branch alpha-work .*Signing off is your approval: the Git agent merges it into main and pushes both/);
   await h.resolve(runId, so.id, { action: "signoff" });
-  const branch = h.repo.appExtra(runId, "alpha").integrationBranch!;
-  assert.ok(sentTo(h, runId, GIT_ID, new RegExp(`signed off Alpha \\(alpha\\).*Settings say: push ${branch.replace(/[/.]/g, "\\$&")} to its remote`, "s")));
+  assert.ok(sentTo(h, runId, GIT_ID, /signed off Alpha \(alpha\).*Settings say: merge alpha-work into its main branch and push main and alpha-work to its remote/s));
+});
+
+test("gitOnSignoff push: only the work branch is pushed", async () => {
+  const { h, runId } = await run({ settings: { gitOnSignoff: "push" } });
+  const so = h.repo.listNeeds(runId, "open").find((n) => n.kind === "signoff" && n.appId === "alpha")!;
+  await h.resolve(runId, so.id, { action: "signoff" });
+  assert.ok(sentTo(h, runId, GIT_ID, /Settings say: push alpha-work to its remote/));
+});
+
+test("two branches: every app works on <app>-work, every brief but the Git agent's carries the binding Git rules, and its messages are delivered as Git rules", async () => {
+  const { h, runId } = await run();
+  assert.equal(h.repo.appExtra(runId, "alpha").integrationBranch, "alpha-work");
+  assert.equal(h.repo.appExtra(runId, "beta").integrationBranch, "beta-work");
+  const run_ = h.engine.run(runId);
+  const lead = h.repo.listNodes(runId).find((n) => n.appId === "alpha" && n.tier === "lead")!;
+  const builder = h.repo.listNodes(runId).find((n) => n.appId === "alpha" && n.tier === "specialist")!;
+  for (const n of [lead, builder, h.repo.getNode(runId, "orch")!]) {
+    const brief = h.engine.buildBrief(run_, n);
+    assert.match(brief, /## Git rules \(strict, set by the human\)/, n.id);
+    assert.match(brief, /binding/, n.id);
+  }
+  assert.match(h.engine.buildBrief(run_, lead), /alpha-work/);
+  assert.doesNotMatch(h.engine.buildBrief(run_, h.repo.getNode(runId, GIT_ID)!), /## Git rules/);
+
+  const git = h.repo.getNode(runId, GIT_ID)!;
+  const sent = await callTool(h.engine, "helm_message", git.threadId!, { to: lead.id, text: "Delete branch bb/old once merged.", kind: "info" });
+  assert.ok(!sent.isError, sent.text);
+  assert.ok(sentTo(h, runId, lead.id, /^Git rule from Git agent .*binding by the human's policy.*Delete branch bb\/old/s));
+  const orch = h.repo.getNode(runId, "orch")!;
+  await callTool(h.engine, "helm_message", orch.threadId!, { to: lead.id, text: "Plain note.", kind: "ask" });
+  assert.ok(sentTo(h, runId, lead.id, /^Message from .*Plain note\./s), "other agents' messages are not Git rules");
+});
+
+test("the audit flags agent branches beside main and the work branch, and leaves the human's alone", async () => {
+  const { h, runId } = await run();
+  const repo = h.repo.getApp(runId, "alpha")!.repoPath!;
+  const refs = h.sim.git.repos.get(repo)!.refs;
+  const tip = h.sim.git.resolve(repo, "alpha-work")!;
+  refs.set("feature/mine", tip);
+  await h.clock.advance(H);
+  assert.deepEqual(await auditWorktrees(h.engine, runId), [], "a human branch is not an agent's");
+  refs.set("bb/alpha-builder-thr_x", tip);
+  await h.clock.advance(H);
+  const [a] = await appWorktrees(h.engine, runId, { appId: "alpha" });
+  assert.deepEqual(a.extraBranches, ["bb/alpha-builder-thr_x"]);
+  assert.deepEqual(await auditWorktrees(h.engine, runId), ["alpha"]);
+  assert.ok(sentTo(h, runId, GIT_ID, /Helm worktree check: Alpha has 1 agent branch\(es\) besides main and alpha-work.*git branch -d/s));
 });
 
 test("the Git agent's evidence is checked in the Studio and the apps' repositories", async () => {

@@ -31,7 +31,7 @@ export const DEFAULT_SETTINGS: HelmSettings = {
   permissionMode: { orchestrator: "auto", manager: "auto", lead: "auto", specialist: "auto", gate: "auto", planner: "auto", git: "auto", custom: "auto" },
   names: { planner: "", orchestrator: "", git: "" },
   defaultModels: { planner: null, orchestrator: null, git: null },
-  gitOnSignoff: "push",
+  gitOnSignoff: "merge-push",
   showLeadsInSidebar: false,
   appsRoot: "~/Projects/helm",
   weights: SEED_WEIGHTS,

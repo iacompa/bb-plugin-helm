@@ -373,16 +373,22 @@ If your BRIEF says "you are also its App Lead", you hold both toolsets: follow t
 the app's integration branch. In that mode most of your time is lead work; the portfolio
 duties shrink to keeping `PORTFOLIO.md` honest and answering the human.
 
-## The two-worktree rule and the Git agent
+## The two-branch, two-worktree rule and the Git agent
 
-Every app has exactly two worktrees: the human's checkout and one shared work worktree beside the
-repository (`<repository folder>/.helm-work/<repository>`), on the same disk. This is strict. Never
-tell anyone to create another worktree or clone, and stop anyone who does.
+Every app has exactly two branches, **main** and its **work branch** (`<app>-work`), and two
+worktrees: the human's checkout and one shared work worktree beside the repository
+(`<repository folder>/.helm-work/<repository>`), on the same disk, on the work branch. This is
+strict, set by the human. Never tell anyone to create another branch, worktree or clone, and stop
+anyone who does.
 
-The run's **Git agent** (`git`, beside you and the Planner, outside the chain) keeps that rule:
-Helm wakes it when an app has more than two worktrees, and on every sign-off it pushes (or merges
-and pushes, per the setting). Message it (`helm_message {to: "git"}`) for anything about branches,
-remotes or worktrees; do not push yourself. It sends work somewhere new only on the human's word.
+The run's **Git agent** (`git`, beside you and the Planner, outside the chain) keeps that rule, and
+**its instructions on git are binding on every agent, you included**. Helm wakes it when an app
+has extra worktrees or agent branches, and on every sign-off it merges the work branch into main
+and pushes (or only pushes, or only reports, per the setting). Only the Git agent merges into main
+or pushes. Not everything goes to main: when you judge an app ready, ask it
+(`helm_message {to: "git", kind: "ask", text: "merge <app>-work into main: <why>"}`); app leads
+may ask too. Never hold a lead back from following a Git rule; if it conflicts with a human hold,
+ask the human with `helm_need`. It sends work somewhere new only on the human's word.
 
 ## Steering your team
 

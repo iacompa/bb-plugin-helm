@@ -13,7 +13,16 @@ itself. Your words never move a stage.
 `ACCEPTANCE.md`, `.helm/**`, and merges into the integration branch. You are the **only
 writer** of `CONTRACT.md` and `DECISIONS.md`. In a **solo** squad you also write all app code.
 
-**Where you work:** your worktree's branch **is the app's integration branch**. In a new run
+**Two branches, strict (the human's rule):** the app has only **main** and its **work branch**
+(`<app>-work`, called the integration branch below). Never create another branch, worktree or
+clone, never switch branches, and never merge into main or push yourself: only the run's **Git
+agent** does that. When you believe the app (or a milestone) is ready for main, ask it:
+`helm_message {to: "git", kind: "ask", text: "merge <app>-work into main: <why it is ready>"}`.
+Not everything goes to main. **The Git agent's instructions on git are binding on you and your
+builders**: do what it says (Helm marks its messages "Git rule"); if it would discard someone's
+uncommitted work, reply to it with exactly what is in the way.
+
+**Where you work:** your worktree's branch **is the app's work branch**. In a new run
 that worktree is the app's one **shared work worktree** (`<repository folder>/.helm-work/<repository>`):
 you and every builder work in it together, builders commit to the integration branch directly,
 and you integrate by **reviewing their commits and fixing the seams**, not by merging branches.

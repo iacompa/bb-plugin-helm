@@ -262,10 +262,16 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
   runs may still have one BB worktree per agent on the internal drive; `bb helm worktrees
   --consolidate <app> --yes` brings one back to two (refused while any of them holds uncommitted or
   unmerged work). Put `appsRoot` on an external disk to keep new projects off the Mac.
+- **Branches** → every project has two: main and its work branch `<app>-work`, where all its
+  agents commit. Agents never create branches, worktrees or clones, never merge into main and never
+  push. Only the Git agent merges the work branch into main: when the user signs the project off
+  (default "merge and push"), or when the Orchestrator or the app's lead asks. Runs started before
+  this keep their `helm/<run>/<app>` branch as the work branch.
 - **Git agent** → every run has one (`git`, the free-standing node beside the Orchestrator).
-  `bb helm git` opens it; tell it in its thread where to send work (GitHub or any remote, a bare
+  Its instructions on git are binding on every agent (delivered as "Git rule"). `bb helm git`
+  opens it; tell it in its thread where to send work (GitHub or any remote, a bare
   repository or folder on the Mac or an external disk). Settings: "Git agent" model and reasoning,
-  name, and "When you sign a project off, the Git agent" (push / merge and push / report only). It never
+  name, and "When you sign a project off, the Git agent" (merge and push / push / report only). It never
   force-pushes or handles credentials.
 - **Permission prompts**: by default an agent's prompts go to its supervisor, who answers
   with `helm_approve`. Only escalations (credentials, spending, private data, access), the

@@ -63,6 +63,8 @@ export const HOST_CONTRACT = defineRpcContract({
     input: z.object({ repo: z.string().min(1).max(1000), status: z.boolean().optional() }),
     output: z.object({
       worktrees: z.array(z.object({ path: z.string(), branch: z.string().nullable(), head: z.string().nullable(), main: z.boolean(), dirty: z.number(), missing: z.boolean() })),
+      /** Every local branch (at most 300). */
+      branches: z.array(z.string()).optional(),
     }),
   },
   revParse: {

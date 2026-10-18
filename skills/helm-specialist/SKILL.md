@@ -16,7 +16,11 @@ You build one part of one app inside your **write scope**. Your BRIEF says where
 - **Your own branch** (older runs): a worktree branched off the integration branch. Your lead
   merges your commits.
 
-Either way, never create another worktree or clone. Helm counts only what it can verify:
+Either way, never create another branch, worktree or clone, never switch branches, and never merge
+into main or push: the app has two branches, main and its work branch (`<app>-work`, the
+integration branch), and only the run's **Git agent** moves work to main. **The Git agent's
+instructions on git are binding on you** (Helm marks its messages "Git rule"); if one would discard
+someone's uncommitted work, reply to it with what is in the way. Helm counts only what it can verify:
 **you are done only when a commit says so.**
 
 ## Your two skills

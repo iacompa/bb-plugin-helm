@@ -31,7 +31,7 @@ test("readiness is read-only: it lists what blocks a start, and a ready plan is 
   const r2 = await svc.readiness(good.runId);
   assert.deepEqual(r2.problems, []);
   assert.equal(r2.ok, true);
-  assert.ok(r2.notes.some((n) => n.includes("helm/") && n.includes("at your last commit")), r2.notes.join("\n"));
+  assert.ok(r2.notes.some((n) => n.includes("work branch tide-work") && n.includes("at your last commit")), r2.notes.join("\n"));
   assert.match(String(r2.runFolder), /good/);
   assert.equal(h.engine.run(good.runId).status, "planning", "checking never starts the run");
   assert.equal(h.sim.helmThreads().length, 0, "nothing spawned");
