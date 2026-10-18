@@ -350,7 +350,7 @@ export function inferProfile(input: ProfileInput): Profile {
     if (kind === "web" && found.includes("payments")) add("database", "a website that takes payments keeps orders and customers");
     if (kind === "web" && found.includes("auth")) add("database", "accounts on a website are stored on the server");
     if (found.includes("hipaa") && (kind === "web" || found.includes("database"))) add("auth", "health data needs access control");
-    if (found.some((n) => n === "payments" || n === "hipaa") && !found.includes("security")) add("security", "payments and health data raise the stakes");
+    if (found.some((n) => n === "payments" || n === "hipaa") && !found.includes("security")) add("security", found.includes("hipaa") ? "health data raises the stakes" : "taking payments raises the stakes");
     needs = found;
   }
 
@@ -415,11 +415,20 @@ export function profileLine(p: { kind: ProjectKind; needs: ProjectNeed[]; tools:
   return parts.join(" · ");
 }
 
-/** The assumption shown before Approve when Helm decided something the human did not say. */
+/** The assumption shown before Approve when Helm decided something the human did not say (reasons dropped whole, never cut mid-way). */
 export function profileAssumption(name: string, p: Profile): string | null {
   if (!p.why.length) return null;
-  return `${name}: Helm decided ${profileLine(p)} (${p.why.join("; ")}). Correct it with “· Website”, “· needs payments, HIPAA” or “· tools Unreal” on the line, or tell the planner.`.slice(0, 400);
+  const head = `${name}: Helm decided ${profileLine(p)}`;
+  const why: string[] = [];
+  for (const w of p.why) {
+    if (head.length + why.join("; ").length + w.length + 8 > 400) break;
+    why.push(w);
+  }
+  return `${head} (${why.join("; ")}${why.length < p.why.length ? "; …" : ""}).`;
 }
+
+/** Said once after the decisions: how to correct them. */
+export const PROFILE_HINT = "Correct any decision on the project's line (“· Website”, “· Game”, “· Review”, “· needs payments, HIPAA”, “· needs none”, “· tools Unreal, Blender”), in the wizard, or by telling the planner.";
 
 /** Squad members a profile adds or changes are explained in topology.ts; this says what each kind delivers. */
 export function kindDeliverable(kind: ProjectKind): string {

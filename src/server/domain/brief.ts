@@ -7,7 +7,7 @@
 import { z } from "zod";
 import type { Platform, Portfolio, PortfolioApp, ProjectKind, ProjectNeed } from "../../shared/types.ts";
 import { PLATFORM_LABEL } from "./roles.ts";
-import { inferProfile, kindWord, listWords, normalizeNeed, normalizeTool, profileAssumption } from "./profile.ts";
+import { inferProfile, kindWord, listWords, normalizeNeed, normalizeTool, profileAssumption, PROFILE_HINT } from "./profile.ts";
 
 export const PlatformSchema = z.enum(["mac", "win", "ios", "and", "web"]);
 export const ShapeSchema = z.enum(["solo", "lean", "full"]);
@@ -253,6 +253,7 @@ export function parseBrief(text: string): ParsedBrief {
     if (pa) assumptions.push(pa);
     if (assumption) assumptions.push(assumption);
   }
+  if (assumptions.some((x) => x.includes(": Helm decided "))) assumptions.push(PROFILE_HINT);
   return {
     portfolio: { apps, groups, assumptions: assumptions.slice(0, 40), questions: [] },
     structured: apps.length > 0,

@@ -8,6 +8,7 @@ import { MIGRATIONS } from "../db/schema.ts";
 import type { HelmSettings } from "../engine/context.ts";
 import { expandHome } from "../engine/context.ts";
 import { TOOL_NAMES } from "../agent/tools.ts";
+import { TOOL_INFO } from "../domain/profile.ts";
 
 export interface DoctorCheck {
   id: string;
@@ -41,6 +42,16 @@ export async function runDoctor(bb: BbPluginApi, port: RealBB, repo: Repo, setti
     const tools = [p.git, p.xcode && `Xcode: ${p.xcode}`, p.gradle && `Gradle: ${p.gradle}`, p.androidSdk ? "Android SDK" : null, p.dotnet && `.NET ${p.dotnet}`].filter(Boolean);
     return `${p.platform}: ${tools.join(" · ")}`;
   });
+  // informational: which project tools are installed (a missing one is not a failure)
+  try {
+    const ask = Object.entries(TOOL_INFO).map(([id, t]) => ({ id, bins: t.probe?.bins ?? [id], paths: t.probe?.paths ?? [] }));
+    const { found } = await port.host(hostId).toolProbe({ tools: ask });
+    const have = Object.keys(TOOL_INFO).filter((id) => found[id]).map((id) => TOOL_INFO[id].label);
+    const missing = Object.keys(TOOL_INFO).filter((id) => !found[id]).map((id) => TOOL_INFO[id].label);
+    add("project.tools", true, `${have.length ? `installed: ${have.join(", ")}` : "none of the known tools installed"}${missing.length ? ` · not found: ${missing.join(", ")}` : ""}`);
+  } catch (e) {
+    add("project.tools", true, `not checked (${e instanceof Error ? e.message : String(e)})`);
+  }
   await attempt("catalog", async () => {
     const cat = await port.catalog({ hostId });
     const by = cat.providers.filter((p) => p.available).map((p) => `${p.id} ${cat.models.filter((m) => m.providerId === p.id).length}`);
