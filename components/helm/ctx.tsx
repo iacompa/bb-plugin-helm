@@ -71,6 +71,9 @@ export interface HelmCtx {
   studio: StudioOpts | null;
   openStudio: (o?: StudioOpts) => void;
   closeStudio: () => void;
+  screensOpen: boolean;
+  openScreens: () => void;
+  closeScreens: () => void;
   wizardOpen: boolean;
   setWizardOpen: (v: boolean) => void;
 
@@ -170,6 +173,7 @@ export function HelmProvider({ children, rootRef }: { children: ReactNode; rootR
   const [focusReq, setFocusReq] = useState<{ id: string; key: number } | null>(null);
   const [observatory, setObservatory] = useState(false);
   const [studio, setStudio] = useState<StudioOpts | null>(null);
+  const [screensOpen, setScreensOpen] = useState(false);
   // the wizard stays open (with its draft) when you leave the panel and come back
   const [wizardOpen, setWizardOpen] = useStored("helm:wizardOpen", false);
 
@@ -262,6 +266,9 @@ export function HelmProvider({ children, rootRef }: { children: ReactNode; rootR
       studio,
       openStudio: (o: StudioOpts = {}) => setStudio(o),
       closeStudio: () => setStudio(null),
+      screensOpen,
+      openScreens: () => setScreensOpen(true),
+      closeScreens: () => setScreensOpen(false),
       wizardOpen,
       setWizardOpen,
       pulse,
@@ -270,7 +277,7 @@ export function HelmProvider({ children, rootRef }: { children: ReactNode; rootR
       node,
       app,
     }),
-    [rpc, rootRef, runs, runsError, refreshRuns, runId, setRunId, tabs, closeTab, newSession, data, rev, loading, error, refetch, catalog, catalogError, loadCatalog, view, sel, select, tab, draftType, inspOpen, inspWide, drill, focusNode, focusReq, observatory, studio, wizardOpen, pulse, firePulse, flashes, node, app],
+    [rpc, rootRef, runs, runsError, refreshRuns, runId, setRunId, tabs, closeTab, newSession, data, rev, loading, error, refetch, catalog, catalogError, loadCatalog, view, sel, select, tab, draftType, inspOpen, inspWide, drill, focusNode, focusReq, observatory, studio, screensOpen, wizardOpen, pulse, firePulse, flashes, node, app],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

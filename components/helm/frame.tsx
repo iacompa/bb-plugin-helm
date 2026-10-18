@@ -15,6 +15,7 @@ import { LedgerView } from "./ledger.tsx";
 import { NeedsView } from "./needs.tsx";
 import { Inspector } from "./inspector/index.tsx";
 import { StudioModal } from "./studio.tsx";
+import { ScreensModal } from "./screens.tsx";
 import { EXAMPLES, WizardModal, seedWizardBrief, seedWizardMode } from "./wizard.tsx";
 import { reportClientError } from "./data.ts";
 import { StartBar, useStartRun } from "./startbar.tsx";
@@ -155,6 +156,7 @@ function Frame() {
         {showInspector ? <Inspector /> : null}
       </div>
       <StudioModal />
+      <ScreensModal />
       <WizardModal />
       <DialogHost />
     </>
@@ -215,17 +217,6 @@ function TopBar() {
   const [pop, setPop] = useState<{ kind: "run" | "cap" | "perm"; el: HTMLElement } | null>(null);
   const toggle = (kind: "run" | "cap", el: HTMLElement) => setPop((p) => (p && p.kind === kind ? null : { kind, el }));
   const nav = useBbNavigate();
-  const openSims = async () => {
-    try {
-      const r = (await h.rpc.call("sim_open", { runId: data?.run?.id ?? null })) as { url: string; threadId: string | null; message: string };
-      if (r.threadId) {
-        nav.toThread(r.threadId, { split: true });
-        toast.success("Simulators opened", { description: "In the Orchestrator thread's browser tab." });
-      } else if (r.url && !nav.openUrl(r.url)) window.open(r.url, "_blank", "noopener");
-    } catch (err) {
-      toast.error("Could not open the simulators", { description: errMsg(err) });
-    }
-  };
   const planner = data?.nodes.planner ?? null;
   const plannerName = planner?.label.split(" · ")[0] ?? "Amer";
   const openPlanner = async () => {
@@ -335,9 +326,9 @@ function TopBar() {
           <span className="btn-lbl"> {plannerName}</span>
         </button>
       ) : null}
-      <button type="button" className="btn" onClick={() => void openSims()} title="Simulators: watch and drive the apps in BB's browser (iOS, Android, macOS; Windows screenshots)" aria-label="Simulators" data-testid="simulators">
+      <button type="button" className="btn" onClick={() => h.openScreens()} disabled={!run} title="Screens: click through each app's screens, page by page (no device, nothing runs)" aria-label="Screens" aria-pressed={h.screensOpen} data-testid="screens">
         <Ic name="Smartphone" size="sm" />
-        <span className="btn-lbl"> Simulators</span>
+        <span className="btn-lbl"> Screens</span>
       </button>
       <button type="button" className="btn" onClick={(e) => setPop(pop?.kind === "perm" ? null : { kind: "perm", el: e.currentTarget })} title="Permissions: what agents may do, and who approves their prompts" aria-label="Permissions" aria-expanded={pop?.kind === "perm"} data-testid="permissions">
         <Ic name="SecurityCheck" size="sm" />

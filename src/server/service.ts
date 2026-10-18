@@ -1,6 +1,7 @@
 // The service layer: one set of functions behind the CLI, the RPC and the UI,
 // so a directive sent from any surface is the same code path (§9 rules).
 
+import { ScreensView } from "./screens.ts";
 import { refreshRun } from "./engine/refresh.ts";
 import type { Autonomy, DirectiveInfo, ModelRef, NodeInfo, PermissionMode, Portfolio, RunInfo, SlotId, SlotMap, Tier } from "../shared/types.ts";
 import { PERMISSION_KEYS, type SettingsWriter } from "./settings.ts";
@@ -205,8 +206,11 @@ export class HelmService {
     return this.permissions();
   }
 
-  /** Opens the simulator view in BB's in-app browser (set by the plugin factory). */
-  openSimulators: (runId?: string | null, appId?: string | null) => Promise<{ url: string; threadId: string | null; message: string }> = async () => ({ url: "", threadId: null, message: "The simulator view is not available here." });
+  private screensView: ScreensView | null = null;
+  /** The Screens view: each app's committed screenshots as pages you click through. */
+  get screens(): ScreensView {
+    return (this.screensView ??= new ScreensView(this.engine));
+  }
 
   /** Restart a running run's live agents so they load the installed Helm version (skills, tools, prompt). */
   async refresh(runId: string) {

@@ -238,14 +238,13 @@ bb helm limits [--run <id>] [--concurrency N] [--budget N] [--permission provide
   on `helm_spawn_squad`): it becomes part of the agent's system prompt and brief. To change
   what one agent works on, ask its supervisor, or `bb helm tell` the agent directly. Managers see
   only their own apps; cross-group work goes through the Orchestrator.
-- **"Show me the app" / simulators** → the panel's **Simulators** button, or `bb helm sim`
-  (opens a tab in the Orchestrator thread's in-app browser; prints the URL). iOS simulators
-  and Android emulators (headless) stream live; Android is fully interactive (tap, swipe,
-  type, Back/Home), iOS is watch-only unless `idb` is installed; both have dark/light,
-  large text and open-URL buttons. "Install & run" uses the newest build Helm finds in the
-  app's worktrees or Xcode's DerivedData (it never builds). macOS apps are launched and
-  their window mirrored (BB needs the Screen Recording permission). Windows apps cannot
-  run on a Mac: the view shows the screenshots the Windows builder committed.
+- **"Show me the app" / screens** → the panel's **Screens** button, or `bb helm screens --app <name>`
+  to list the pages. Screens shows each app as pages you click through like a tiny browser:
+  the screenshots the builders committed (`reports/ui/`, `reports/<platform>/…`), no device
+  frame, nothing running. Tappable areas come from the UI builder's screen map
+  (`reports/screens/screens.json`); without one every captured screen is still a page.
+  Size, theme and platform pickers appear when there are several captures. If an app shows no
+  screens, its UI builder has not captured any yet: tell the lead with `bb helm tell`.
 - **After a Helm upgrade, mid-run** → agents keep the old skills, tools and prompt until
   their session restarts. `bb helm refresh --yes` rewrites briefs and restarts each live
   agent on the new version (supervisors first; work in worktrees stays).

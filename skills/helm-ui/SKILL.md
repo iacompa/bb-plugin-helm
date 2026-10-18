@@ -241,6 +241,25 @@ reports/ui/shift-list--default--compact--light--a11y-xxxl.png
 - Capture from the running app, simulator, or emulator, or from automated snapshot tests (swift-snapshot-testing, Paparazzi or Roborazzi, Playwright), never from mockups. Automated capture is preferred because it doubles as a regression test.
 - Use realistic fixture data in every capture. A screenshot full of placeholder text does not count as evidence.
 - Add a short `reports/ui/INDEX.md` listing each screen, its captures, and any known gaps. Never hide gaps.
+
+**Screen map (what the human clicks through).** The Helm panel's **Screens** view shows each app as pages: your screenshots, no device frame, nothing running. Write `reports/screens/screens.json` so its pages link like the real app:
+
+```json
+{
+  "start": "shift-list",
+  "screens": [
+    { "id": "shift-list", "name": "Shifts", "image": "reports/ui/shift-list--default--compact--light.png",
+      "links": [ { "to": "settings", "x": 0.86, "y": 0.04, "w": 0.12, "h": 0.06, "label": "Settings gear" },
+                 { "to": "shift-detail", "x": 0.04, "y": 0.18, "w": 0.92, "h": 0.1, "label": "First shift" } ] },
+    { "id": "settings", "name": "Settings", "image": "reports/ui/settings--default--compact--light.png",
+      "links": [ { "to": "shift-list", "x": 0.02, "y": 0.04, "w": 0.14, "h": 0.06, "label": "Back" } ] }
+  ]
+}
+```
+
+- One entry per screen; `id` matches the `<screen>` part of its file names, so every size, theme and state is offered automatically. `image` is the compact light capture, relative to the repository root.
+- `links` are the tappable areas in that image: `x`, `y`, `w`, `h` are fractions (0 to 1) of the image's width and height, measured from the top-left. Add one for each button, tab, row or back control that opens another screen. Every `to` must be another screen's `id`.
+- Include every screen the app has (onboarding, settings, empty states that are their own page), and update the map whenever you add a screen or move a control. Commit it with the screenshots.
 - Look at every screenshot yourself before reporting. Check for clipped text, misalignment, contrast problems in dark mode, and overlapping elements at compact size. Screenshots you have not looked at are not evidence.
 
 ---

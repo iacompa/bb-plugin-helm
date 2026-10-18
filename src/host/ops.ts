@@ -9,7 +9,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import { homedir, platform, tmpdir } from "node:os";
 import type { HostOps } from "../shared/host-contract.ts";
 import { scan, type ScanFile } from "../server/domain/slop/scan.ts";
-import { createSimOps } from "./sim.ts";
+import { createScreenOps } from "./screens.ts";
 
 const GIT_ENV = {
   ...process.env,
@@ -165,7 +165,7 @@ async function versionOf(cmd: string, args: string[], cwd?: string): Promise<str
 
 export function createHostOps(): HostOps {
   return {
-    ...createSimOps(),
+    ...createScreenOps(),
     async ensureRepo({ path, files, message }) {
       const root = resolve(path);
       await mkdir(root, { recursive: true });

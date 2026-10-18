@@ -294,15 +294,24 @@ export class FakeGit {
         const want = paths?.length ? new Set(paths) : null;
         return { commit: sha, findings: want ? res.findings.filter((f) => want.has(f.path) || f.rule === "S6") : res.findings, filesScanned: res.filesScanned, shippedFiles: res.shippedFiles, exempted: res.exempted, unverified: res.unverified };
       },
-      // no simulators in the simulation
-      simList: async () => ({ host: "darwin", ios: [], and: [], tools: { simctl: false, adb: false, emulator: false, idb: false, screencapture: false } }),
-      simBoot: async () => ({ ok: false, message: "no simulators in the simulation" }),
-      simShutdown: async () => ({ ok: false, message: "no simulators in the simulation" }),
-      simFrame: async () => ({ data: null, mime: "", error: "not-booted" }),
-      simInput: async () => ({ ok: false, message: "no simulators in the simulation" }),
-      simBuilds: async () => ({ builds: [] }),
-      simInstall: async () => ({ ok: false, message: "no simulators in the simulation", match: null }),
-      simImage: async () => ({ data: null, mime: "" }),
+      // the Screens view reads the worktrees' files (no images are decoded here)
+      screensScan: async ({ roots }: { roots: string[] }) => {
+        const files: Array<{ root: string; rel: string; mtime: number }> = [];
+        const maps: Array<{ root: string; text: string; mtime: number }> = [];
+        for (const root of roots) {
+          const wt = this.wts.get(root);
+          if (!wt) continue;
+          for (const rel of wt.work.keys()) if (/\.(png|jpe?g|gif|webp)$/i.test(rel) && /(^|\/)(reports|screens|screenshots)\//i.test(rel)) files.push({ root, rel, mtime: this.now() });
+          const m = wt.work.get("reports/screens/screens.json");
+          if (m !== undefined) maps.push({ root, text: m, mtime: this.now() });
+        }
+        return { files, maps };
+      },
+      screenImage: async ({ path }: { path: string }) => {
+        const w = this.wtFor(path);
+        const content = w ? w.wt.work.get(w.rel) : undefined;
+        return content === undefined ? { data: null, mime: "" } : { data: Buffer.from(content).toString("base64"), mime: path.endsWith(".png") ? "image/png" : "image/jpeg" };
+      },
       toolProbe: async (input: { tools: Array<{ id: string }> }) => ({ found: Object.fromEntries(input.tools.map((t) => [t.id, t.id === "docker" ? "/usr/local/bin/docker" : null])) }),
       probe: async () => ({ platform: "darwin", home, git: "git version 2.50.0 (sim)", xcode: "Xcode 27.0 (sim)", swift: "Swift 6.3 (sim)", gradle: null, androidSdk: false, dotnet: null }),
     };

@@ -409,15 +409,21 @@ export function buildCli(svc: HelmService, extra: { doctor(): Promise<{ ok: bool
             return out(i.options.json, { run: r }, line(r));
           }),
       }),
-      sim: cliCommand({
-        summary: "Open the simulator view (iOS, Android, macOS; Windows screenshots) in BB's in-app browser, or print its URL",
-        options: { run: RUN, app: { type: "string", description: "App id to show first" }, json: JSON_OPT },
+      screens: cliCommand({
+        summary: "List an app's screens (the pages the Screens view shows) and the links between them",
+        options: { run: RUN, app: { type: "string", description: "App name or id (default: list the apps)" }, refresh: { type: "boolean", description: "Scan again now" }, json: JSON_OPT },
         run: (i) =>
           guard(async () => {
-            // without --run: the most recently active run
-            const run = i.options.run ? runOf(i.options.run) : null;
-            const r = await svc.openSimulators(run?.id ?? null, i.options.app ?? null);
-            return out(i.options.json, r, `${r.message}\n${r.url}`);
+            const run = runOf(i.options.run);
+            if (!i.options.app) {
+              const apps = svc.screens.apps(run.id);
+              return out(i.options.json, { apps }, apps.length ? `${apps.map((a) => `${a.name} (${a.id})`).join("\n")}\n\nbb helm screens --app <name> lists its screens; the panel's Screens button shows them.` : "No apps in this run.");
+            }
+            const app = svc.appFor(run.id, i.options.app);
+            const map = await svc.screens.list(run.id, app.id, !!i.options.refresh);
+            const lines = map.screens.map((s) => `${s.id === map.start ? "▸" : " "} ${s.name} (${s.id}): ${s.variants.length} image${s.variants.length === 1 ? "" : "s"}${s.links.length ? ` · links to ${[...new Set(s.links.map((l) => l.to))].join(", ")}` : ""}`);
+            const head = map.screens.length ? `${app.name}: ${map.screens.length} screens (${map.source === "map" ? "from the screen map" : "from screenshots; no screen map yet"})` : `${app.name} has no screenshots yet. The UI and platform builders commit them under reports/ as they build.`;
+            return out(i.options.json, map, [head, ...lines, ...map.problems.map((p) => `! ${p}`)].join("\n"));
           }),
       }),
       refresh: cliCommand({

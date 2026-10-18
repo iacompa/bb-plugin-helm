@@ -253,3 +253,15 @@ The open decisions from the brief (§17.2) took their defaults. Where reality on
     - **Skills.** The orchestrator, manager, lead and helm skills carry the same table.
 
 45. **Outbox spin fix.** A due row for an agent queued behind an older row for the same agent that was not yet due (per-node FIFO) re-armed the outbox timer at "now" forever, which would busy-loop the server. When a drain dispatches nothing, the next wake-up is now the next row that becomes due later; finishing an in-flight row drains again by itself. Found by the custom-agent tests.
+
+46. **Screens instead of simulators (user request).** "I want the simulator to not really do anything, but just show the UI … if I click the home button it shows the app, not the iPhone … the first page, the settings, any page the app has … almost like a browser, simple, I can press, go into a page, go to a different page. There's no functionality within the simulator."
+    - **Removed:** the device simulator view (decision 40): the `/sim` HTTP page, `bb helm sim`, `sim_open`, and the host methods that booted simulators and emulators, streamed frames, sent taps and installed builds.
+    - **Added: the Screens modal in the Helm panel.** The **Screens** toolbar button opens it.
+      - Pick an app; its pages are listed on the left.
+      - The screen shows as a plain image, with no device frame.
+      - Back, forward and first-page buttons, plus arrow keys, work like a small browser.
+      - Pickers for platform, size and theme appear when there are several captures.
+    - **Where pages come from.** Screenshots under `reports/ui`, `reports/<platform>/…`, `screens/` or `screenshots/` in the app's repository and its lead's, builders' and custom agents' worktrees. Gate and audit evidence is skipped. When the same file is in several worktrees, the newest copy wins.
+    - **File names give the screen and its variant.** For example `<screen>--<state>--<size>--<theme>.png` and `<route>-<width>-<theme>.png`.
+    - **The screen map.** The UI builder writes `reports/screens/screens.json`: page names, order, the start page, and tappable areas (fractions of the image) that open another page. The helm-ui skill says how. Without a map, every screenshot is still a page. Map problems (unknown targets, bad paths, invalid JSON) are shown, not fatal.
+    - **Read-only and contained.** Two host methods: `screensScan` (walks the given folders, at most 600 files in 10 s) and `screenImage` (png/jpg/gif/webp, at most 8 MB). The server reads only paths the scan returned, and images reach the panel as data URLs over `screens_image`. `bb helm screens --app <name>` lists the pages and links.

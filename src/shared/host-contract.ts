@@ -19,19 +19,6 @@ const ScanFindingZ = z.object({
   fix: z.string(),
 });
 
-export const SimPlatformZ = z.enum(["ios", "and", "mac", "win"]);
-/** A simulator udid, an AVD name, an adb serial, or "local" for this Mac. */
-export const SimIdZ = z.string().min(1).max(120).regex(/^[\w.:-]+$/);
-const SimDeviceZ = z.object({ id: z.string(), name: z.string(), detail: z.string(), booted: z.boolean() });
-export const SimListZ = z.object({
-  host: z.string(),
-  ios: z.array(SimDeviceZ),
-  and: z.array(SimDeviceZ),
-  tools: z.object({ simctl: z.boolean(), adb: z.boolean(), emulator: z.boolean(), idb: z.boolean(), screencapture: z.boolean() }),
-});
-export type SimList = z.output<typeof SimListZ>;
-export type SimPlatform = z.output<typeof SimPlatformZ>;
-
 export const HOST_CONTRACT = defineRpcContract({
   ensureRepo: {
     input: z.object({ path: z.string().min(1), files: z.array(RepoFile).max(500), message: z.string().max(200) }),
@@ -122,52 +109,14 @@ export const HOST_CONTRACT = defineRpcContract({
     }),
     output: z.object({ found: z.record(z.string(), z.string().nullable()) }),
   },
-  // ── simulator view (the human watches and drives the apps) ──
-  simList: {
-    input: z.object({}),
-    output: SimListZ,
+  // ── Screens view (the human clicks through an app's committed screenshots) ──
+  /** Screenshots under each folder's reports/, screens/ or screenshots/ folders, and each folder's reports/screens/screens.json. */
+  screensScan: {
+    input: z.object({ roots: z.array(z.string().min(1).max(1000)).max(40) }),
+    output: z.object({ files: z.array(z.object({ root: z.string(), rel: z.string(), mtime: z.number() })), maps: z.array(z.object({ root: z.string(), text: z.string(), mtime: z.number() })) }),
   },
-  simBoot: {
-    input: z.object({ platform: SimPlatformZ, id: SimIdZ }),
-    output: z.object({ ok: z.boolean(), message: z.string() }),
-  },
-  simShutdown: {
-    input: z.object({ platform: SimPlatformZ, id: SimIdZ }),
-    output: z.object({ ok: z.boolean(), message: z.string() }),
-  },
-  /** One frame as a downscaled JPEG (base64). mac: the window of the app whose name matches `match`. */
-  simFrame: {
-    input: z.object({ platform: SimPlatformZ, id: SimIdZ, match: z.string().max(120).optional() }),
-    output: z.object({ data: z.string().nullable(), mime: z.string(), error: z.string().nullable() }),
-  },
-  /** x/y are 0..1 of the screen. */
-  simInput: {
-    input: z.object({
-      platform: SimPlatformZ,
-      id: SimIdZ,
-      action: z.enum(["tap", "swipe", "text", "key", "appearance", "textSize", "url"]),
-      x: z.number().min(0).max(1).optional(),
-      y: z.number().min(0).max(1).optional(),
-      x2: z.number().min(0).max(1).optional(),
-      y2: z.number().min(0).max(1).optional(),
-      text: z.string().max(500).optional(),
-      key: z.enum(["back", "home", "recents", "enter", "delete"]).optional(),
-      value: z.string().max(40).optional(),
-    }),
-    output: z.object({ ok: z.boolean(), message: z.string() }),
-  },
-  /** Newest app builds under the given folders (and Xcode's DerivedData for the given names). */
-  simBuilds: {
-    input: z.object({ platform: SimPlatformZ, roots: z.array(z.string().min(1).max(1000)).max(40), names: z.array(z.string().min(1).max(80)).max(4) }),
-    output: z.object({ builds: z.array(z.object({ path: z.string(), mtime: z.number(), kind: z.enum(["app", "apk", "image"]) })) }),
-  },
-  /** Install and launch a build that simBuilds returned. */
-  simInstall: {
-    input: z.object({ platform: SimPlatformZ, id: SimIdZ, path: z.string().min(1).max(1500) }),
-    output: z.object({ ok: z.boolean(), message: z.string(), match: z.string().nullable() }),
-  },
-  /** An image file (screenshot evidence) as base64, png/jpg/gif/webp only. */
-  simImage: {
+  /** An image file as base64, png/jpg/gif/webp only. */
+  screenImage: {
     input: z.object({ path: z.string().min(1).max(1500) }),
     output: z.object({ data: z.string().nullable(), mime: z.string() }),
   },
