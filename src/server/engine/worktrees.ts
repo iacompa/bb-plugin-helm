@@ -12,6 +12,7 @@ import type { AppInfo, NodeInfo } from "../../shared/types.ts";
 import type { Engine } from "./engine.ts";
 import { HelmError, gitLimitsKey } from "./engine.ts";
 import { GIT_ID } from "./custom.ts";
+import { ORCH_ID } from "../domain/topology.ts";
 
 /** The checkout and the shared work worktree: what every app has. */
 export const MAX_WORKTREES = 2;
@@ -174,6 +175,8 @@ export function worktreesText(list: AppWorktrees[]): string {
 export async function auditWorktrees(e: Engine, runId: string): Promise<string[]> {
   const git = e.repo.getNode(runId, GIT_ID);
   if (!git?.threadId) return [];
+  // a run on hold (the human paused the Orchestrator, or the Git agent) gets no clean-up work
+  if (git.status === "paused" || e.repo.getNode(runId, ORCH_ID)?.status === "paused") return [];
   const last = Number(e.repo.getMeta(`wt-audit-at:${runId}`) ?? 0);
   if (e.now() - last < AUDIT_EVERY_MS) return [];
   e.repo.setMeta(`wt-audit-at:${runId}`, String(e.now()));
@@ -304,7 +307,9 @@ export async function consolidate(e: Engine, runId: string, appId: string, by: s
   e.repo.tx(() => {
     e.repo.setMeta(consolidatingKey(runId, appId), keep!);
     for (const m of moving) {
-      e.repo.updateNode(runId, m.n.id, { threadId: null, environmentId: null, branch: null, ...(m.n.status === "done" ? {} : { status: "planned", warning: "moving to the app's shared work worktree" }) });
+      // a paused agent stays paused: it starts in the shared worktree when the human resumes it
+      const next = m.n.status === "done" ? {} : m.n.status === "paused" ? (wasLive.has(m.n.id) ? { prevStatus: "queued" as const } : {}) : { status: "planned" as const };
+      e.repo.updateNode(runId, m.n.id, { threadId: null, environmentId: null, branch: null, ...next, ...(m.n.status === "done" ? {} : { warning: "moving to the app's shared work worktree" }) });
       e.repo.deleteMeta(`reuse:${runId}:${m.n.id}`);
       if (wasLive.has(m.n.id)) e.repo.setMeta(`moved:${runId}:${m.n.id}`, "1");
     }
@@ -343,6 +348,8 @@ async function finish(e: Engine, run: ReturnType<Engine["run"]>, app: AppInfo, b
   if (!e.repo.getMeta(key)) e.repo.setMeta(key, keep);
   const waiting = e.repo.listNodes(runId).filter((n) => (n.appId === app.id || (n.alsoLead && e.repo.listApps(runId)[0]?.id === app.id)) && !n.threadId && n.status !== "done" && e.repo.getMeta(`moved:${runId}:${n.id}`));
   const ids = waiting.map((n) => n.id).join(", ") || "none";
+  const held = waiting.filter((n) => n.status === "paused").length;
+  const heldNote = held ? ` ${held} of them ${held === 1 ? "is" : "are"} paused and start${held === 1 ? "s" : ""} there when resumed.` : "";
   let path: string;
   try {
     path = await e.ensureWorkTree(run, app, keep);
@@ -350,19 +357,22 @@ async function finish(e: Engine, run: ReturnType<Engine["run"]>, app: AppInfo, b
     const why = err instanceof Error ? err.message.slice(0, 200) : String(err);
     const busy = /checked out in/.test(why);
     e.repo.tx(() => {
-      for (const n of waiting) e.repo.updateNode(runId, n.id, busy ? { status: "queued", firstInLine: true, warning: "waiting for BB to finish removing the old worktrees" } : { status: "idle", warning: `waiting for the shared work worktree: ${why}` });
+      for (const n of waiting) {
+        if (n.status === "paused") continue;
+        e.repo.updateNode(runId, n.id, busy ? { status: "queued", firstInLine: true, warning: "waiting for BB to finish removing the old worktrees" } : { status: "idle", warning: `waiting for the shared work worktree: ${why}` });
+      }
     });
     if (busy) {
       await e.pump(runId);
-      return `${app.name} is moving to one shared worktree on ${branch}. ${removed}BB is still removing the old worktrees (${why}); the shared worktree is created as soon as it is done, and ${waiting.length} agent(s) start there with a hand-over: ${ids}.`;
+      return `${app.name} is moving to one shared worktree on ${branch}. ${removed}BB is still removing the old worktrees (${why}); the shared worktree is created as soon as it is done, and ${waiting.length} agent(s) start there with a hand-over: ${ids}.${heldNote}`;
     }
     return `Rejected: ${removed}but the shared work worktree could not be created: ${why}. ${app.name}'s agents are stopped; fix that and consolidate again.`;
   }
   e.repo.tx(() => {
     e.repo.deleteMeta(key);
-    for (const n of waiting) e.repo.updateNode(runId, n.id, { status: "queued", firstInLine: true, warning: null });
+    for (const n of waiting) e.repo.updateNode(runId, n.id, n.status === "paused" ? { warning: null } : { status: "queued", firstInLine: true, warning: null });
     e.repo.event(runId, e.leadOf(runId, app.id)?.id ?? by, "worktrees", `${app.name}: consolidated into ${path} by ${by}. ${removed}`.trim());
   });
   await e.pump(runId);
-  return `${app.name} now works in one shared worktree: ${path} on ${branch}. ${removed}${waiting.length} agent(s) start again there with a hand-over: ${ids}.`;
+  return `${app.name} now works in one shared worktree: ${path} on ${branch}. ${removed}${waiting.length} agent(s) start again there with a hand-over: ${ids}.${heldNote}`;
 }

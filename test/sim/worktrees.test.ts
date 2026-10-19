@@ -8,6 +8,7 @@ import { appWorktrees, auditWorktrees, consolidate } from "../../src/server/engi
 import { nodeWorktree } from "../../src/server/engine/gates.ts";
 import { callTool } from "../../src/server/agent/tools.ts";
 import { GIT_ID } from "../../src/server/engine/custom.ts";
+import { createDirective } from "../../src/server/engine/direct.ts";
 import type { HelmSettings } from "../../src/server/engine/context.ts";
 import type { Portfolio } from "../../src/shared/types.ts";
 
@@ -247,6 +248,32 @@ test("BB removes the old worktrees in the background: the agents wait, and start
   assert.equal(await nodeWorktree(h.engine, h.repo.getNode(runId, lead.id)!), work, "the lead started in the shared worktree");
   assert.equal(h.repo.getMeta(`consolidating:${runId}:alpha`), null);
   assert.equal((await appWorktrees(h.engine, runId, { appId: "alpha" }))[0].worktrees.length, 2);
+});
+
+test("a paused run: the audit stays quiet, and consolidating keeps the paused agents paused until resumed", async () => {
+  const { h, runId } = await run({ legacy: true });
+  await mergeAll(h, runId, "alpha");
+  const lead = h.repo.getNode(runId, "alpha.lead")!;
+  // live agents, as in a running app (idle and finished ones are not paused)
+  for (const n of h.repo.listNodes(runId).filter((x) => x.appId === "alpha" && x.threadId && x.status !== "done")) h.repo.updateNode(runId, n.id, { status: "waiting" });
+  await createDirective(h.engine, runId, { type: "pause", target: "orch", cascade: "subtree", text: "hold everything" });
+  await h.clock.advance(H);
+  const alerts = () => h.repo.outboxForRun(runId).filter((o) => o.nodeId === GIT_ID && /Helm worktree check/.test(String(o.payload.text))).length;
+  const n0 = alerts();
+  assert.deepEqual(await auditWorktrees(h.engine, runId), [], "no clean-up work while the run is paused");
+  assert.equal(alerts(), n0);
+
+  const r = await consolidate(h.engine, runId, "alpha", "test");
+  assert.match(r, /paused and start(s)? there when resumed/, r);
+  await h.clock.advance(H);
+  const after = h.repo.getNode(runId, lead.id)!;
+  assert.equal(after.status, "paused", "still paused");
+  assert.equal(after.threadId, null, "no new thread while paused");
+  assert.equal(h.repo.nodeFlags(runId, lead.id).prevStatus, "queued");
+
+  await createDirective(h.engine, runId, { type: "resume", target: "orch", cascade: "subtree", text: "go on" });
+  await h.clock.runUntil(h.clock.now() + H, { stopWhen: () => !!h.repo.getNode(runId, lead.id)?.threadId });
+  assert.equal(await nodeWorktree(h.engine, h.repo.getNode(runId, lead.id)!), h.engine.workTree(runId, "alpha"), "resumed in the shared worktree");
 });
 
 test("a consolidation that stopped half-way is finished by running it again", async () => {
