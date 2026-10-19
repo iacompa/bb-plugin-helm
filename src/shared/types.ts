@@ -202,7 +202,7 @@ export const LIMIT_DEFAULTS: HelmLimits = {
 
 export const LIMIT_CEILINGS = {
   managerSpan: 6,
-  orchestratorSpan: 8,
+  orchestratorSpan: 12,
   leadSpan: 8,
   maxTotalAgents: 400,
   concurrency: 48,

@@ -99,7 +99,15 @@ test("cap: plans over maxTotalAgents are refused", () => {
 
 test("ceilings are never silently exceeded", () => {
   assert.equal(planTopology(apps(5), S(7, 6)).ok, false);
-  assert.equal(planTopology(apps(5), S(4, 9)).ok, false);
+  assert.equal(planTopology(apps(5), S(4, 13)).ok, false);
+});
+
+test("22 apps at two per manager fit under one Orchestrator with a span of 12", () => {
+  const plan = planTopology(apps(22), S(2, 12));
+  assert.equal(plan.ok, true, plan.error ?? "");
+  assert.equal(plan.managers.length, 11);
+  assert.ok(plan.managers.every((m) => m.appIds.length === 2));
+  assert.equal(planTopology(apps(22), S(2, 8)).ok, false, "a span of 8 still refuses 11 managers");
 });
 
 test("table: apps × spans — invariants hold", () => {

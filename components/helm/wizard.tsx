@@ -614,7 +614,7 @@ function StepPortfolio(p: {
     <div className="wpad">
       <div className="row" style={{ gap: 16, flexWrap: "wrap", alignItems: "flex-end" }}>
         {stepper("managerSpan", 2, 6, "Apps per manager (max 6)")}
-        {stepper("orchestratorSpan", 4, 8, "Managers per Orchestrator (max 8)")}
+        {stepper("orchestratorSpan", 4, 12, "Managers per Orchestrator (max 12)")}
         <div className="hint-t grow" style={{ minWidth: 240 }}>
           Smaller spans mean closer supervision and more managers. Helm only adds a manager layer when the Orchestrator would otherwise lead too many apps.
         </div>
